@@ -1,0 +1,48 @@
+{
+  "name": "Live Chat Widget",
+  "settings": {
+    "enabled": {
+      "label": "Enable chat widget"
+    },
+    "widget_color": {
+      "label": "Widget color"
+    },
+    "welcome_message": {
+      "label": "Welcome message"
+    },
+    "api_url": {
+      "label": "API URL",
+      "info": "Your backend API URL"
+    },
+    "ws_url": {
+      "label": "WebSocket URL",
+      "info": "Your WebSocket URL"
+    },
+    "widget_script_url": {
+      "label": "Widget Script URL",
+      "info": "URL to the widget initializer script"
+    },
+    "customization": {
+      "header": "Customization"
+    },
+    "show_on_mobile": {
+      "label": "Show on mobile devices"
+    },
+    "show_on_desktop": {
+      "label": "Show on desktop devices"
+    },
+    "position": {
+      "label": "Widget position",
+      "options": {
+        "bottom-right": "Bottom Right",
+        "bottom-left": "Bottom Left"
+      }
+    },
+    "bottom_spacing": {
+      "label": "Bottom spacing (px)"
+    },
+    "side_spacing": {
+      "label": "Side spacing (px)"
+    }
+  }
+}

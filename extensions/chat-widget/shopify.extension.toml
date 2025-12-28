@@ -1,0 +1,10 @@
+api_version = "2024-01"
+
+[[extensions]]
+type = "theme"
+name = "live-chat-widget"
+
+[extensions.settings]
+  [[extensions.settings.blocks]]
+  type = "chat-widget"
+  name = "Live Chat Widget"

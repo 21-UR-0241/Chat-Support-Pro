@@ -1,0 +1,85 @@
+{
+  "name": "chat-support-pro",
+  "version": "1.0.0",
+  "description": "Professional live chat application for Shopify stores with real-time messaging and advanced analytics",
+  "main": "backend/server.js",
+  "scripts": {
+    "dev:clean": "npm run clean && npm run dev",
+    "dev": "concurrently \"npm run server:dev\" \"npm run frontend:dev\"",
+    "dev:all": "concurrently \"npm run server:dev\" \"npm run frontend:dev\" \"npm run widget:watch\"",
+    "start": "node backend/server.js",
+    "server:dev": "nodemon backend/server.js",
+    "frontend:dev": "vite",
+    "frontend:build": "vite build",
+    "frontend:preview": "vite preview",
+    "widget:build": "node frontend/widget/widget-build.js",
+    "widget:watch": "node frontend/widget/widget-build.js --watch",
+    "build": "npm run frontend:build",
+    "deploy": "npm run build && shopify app deploy",
+    "clean": "taskkill /F /IM node.exe 2>nul || echo No processes to clean",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "lint": "eslint backend frontend",
+    "format": "prettier --write \"**/*.{js,jsx,json,md}\"",
+    "db:migrate": "node scripts/migrate.js",
+    "db:seed": "node scripts/seed.js",
+    "db:setup": "npm run db:migrate && npm run db:seed",
+    "postinstall": "npm run build"
+  },
+  "keywords": [
+    "shopify",
+    "chat",
+    "live-chat",
+    "customer-support",
+    "websocket",
+    "react",
+    "chat-support-pro",
+    "shopify-app"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "@shopify/shopify-api": "^9.0.0",
+    "bcrypt": "^5.1.1",
+    "cors": "^2.8.5",
+    "date-fns": "^3.0.0",
+    "dotenv": "^16.3.1",
+    "drizzle-orm": "^0.45.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.5.1",
+    "helmet": "^7.2.0",
+    "jsonwebtoken": "^9.0.3",
+    "lucide-react": "^0.294.0",
+    "node-fetch": "^2.7.0",
+    "pg": "^8.16.3",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.23.5",
+    "@babel/preset-react": "^7.23.3",
+    "@shopify/cli": "^3.52.0",
+    "@vitejs/plugin-react": "^4.2.1",
+    "concurrently": "^8.2.2",
+    "drizzle-kit": "^0.31.8",
+    "esbuild": "^0.19.8",
+    "eslint": "^8.54.0",
+    "eslint-config-prettier": "^9.0.0",
+    "eslint-plugin-react": "^7.33.2",
+    "nodemon": "^3.0.2",
+    "prettier": "^3.1.0",
+    "vite": "^5.0.8"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/chat-support-pro.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/chat-support-pro/issues"
+  },
+  "homepage": "https://github.com/yourusername/chat-support-pro#readme"
+}

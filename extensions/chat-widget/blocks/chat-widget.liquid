@@ -1,0 +1,132 @@
+{% comment %}
+  Chat Widget Theme Extension Block
+  Allows merchants to add the live chat widget to their storefront
+{% endcomment %}
+
+{% if block.settings.enabled %}
+  <div 
+    id="shopify-chat-widget-root"
+    data-shop-domain="{{ shop.permanent_domain }}"
+    data-widget-color="{{ block.settings.widget_color }}"
+    data-welcome-message="{{ block.settings.welcome_message }}"
+    data-api-url="{{ block.settings.api_url }}"
+    data-ws-url="{{ block.settings.ws_url }}"
+    class="chat-widget-container"
+  ></div>
+
+  <script>
+    // Load the chat widget initializer
+    (function() {
+      const script = document.createElement('script');
+      script.src = '{{ block.settings.widget_script_url }}';
+      script.async = true;
+      script.defer = true;
+      document.body.appendChild(script);
+    })();
+  </script>
+
+  <style>
+    .chat-widget-container {
+      position: fixed;
+      bottom: 0;
+      right: 0;
+      z-index: 9999;
+    }
+  </style>
+{% endif %}
+
+{% schema %}
+{
+  "name": "Live Chat Widget",
+  "target": "body",
+  "settings": [
+    {
+      "type": "checkbox",
+      "id": "enabled",
+      "label": "Enable chat widget",
+      "default": true
+    },
+    {
+      "type": "color",
+      "id": "widget_color",
+      "label": "Widget color",
+      "default": "#667eea"
+    },
+    {
+      "type": "text",
+      "id": "welcome_message",
+      "label": "Welcome message",
+      "default": "Hi! How can we help you today?"
+    },
+    {
+      "type": "url",
+      "id": "api_url",
+      "label": "API URL",
+      "info": "Your backend API URL (e.g., https://your-app.com)"
+    },
+    {
+      "type": "url",
+      "id": "ws_url",
+      "label": "WebSocket URL",
+      "info": "Your WebSocket URL (e.g., wss://your-app.com/ws)"
+    },
+    {
+      "type": "url",
+      "id": "widget_script_url",
+      "label": "Widget Script URL",
+      "info": "URL to the widget initializer script",
+      "default": "https://cdn.yourdomain.com/widget-init.js"
+    },
+    {
+      "type": "header",
+      "content": "Customization"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_on_mobile",
+      "label": "Show on mobile devices",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "show_on_desktop",
+      "label": "Show on desktop devices",
+      "default": true
+    },
+    {
+      "type": "select",
+      "id": "position",
+      "label": "Widget position",
+      "options": [
+        {
+          "value": "bottom-right",
+          "label": "Bottom Right"
+        },
+        {
+          "value": "bottom-left",
+          "label": "Bottom Left"
+        }
+      ],
+      "default": "bottom-right"
+    },
+    {
+      "type": "range",
+      "id": "bottom_spacing",
+      "label": "Bottom spacing (px)",
+      "min": 0,
+      "max": 100,
+      "step": 5,
+      "default": 20
+    },
+    {
+      "type": "range",
+      "id": "side_spacing",
+      "label": "Side spacing (px)",
+      "min": 0,
+      "max": 100,
+      "step": 5,
+      "default": 20
+    }
+  ]
+}
+{% endschema %}
