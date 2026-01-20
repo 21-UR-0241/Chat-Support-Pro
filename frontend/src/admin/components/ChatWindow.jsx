@@ -269,7 +269,7 @@
 // export default ChatWindow;
 
 
-
+//frontend/src/admin/components/ChatWindow.jsx
 /**
  * ChatWindow Component
  * Modern chat interface with WhatsApp-inspired design

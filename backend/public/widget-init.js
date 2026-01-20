@@ -1,371 +1,267 @@
 /**
- * Multi-Store Chat Widget Initializer
- * Production-ready widget loader for Shopify stores
- * @version 1.0.0
+ * Widget API Endpoints
+ * Add these to your server.js
+ * 
+ * These endpoints support the multi-store chat widget
  */
 
-(function() {
-  'use strict';
+const express = require('express');
+const router = express.Router();
+const db = require('./db');
 
-  // ============================================
-  // CONFIGURATION
-  // ============================================
-  
-  const CONFIG = {
-    // Auto-detect API URL from script source or use environment variable
-    apiUrl: (function() {
-      // Try to get from script tag data attribute first
-      const currentScript = document.currentScript || (function() {
-        const scripts = document.getElementsByTagName('script');
-        return scripts[scripts.length - 1];
-      })();
-      
-      if (currentScript && currentScript.dataset.apiUrl) {
-        return currentScript.dataset.apiUrl;
-      }
-      
-      // Try to extract from script src
-      if (currentScript && currentScript.src) {
-        const url = new URL(currentScript.src);
-        return url.origin;
-      }
-      
-      // Fallback - will be replaced during build/deployment
-      return '${API_URL}' !== '${API_URL}' 
-        ? '${API_URL}' 
-        : window.location.protocol + '//' + window.location.host;
-    })(),
-    
-    // WebSocket URL (auto-detect protocol)
-    wsUrl: null, // Will be set based on apiUrl
-    
-    // Widget version
-    version: '1.0.0',
-    
-    // CDN URLs (optional - for faster loading)
-    cdn: {
-      enabled: false,
-      baseUrl: '', // e.g., 'https://cdn.your-domain.com'
-    },
-    
-    // Feature flags
-    features: {
-      analytics: true,
-      notifications: true,
-      soundEffects: true,
-    },
-    
-    // Performance
-    lazyLoad: true,
-    preload: false,
-    
-    // Debug mode (disable in production)
-    debug: false,
-  };
+// ============ PUBLIC WIDGET ENDPOINTS ============
+// These endpoints don't require authentication (called by widget)
 
-  // ============================================
-  // UTILITY FUNCTIONS
-  // ============================================
-  
-  /**
-   * Logger with conditional output
-   */
-  const log = {
-    info: function(...args) {
-      if (CONFIG.debug) console.log('[ChatWidget]', ...args);
-    },
-    error: function(...args) {
-      console.error('[ChatWidget Error]', ...args);
-    },
-    warn: function(...args) {
-      if (CONFIG.debug) console.warn('[ChatWidget Warning]', ...args);
-    }
-  };
-
-  /**
-   * Get Shopify store information
-   */
-  function getStoreInfo() {
-    const info = {
-      shop: null,
-      storeId: null,
-      customerId: null,
-      customerEmail: null,
-      customerName: null,
-    };
+/**
+ * Verify store is registered and active
+ * GET /api/stores/verify?domain=storea.myshopify.com
+ */
+router.get('/verify', async (req, res) => {
+  try {
+    const { domain } = req.query;
     
-    // Get shop domain
-    if (window.Shopify && window.Shopify.shop) {
-      info.shop = window.Shopify.shop;
-      info.storeId = window.Shopify.shop.replace('.myshopify.com', '');
+    if (!domain) {
+      return res.status(400).json({ error: 'domain parameter required' });
     }
     
-    // Try to get from meta tags (theme customization)
-    const shopMeta = document.querySelector('meta[name="shopify-shop"]');
-    if (shopMeta) {
-      info.shop = shopMeta.content;
-      info.storeId = shopMeta.content.replace('.myshopify.com', '');
-    }
+    console.log('📋 Store verification request:', domain);
     
-    // Get customer info (if logged in)
-    if (window.Shopify && window.Shopify.customer) {
-      info.customerId = window.Shopify.customer.id;
-      info.customerEmail = window.Shopify.customer.email;
-      info.customerName = window.Shopify.customer.first_name && window.Shopify.customer.last_name
-        ? `${window.Shopify.customer.first_name} ${window.Shopify.customer.last_name}`
-        : window.Shopify.customer.email;
-    }
+    const store = await db.getStoreByDomain(domain);
     
-    return info;
-  }
-
-  /**
-   * Check if widget is already loaded
-   */
-  function isWidgetLoaded() {
-    return window.MultiStoreChatWidget && document.getElementById('multi-store-chat-widget');
-  }
-
-  /**
-   * Load CSS file
-   */
-  function loadCSS(url) {
-    return new Promise((resolve, reject) => {
-      // Check if already loaded
-      const existing = document.querySelector(`link[href="${url}"]`);
-      if (existing) {
-        resolve();
-        return;
-      }
-      
-      const link = document.createElement('link');
-      link.rel = 'stylesheet';
-      link.href = url;
-      link.onload = resolve;
-      link.onerror = reject;
-      document.head.appendChild(link);
-    });
-  }
-
-  /**
-   * Load JavaScript file
-   */
-  function loadJS(url) {
-    return new Promise((resolve, reject) => {
-      // Check if already loaded
-      const existing = document.querySelector(`script[src="${url}"]`);
-      if (existing) {
-        resolve();
-        return;
-      }
-      
-      const script = document.createElement('script');
-      script.src = url;
-      script.async = true;
-      script.onload = resolve;
-      script.onerror = reject;
-      document.body.appendChild(script);
-    });
-  }
-
-  /**
-   * Create widget container
-   */
-  function createContainer() {
-    if (document.getElementById('multi-store-chat-widget')) {
-      return;
-    }
-    
-    const container = document.createElement('div');
-    container.id = 'multi-store-chat-widget';
-    container.setAttribute('data-version', CONFIG.version);
-    document.body.appendChild(container);
-    
-    log.info('Widget container created');
-  }
-
-  /**
-   * Determine WebSocket URL
-   */
-  function getWebSocketUrl(apiUrl) {
-    try {
-      const url = new URL(apiUrl);
-      const protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-      return `${protocol}//${url.host}/ws`;
-    } catch (error) {
-      log.error('Failed to parse WebSocket URL:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Initialize widget with configuration
-   */
-  function initializeWidget() {
-    const storeInfo = getStoreInfo();
-    
-    if (!storeInfo.storeId) {
-      log.error('Store ID not found. Make sure this is a Shopify store.');
-      return;
-    }
-    
-    log.info('Initializing widget for store:', storeInfo.storeId);
-    
-    // Set WebSocket URL
-    CONFIG.wsUrl = CONFIG.wsUrl || getWebSocketUrl(CONFIG.apiUrl);
-    
-    // Initialize widget
-    if (window.MultiStoreChatWidget && typeof window.MultiStoreChatWidget.init === 'function') {
-      window.MultiStoreChatWidget.init({
-        storeId: storeInfo.storeId,
-        shop: storeInfo.shop,
-        apiUrl: CONFIG.apiUrl,
-        wsUrl: CONFIG.wsUrl,
-        customer: {
-          id: storeInfo.customerId,
-          email: storeInfo.customerEmail,
-          name: storeInfo.customerName,
-        },
-        features: CONFIG.features,
-        debug: CONFIG.debug,
+    if (!store) {
+      console.log('  ❌ Store not found in database');
+      return res.status(404).json({ 
+        error: 'Store not found',
+        message: 'This store has not installed the chat app yet. Please install from the Shopify App Store.',
+        domain
       });
-      
-      log.info('Widget initialized successfully');
-      
-      // Track installation
-      trackInstallation(storeInfo);
-    } else {
-      log.error('MultiStoreChatWidget not found. Widget script may have failed to load.');
-    }
-  }
-
-  /**
-   * Track widget installation (optional analytics)
-   */
-  function trackInstallation(storeInfo) {
-    if (!CONFIG.features.analytics) return;
-    
-    try {
-      // Send installation ping (optional)
-      fetch(`${CONFIG.apiUrl}/api/widget/installed`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          storeId: storeInfo.storeId,
-          version: CONFIG.version,
-          timestamp: new Date().toISOString(),
-        }),
-      }).catch(() => {}); // Fail silently
-    } catch (error) {
-      // Fail silently
-    }
-  }
-
-  /**
-   * Load widget assets and initialize
-   */
-  async function loadWidget() {
-    try {
-      log.info('Loading widget assets from:', CONFIG.apiUrl);
-      
-      const baseUrl = CONFIG.cdn.enabled ? CONFIG.cdn.baseUrl : CONFIG.apiUrl;
-      const cssUrl = `${baseUrl}/widget.css?v=${CONFIG.version}`;
-      const jsUrl = `${baseUrl}/widget.js?v=${CONFIG.version}`;
-      
-      // Create container first
-      createContainer();
-      
-      // Load CSS and JS in parallel
-      await Promise.all([
-        loadCSS(cssUrl),
-        loadJS(jsUrl),
-      ]);
-      
-      // Initialize widget
-      initializeWidget();
-      
-    } catch (error) {
-      log.error('Failed to load widget:', error);
-      
-      // Show error message to store owner (only in debug mode)
-      if (CONFIG.debug) {
-        const errorDiv = document.createElement('div');
-        errorDiv.style.cssText = 'position:fixed;bottom:20px;right:20px;background:#f44336;color:white;padding:12px;border-radius:4px;z-index:999999;font-size:14px;';
-        errorDiv.textContent = 'Chat widget failed to load. Check console for details.';
-        document.body.appendChild(errorDiv);
-        setTimeout(() => errorDiv.remove(), 5000);
-      }
-    }
-  }
-
-  /**
-   * Wait for DOM to be ready
-   */
-  function onReady(callback) {
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', callback);
-    } else {
-      callback();
-    }
-  }
-
-  /**
-   * Main initialization
-   */
-  function init() {
-    // Prevent multiple initializations
-    if (window.__MULTI_STORE_CHAT_LOADED) {
-      log.warn('Widget already loaded');
-      return;
     }
     
-    window.__MULTI_STORE_CHAT_LOADED = true;
-    
-    // Check if already loaded
-    if (isWidgetLoaded()) {
-      log.info('Widget already exists in DOM');
-      return;
+    if (!store.isActive) {
+      console.log('  ❌ Store is inactive');
+      return res.status(403).json({
+        error: 'Store inactive',
+        message: 'This store\'s chat app subscription is inactive. Please contact support.',
+        domain
+      });
     }
     
-    log.info('Starting widget initialization...');
+    console.log('  ✅ Store verified:', store.id);
     
-    onReady(() => {
-      if (CONFIG.lazyLoad && !CONFIG.preload) {
-        // Lazy load on user interaction
-        const events = ['mousemove', 'scroll', 'touchstart', 'click'];
-        const loadOnce = () => {
-          events.forEach(event => document.removeEventListener(event, loadOnce));
-          loadWidget();
-        };
-        events.forEach(event => document.addEventListener(event, loadOnce, { once: true, passive: true }));
-        
-        // Fallback: load after 5 seconds if no interaction
-        setTimeout(loadOnce, 5000);
-      } else {
-        // Load immediately
-        loadWidget();
-      }
+    res.json({
+      storeId: store.id,
+      storeIdentifier: store.storeIdentifier,
+      shopDomain: store.shopDomain,
+      brandName: store.brandName,
+      active: store.isActive,
+      verified: true
     });
+  } catch (error) {
+    console.error('❌ Store verification error:', error);
+    res.status(500).json({ error: 'Verification failed' });
   }
+});
 
-  // ============================================
-  // EXPOSE PUBLIC API
-  // ============================================
-  
-  window.MultiStoreChatWidgetLoader = {
-    version: CONFIG.version,
-    init: init,
-    config: CONFIG,
-    reload: function() {
-      window.__MULTI_STORE_CHAT_LOADED = false;
-      init();
+/**
+ * Get widget settings for a store
+ * GET /api/widget/settings?store=storea
+ */
+router.get('/settings', async (req, res) => {
+  try {
+    const { store: storeIdentifier } = req.query;
+    
+    if (!storeIdentifier) {
+      return res.status(400).json({ error: 'store parameter required' });
     }
-  };
+    
+    const store = await db.getStoreByIdentifier(storeIdentifier);
+    
+    if (!store || !store.isActive) {
+      return res.status(404).json({ error: 'Store not found or inactive' });
+    }
+    
+    // Return widget-safe settings (no sensitive data)
+    res.json({
+      storeId: store.id,
+      storeIdentifier: store.storeIdentifier,
+      brandName: store.brandName,
+      primaryColor: store.primaryColor || '#667eea',
+      logoUrl: store.logoUrl,
+      widgetSettings: store.widgetSettings || {
+        position: 'bottom-right',
+        greeting: 'Hi! How can we help you today?',
+        placeholder: 'Type your message...',
+        showAvatar: true,
+        soundEnabled: true
+      },
+      businessHours: store.businessHours,
+      timezone: store.timezone || 'UTC'
+    });
+  } catch (error) {
+    console.error('Widget settings error:', error);
+    res.status(500).json({ error: 'Failed to fetch settings' });
+  }
+});
 
-  // ============================================
-  // AUTO-INITIALIZE
-  // ============================================
+/**
+ * Track widget installation/load
+ * POST /api/widget/installed
+ */
+router.post('/installed', async (req, res) => {
+  try {
+    const { 
+      storeIdentifier, 
+      shopDomain, 
+      version, 
+      timestamp,
+      hasCustomer 
+    } = req.body;
+    
+    console.log('📊 Widget installed:', {
+      storeIdentifier,
+      version,
+      hasCustomer
+    });
+    
+    // Optional: Track in analytics
+    // await db.trackWidgetInstallation(storeIdentifier, version);
+    
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Widget installation tracking error:', error);
+    res.status(200).json({ success: false }); // Don't fail widget load
+  }
+});
+
+/**
+ * Track widget interactions
+ * POST /api/widget/interaction
+ */
+router.post('/interaction', async (req, res) => {
+  try {
+    const { 
+      storeIdentifier, 
+      event, 
+      timestamp,
+      metadata 
+    } = req.body;
+    
+    console.log('📊 Widget interaction:', {
+      storeIdentifier,
+      event
+    });
+    
+    // Optional: Track in analytics
+    // await db.trackWidgetInteraction(storeIdentifier, event, metadata);
+    
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Widget interaction tracking error:', error);
+    res.status(200).json({ success: false }); // Don't fail widget
+  }
+});
+
+/**
+ * Get store availability status
+ * GET /api/widget/availability?store=storea
+ */
+router.get('/availability', async (req, res) => {
+  try {
+    const { store: storeIdentifier } = req.query;
+    
+    if (!storeIdentifier) {
+      return res.status(400).json({ error: 'store parameter required' });
+    }
+    
+    const store = await db.getStoreByIdentifier(storeIdentifier);
+    
+    if (!store) {
+      return res.status(404).json({ error: 'Store not found' });
+    }
+    
+    // Check business hours
+    const isWithinBusinessHours = checkBusinessHours(store.businessHours, store.timezone);
+    
+    // Check if agents are online
+    const agentsOnline = await db.query(
+      'SELECT COUNT(*) FROM employees WHERE is_online = true'
+    );
+    const hasAgentsOnline = parseInt(agentsOnline.rows[0].count) > 0;
+    
+    res.json({
+      available: isWithinBusinessHours && hasAgentsOnline,
+      withinBusinessHours: isWithinBusinessHours,
+      agentsOnline: hasAgentsOnline,
+      message: getAvailabilityMessage(isWithinBusinessHours, hasAgentsOnline)
+    });
+  } catch (error) {
+    console.error('Availability check error:', error);
+    res.status(500).json({ error: 'Failed to check availability' });
+  }
+});
+
+/**
+ * Health check for widget
+ * GET /api/widget/health
+ */
+router.get('/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    version: process.env.npm_package_version || '1.0.0'
+  });
+});
+
+// ============ HELPER FUNCTIONS ============
+
+/**
+ * Check if current time is within business hours
+ */
+function checkBusinessHours(businessHours, timezone) {
+  if (!businessHours) return true; // Always available if not configured
   
-  init();
+  try {
+    // Get current time in store's timezone
+    const now = new Date();
+    const dayOfWeek = now.toLocaleDateString('en-US', { weekday: 'lowercase', timeZone: timezone });
+    const currentHour = parseInt(now.toLocaleTimeString('en-US', { hour: '2-digit', hour12: false, timeZone: timezone }));
+    
+    const hours = businessHours[dayOfWeek];
+    if (!hours || !hours.enabled) return false;
+    
+    return currentHour >= hours.start && currentHour < hours.end;
+  } catch (error) {
+    console.error('Business hours check error:', error);
+    return true; // Default to available on error
+  }
+}
 
-})();
+/**
+ * Get availability message
+ */
+function getAvailabilityMessage(withinHours, hasAgents) {
+  if (withinHours && hasAgents) {
+    return 'Our team is available now!';
+  } else if (!withinHours) {
+    return 'We\'re currently outside business hours. We\'ll respond when we\'re back!';
+  } else if (!hasAgents) {
+    return 'All agents are currently busy. We\'ll respond as soon as possible!';
+  } else {
+    return 'Leave us a message and we\'ll get back to you soon!';
+  }
+}
+
+module.exports = router;
+
+// ============ HOW TO ADD TO SERVER.JS ============
+/*
+
+const widgetRoutes = require('./widget-routes');
+
+// Public widget endpoints (no authentication required)
+app.use('/api/widget', widgetRoutes);
+
+// Also update your stores endpoints to include:
+app.use('/api/stores', widgetRoutes);
+
+*/

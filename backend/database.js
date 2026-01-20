@@ -1,3 +1,4 @@
+//backend/database.js
 const { Pool } = require('pg');
 require('dotenv').config();
 
@@ -74,8 +75,8 @@ async function initDatabase() {
     await client.query(`
       CREATE TABLE IF NOT EXISTS conversations (
         id SERIAL PRIMARY KEY,
-        store_id INTEGER REFERENCES stores(id) ON DELETE CASCADE,
-        store_identifier VARCHAR(100) NOT NULL,
+        shop_id INTEGER REFERENCES stores(id) ON DELETE CASCADE,
+        shop_domain VARCHAR(255) NOT NULL,
         
         -- Customer info
         customer_email VARCHAR(255) NOT NULL,
@@ -114,7 +115,7 @@ async function initDatabase() {
       CREATE TABLE IF NOT EXISTS messages (
         id SERIAL PRIMARY KEY,
         conversation_id INTEGER REFERENCES conversations(id) ON DELETE CASCADE,
-        store_id INTEGER REFERENCES stores(id) ON DELETE CASCADE,
+        shop_id INTEGER REFERENCES stores(id) ON DELETE CASCADE,
         
         -- Message content
         sender_type VARCHAR(50) NOT NULL,
@@ -184,7 +185,7 @@ async function initDatabase() {
         id SERIAL PRIMARY KEY,
         employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
         conversation_id INTEGER REFERENCES conversations(id) ON DELETE CASCADE,
-        store_id INTEGER REFERENCES stores(id) ON DELETE CASCADE,
+        shop_id INTEGER REFERENCES stores(id) ON DELETE CASCADE,
         
         action VARCHAR(100) NOT NULL,
         action_data JSONB,
@@ -199,7 +200,7 @@ async function initDatabase() {
     await client.query(`
       CREATE TABLE IF NOT EXISTS webhook_logs (
         id SERIAL PRIMARY KEY,
-        store_id INTEGER REFERENCES stores(id) ON DELETE CASCADE,
+        shop_id INTEGER REFERENCES stores(id) ON DELETE CASCADE,
         
         topic VARCHAR(255) NOT NULL,
         payload JSONB,
@@ -219,7 +220,7 @@ async function initDatabase() {
     await client.query(`
       CREATE TABLE IF NOT EXISTS canned_responses (
         id SERIAL PRIMARY KEY,
-        store_id INTEGER REFERENCES stores(id) ON DELETE CASCADE,
+        shop_id INTEGER REFERENCES stores(id) ON DELETE CASCADE,
         
         title VARCHAR(255) NOT NULL,
         content TEXT NOT NULL,
@@ -240,7 +241,7 @@ async function initDatabase() {
     await client.query(`
       CREATE TABLE IF NOT EXISTS analytics_daily (
         id SERIAL PRIMARY KEY,
-        store_id INTEGER REFERENCES stores(id) ON DELETE CASCADE,
+        shop_id INTEGER REFERENCES stores(id) ON DELETE CASCADE,
         date DATE NOT NULL,
         
         -- Conversation metrics
@@ -264,7 +265,7 @@ async function initDatabase() {
         
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         
-        UNIQUE(store_id, date)
+        UNIQUE(shop_id, date)
       )
     `);
     
@@ -278,8 +279,8 @@ async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_stores_active ON stores(is_active) WHERE is_active = true;
       
       -- Conversation indexes
-      CREATE INDEX IF NOT EXISTS idx_conversations_store ON conversations(store_id);
-      CREATE INDEX IF NOT EXISTS idx_conversations_identifier ON conversations(store_identifier);
+      CREATE INDEX IF NOT EXISTS idx_conversations_shop ON conversations(shop_id);
+      CREATE INDEX IF NOT EXISTS idx_conversations_domain ON conversations(shop_domain);
       CREATE INDEX IF NOT EXISTS idx_conversations_status ON conversations(status);
       CREATE INDEX IF NOT EXISTS idx_conversations_customer_email ON conversations(customer_email);
       CREATE INDEX IF NOT EXISTS idx_conversations_assigned ON conversations(assigned_to);
@@ -288,7 +289,7 @@ async function initDatabase() {
       
       -- Message indexes
       CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
-      CREATE INDEX IF NOT EXISTS idx_messages_store ON messages(store_id);
+      CREATE INDEX IF NOT EXISTS idx_messages_shop ON messages(shop_id);
       CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp DESC);
       CREATE INDEX IF NOT EXISTS idx_messages_sender_type ON messages(sender_type);
       
@@ -303,12 +304,12 @@ async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_activity_created ON agent_activity(created_at DESC);
       
       -- Webhook log indexes
-      CREATE INDEX IF NOT EXISTS idx_webhook_store ON webhook_logs(store_id);
+      CREATE INDEX IF NOT EXISTS idx_webhook_shop ON webhook_logs(shop_id);
       CREATE INDEX IF NOT EXISTS idx_webhook_received ON webhook_logs(received_at DESC);
       CREATE INDEX IF NOT EXISTS idx_webhook_processed ON webhook_logs(processed);
       
       -- Analytics indexes
-      CREATE INDEX IF NOT EXISTS idx_analytics_store_date ON analytics_daily(store_id, date);
+      CREATE INDEX IF NOT EXISTS idx_analytics_shop_date ON analytics_daily(shop_id, date);
     `);
     
     console.log('✅ Multi-store database tables created successfully');
@@ -514,7 +515,7 @@ async function saveConversation(data) {
   try {
     const result = await pool.query(`
       INSERT INTO conversations (
-        store_id, store_identifier, customer_email, customer_name, customer_id,
+        shop_id, shop_domain, customer_email, customer_name, customer_id,
         customer_phone, status, priority, tags, created_at, updated_at
       )
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
@@ -536,11 +537,11 @@ async function saveConversation(data) {
  */
 async function getConversation(conversationId, storeId = null) {
   try {
-    let query = 'SELECT c.*, s.brand_name, s.logo_url FROM conversations c JOIN stores s ON c.store_id = s.id WHERE c.id = $1';
+    let query = 'SELECT c.*, s.brand_name, s.logo_url FROM conversations c JOIN stores s ON c.shop_id = s.id WHERE c.id = $1';
     const params = [conversationId];
     
     if (storeId) {
-      query += ' AND c.store_id = $2';
+      query += ' AND c.shop_id = $2';
       params.push(storeId);
     }
     
@@ -558,9 +559,9 @@ async function getConversation(conversationId, storeId = null) {
 async function getConversations(filters = {}) {
   try {
     let query = `
-      SELECT c.*, s.brand_name, s.logo_url, s.primary_color
+      SELECT c.*, s.brand_name, s.logo_url, s.primary_color, s.store_identifier
       FROM conversations c 
-      JOIN stores s ON c.store_id = s.id 
+      JOIN stores s ON c.shop_id = s.id 
       WHERE 1=1
     `;
     const params = [];
@@ -568,14 +569,21 @@ async function getConversations(filters = {}) {
     
     // Filter by store
     if (filters.storeId) {
-      query += ` AND c.store_id = $${paramCount}`;
+      query += ` AND c.shop_id = $${paramCount}`;
       params.push(filters.storeId);
       paramCount++;
     }
     
     if (filters.storeIdentifier) {
-      query += ` AND c.store_identifier = $${paramCount}`;
+      query += ` AND c.shop_domain = $${paramCount}`;
       params.push(filters.storeIdentifier);
+      paramCount++;
+    }
+    
+    // Filter by customer email
+    if (filters.customerEmail) {
+      query += ` AND c.customer_email = $${paramCount}`;
+      params.push(filters.customerEmail);
       paramCount++;
     }
     
@@ -632,7 +640,7 @@ async function getConversationCount(filters = {}) {
     let paramCount = 1;
     
     if (filters.storeId) {
-      query += ` AND store_id = $${paramCount}`;
+      query += ` AND shop_id = $${paramCount}`;
       params.push(filters.storeId);
       paramCount++;
     }
@@ -750,7 +758,7 @@ async function saveMessage(data) {
     // Insert message
     const messageResult = await client.query(`
       INSERT INTO messages (
-        conversation_id, store_id, sender_type, sender_name, sender_id,
+        conversation_id, shop_id, sender_type, sender_name, sender_id,
         content, message_type, attachment_url, attachment_type, 
         sent_at, timestamp
       )
@@ -1025,11 +1033,11 @@ async function updateEmployeeStatus(employeeId, status) {
   try {
     // Handle both object and direct status updates
     if (typeof status === 'object') {
-      // New format: { lastLogin: Date, isOnline: boolean }
+      // New format: { last_login: Date, is_online: boolean }
       const updates = {};
-      if (status.lastLogin) updates.last_login = status.lastLogin;
-      if (status.isOnline !== undefined) updates.is_online = status.isOnline;
-      if (status.currentStatus) updates.current_status = status.currentStatus;
+      if (status.last_login) updates.last_login = status.last_login;
+      if (status.is_online !== undefined) updates.is_online = status.is_online;
+      if (status.current_status) updates.current_status = status.current_status;
       
       return await updateEmployee(employeeId, updates);
     } else {
@@ -1053,7 +1061,7 @@ async function logAgentActivity(data) {
   try {
     await pool.query(`
       INSERT INTO agent_activity (
-        employee_id, conversation_id, store_id, action, action_data, created_at
+        employee_id, conversation_id, shop_id, action, action_data, created_at
       )
       VALUES ($1, $2, $3, $4, $5, NOW())
     `, [employee_id, conversation_id, store_id, action, action_data]);
@@ -1074,7 +1082,7 @@ async function logWebhook(data) {
   
   try {
     await pool.query(`
-      INSERT INTO webhook_logs (store_id, topic, payload, headers, received_at)
+      INSERT INTO webhook_logs (shop_id, topic, payload, headers, received_at)
       VALUES ($1, $2, $3, $4, NOW())
     `, [store_id, topic, payload, headers]);
   } catch (error) {
@@ -1092,7 +1100,7 @@ async function logWebhook(data) {
 async function getCannedResponses(storeId) {
   try {
     const result = await pool.query(
-      'SELECT * FROM canned_responses WHERE store_id = $1 ORDER BY category, title',
+      'SELECT * FROM canned_responses WHERE shop_id = $1 ORDER BY category, title',
       [storeId]
     );
     return result.rows;
@@ -1111,7 +1119,7 @@ async function createCannedResponse(data) {
   try {
     const result = await pool.query(`
       INSERT INTO canned_responses (
-        store_id, title, content, shortcut, category, created_by, created_at, updated_at
+        shop_id, title, content, shortcut, category, created_by, created_at, updated_at
       )
       VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
       RETURNING *
@@ -1137,7 +1145,7 @@ async function getDashboardStats(filters = {}) {
     const params = [];
     
     if (filters.storeId) {
-      storeFilter = 'AND c.store_id = $1';
+      storeFilter = 'AND c.shop_id = $1';
       params.push(filters.storeId);
     }
     
@@ -1147,7 +1155,7 @@ async function getDashboardStats(filters = {}) {
         COUNT(DISTINCT c.id) FILTER (WHERE c.status = 'open') as open_conversations,
         COUNT(DISTINCT c.id) FILTER (WHERE c.status = 'pending') as pending_conversations,
         COUNT(DISTINCT c.id) FILTER (WHERE c.status = 'closed') as closed_conversations,
-        COUNT(DISTINCT c.store_id) as active_stores,
+        COUNT(DISTINCT c.shop_id) as active_stores,
         COUNT(DISTINCT m.id) FILTER (WHERE DATE(m.timestamp) = CURRENT_DATE) as messages_today,
         AVG(c.response_time_seconds) FILTER (WHERE c.response_time_seconds IS NOT NULL) as avg_response_time,
         COUNT(DISTINCT c.customer_email) as unique_customers
@@ -1177,7 +1185,7 @@ async function getStoreMetrics(storeId, days = 30) {
         total_messages,
         average_response_time_seconds
       FROM analytics_daily
-      WHERE store_id = $1 
+      WHERE shop_id = $1 
         AND date >= CURRENT_DATE - INTERVAL '${days} days'
       ORDER BY date DESC
     `, [storeId]);

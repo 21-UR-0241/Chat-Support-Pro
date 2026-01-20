@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { LogIn, Mail, Lock, Eye, EyeOff, AlertCircle } from 'lucide-react';
 import api from '../services/api';
 import '../styles/Login.css';
 
@@ -58,11 +59,12 @@ function Login({ onLogin }) {
 
   return (
     <div className="login-container">
-      {/* Background Elements */}
+      {/* Animated Background */}
       <div className="login-background">
         <div className="gradient-orb orb-1"></div>
         <div className="gradient-orb orb-2"></div>
         <div className="gradient-orb orb-3"></div>
+        <div className="grid-overlay"></div>
       </div>
 
       {/* Login Card */}
@@ -70,7 +72,9 @@ function Login({ onLogin }) {
         {/* Header */}
         <div className="login-header">
           <div className="login-logo">
-            <div className="logo-icon">💬</div>
+            <div className="logo-circle">
+              <LogIn className="logo-icon" />
+            </div>
           </div>
           <h1 className="login-title">Welcome Back</h1>
           <p className="login-subtitle">Sign in to your admin dashboard</p>
@@ -80,8 +84,8 @@ function Login({ onLogin }) {
         <form className="login-form" onSubmit={handleSubmit}>
           {/* Error Message */}
           {error && (
-            <div className="login-error">
-              <span className="error-icon">⚠️</span>
+            <div className="login-error" role="alert">
+              <AlertCircle className="error-icon" />
               <span>{error}</span>
             </div>
           )}
@@ -92,7 +96,7 @@ function Login({ onLogin }) {
               Email Address
             </label>
             <div className="input-wrapper">
-              <span className="input-icon">📧</span>
+              <Mail className="input-icon" />
               <input
                 id="email"
                 type="email"
@@ -103,6 +107,7 @@ function Login({ onLogin }) {
                 disabled={loading}
                 autoComplete="email"
                 autoFocus
+                required
               />
             </div>
           </div>
@@ -113,24 +118,26 @@ function Login({ onLogin }) {
               Password
             </label>
             <div className="input-wrapper">
-              <span className="input-icon">🔒</span>
+              <Lock className="input-icon" />
               <input
                 id="password"
                 type={showPassword ? 'text' : 'password'}
-                className="form-input"
+                className="form-input with-toggle"
                 placeholder="Enter your password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 disabled={loading}
                 autoComplete="current-password"
+                required
               />
               <button
                 type="button"
                 className="password-toggle"
                 onClick={() => setShowPassword(!showPassword)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
                 tabIndex={-1}
               >
-                {showPassword ? '👁️' : '👁️‍🗨️'}
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
           </div>
@@ -139,7 +146,7 @@ function Login({ onLogin }) {
           <div className="form-options">
             <label className="checkbox-label">
               <input type="checkbox" className="form-checkbox" />
-              <span>Remember me</span>
+              <span className="checkbox-text">Remember me</span>
             </label>
             <a href="#forgot" className="forgot-link">
               Forgot password?
@@ -155,10 +162,13 @@ function Login({ onLogin }) {
             {loading ? (
               <>
                 <span className="spinner"></span>
-                Signing in...
+                <span>Signing in...</span>
               </>
             ) : (
-              'Sign In'
+              <>
+                <LogIn size={20} />
+                <span>Sign In</span>
+              </>
             )}
           </button>
         </form>
@@ -167,11 +177,14 @@ function Login({ onLogin }) {
         <div className="login-footer">
           <p className="footer-text">
             Don't have an account?{' '}
-            <a href="#signup" className="footer-link">
+            <a href="#contact" className="footer-link">
               Contact your administrator
             </a>
           </p>
         </div>
+
+        {/* Version Badge */}
+        <div className="version-badge">v1.0.0</div>
       </div>
     </div>
   );

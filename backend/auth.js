@@ -1,108 +1,5 @@
-// /**
-//  * Authentication Module
-//  * JWT token generation and verification
-//  */
-
-// const bcrypt = require('bcrypt');
-// const jwt = require('jsonwebtoken');
-
-// const JWT_SECRET = process.env.JWT_SECRET || 'CHANGE-THIS-IN-PRODUCTION-USE-LONG-RANDOM-STRING';
-// const JWT_EXPIRES_IN = '7d';
-
-// /**
-//  * Hash password with bcrypt
-//  */
-// async function hashPassword(password) {
-//   const saltRounds = 10;
-//   return await bcrypt.hash(password, saltRounds);
-// }
-
-// /**
-//  * Compare password with hash
-//  */
-// async function verifyPassword(password, hash) {
-//   return await bcrypt.compare(password, hash);
-// }
-
-// /**
-//  * Generate JWT token
-//  */
-// function generateToken(employee) {
-//   return jwt.sign(
-//     { 
-//       id: employee.id, 
-//       email: employee.email,
-//       role: employee.role,
-//       name: employee.name
-//     },
-//     JWT_SECRET,
-//     { expiresIn: JWT_EXPIRES_IN }
-//   );
-// }
-
-// /**
-//  * Verify JWT token
-//  */
-// function verifyToken(token) {
-//   try {
-//     return jwt.verify(token, JWT_SECRET);
-//   } catch (error) {
-//     return null;
-//   }
-// }
-
-// /**
-//  * Auth middleware - protect routes
-//  */
-// function authenticateToken(req, res, next) {
-//   const authHeader = req.headers['authorization'];
-//   const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
-
-//   if (!token) {
-//     return res.status(401).json({ error: 'Access token required' });
-//   }
-
-//   const user = verifyToken(token);
-  
-//   if (!user) {
-//     // FIXED: Changed from 403 to 401
-//     // 401 = Authentication failed (invalid/expired token)
-//     // 403 = Authenticated but lacks permission (valid token, wrong role)
-//     return res.status(401).json({ error: 'Invalid or expired token' });
-//   }
-
-//   req.user = user;
-//   next();
-// }
-
-// /**
-//  * Optional auth - allows both authenticated and unauthenticated
-//  */
-// function optionalAuth(req, res, next) {
-//   const authHeader = req.headers['authorization'];
-//   const token = authHeader && authHeader.split(' ')[1];
-
-//   if (token) {
-//     const user = verifyToken(token);
-//     if (user) {
-//       req.user = user;
-//     }
-//   }
-  
-//   next();
-// }
-
-// module.exports = {
-//   hashPassword,
-//   verifyPassword,
-//   generateToken,
-//   verifyToken,
-//   authenticateToken,
-//   optionalAuth,
-// };
-
 /**
- * Authentication Module
+ * Authentication Module - Production Ready
  * JWT token generation and verification
  */
 
@@ -112,10 +9,10 @@ const jwt = require('jsonwebtoken');
 const JWT_SECRET = process.env.JWT_SECRET || 'CHANGE-THIS-IN-PRODUCTION-USE-LONG-RANDOM-STRING';
 const JWT_EXPIRES_IN = '7d';
 
-// Log JWT configuration on startup
-console.log('🔐 Auth Module Loaded');
-console.log('  JWT_SECRET:', JWT_SECRET ? '***' + JWT_SECRET.substring(JWT_SECRET.length - 4) : 'NOT SET');
-console.log('  JWT_EXPIRES_IN:', JWT_EXPIRES_IN);
+// Validate JWT_SECRET on startup
+if (JWT_SECRET === 'CHANGE-THIS-IN-PRODUCTION-USE-LONG-RANDOM-STRING') {
+  console.warn('⚠️  WARNING: Using default JWT_SECRET. Set JWT_SECRET in environment variables for production!');
+}
 
 /**
  * Hash password with bcrypt
@@ -136,14 +33,7 @@ async function verifyPassword(password, hash) {
  * Generate JWT token
  */
 function generateToken(employee) {
-  console.log('🎫 Generating token for:', {
-    id: employee.id,
-    email: employee.email,
-    role: employee.role,
-    name: employee.name
-  });
-  
-  const token = jwt.sign(
+  return jwt.sign(
     { 
       id: employee.id, 
       email: employee.email,
@@ -153,9 +43,6 @@ function generateToken(employee) {
     JWT_SECRET,
     { expiresIn: JWT_EXPIRES_IN }
   );
-  
-  console.log('✅ Token generated:', token.substring(0, 30) + '...');
-  return token;
 }
 
 /**
@@ -163,12 +50,12 @@ function generateToken(employee) {
  */
 function verifyToken(token) {
   try {
-    console.log('🔍 Verifying token:', token.substring(0, 30) + '...');
-    const decoded = jwt.verify(token, JWT_SECRET);
-    console.log('✅ Token valid, decoded:', decoded);
-    return decoded;
+    return jwt.verify(token, JWT_SECRET);
   } catch (error) {
-    console.log('❌ Token verification failed:', error.message);
+    // Log token errors in development only
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Token verification failed:', error.message);
+    }
     return null;
   }
 }
@@ -177,35 +64,19 @@ function verifyToken(token) {
  * Auth middleware - protect routes
  */
 function authenticateToken(req, res, next) {
-  console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('🔐 AUTH MIDDLEWARE - Checking authentication');
-  console.log('  Endpoint:', req.method, req.path);
-  
   const authHeader = req.headers['authorization'];
-  console.log('  Auth header:', authHeader || '❌ MISSING');
-  
   const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
 
   if (!token) {
-    console.log('  ❌ DENIED: No token provided');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
     return res.status(401).json({ error: 'Access token required' });
   }
-  
-  console.log('  Token received:', token.substring(0, 30) + '...');
 
   const user = verifyToken(token);
   
   if (!user) {
-    console.log('  ❌ DENIED: Invalid or expired token');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
     return res.status(401).json({ error: 'Invalid or expired token' });
   }
 
-  console.log('  ✅ ALLOWED: User authenticated');
-  console.log('  User:', user);
-  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-  
   req.user = user;
   next();
 }
@@ -227,6 +98,55 @@ function optionalAuth(req, res, next) {
   next();
 }
 
+/**
+ * Admin-only middleware
+ */
+function requireAdmin(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  
+  next();
+}
+
+/**
+ * Check if user can access store
+ */
+function canAccessStore(employee, storeId) {
+  // Admin or employees who can view all stores
+  if (employee.role === 'admin' || employee.can_view_all_stores) {
+    return true;
+  }
+  
+  // Check if store is in assigned stores
+  if (employee.assigned_stores && employee.assigned_stores.includes(storeId)) {
+    return true;
+  }
+  
+  return false;
+}
+
+/**
+ * Middleware to verify store access
+ */
+function verifyStoreAccess(req, res, next) {
+  const storeId = parseInt(req.params.storeId || req.query.storeId || req.body.storeId);
+  
+  if (!storeId) {
+    return res.status(400).json({ error: 'Store ID required' });
+  }
+  
+  if (!canAccessStore(req.user, storeId)) {
+    return res.status(403).json({ error: 'Access to this store is not authorized' });
+  }
+  
+  next();
+}
+
 module.exports = {
   hashPassword,
   verifyPassword,
@@ -234,4 +154,7 @@ module.exports = {
   verifyToken,
   authenticateToken,
   optionalAuth,
+  requireAdmin,
+  canAccessStore,
+  verifyStoreAccess,
 };

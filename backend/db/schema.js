@@ -1,3 +1,5 @@
+//backend/db/schema.js
+
 const { pgTable, serial, varchar, text, boolean, timestamp, integer, decimal, jsonb, date, unique } = require('drizzle-orm/pg-core');
 const { relations } = require('drizzle-orm');
 

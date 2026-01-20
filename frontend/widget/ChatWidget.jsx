@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MessageCircle, X, Send, Minimize2 } from 'lucide-react';
+import { MessageCircle, X, Send, Minimize2, Loader2 } from 'lucide-react';
 
-function ChatWidget({ apiUrl, wsUrl, shopDomain, widgetColor = '#667eea', welcomeMessage = 'Hi! How can we help?' }) {
+function ChatWidget({ apiUrl, wsUrl, storeIdentifier }) {
   const [isOpen, setIsOpen] = useState(false);
   const [conversationStarted, setConversationStarted] = useState(false);
   const [conversationId, setConversationId] = useState(null);
@@ -13,9 +13,57 @@ function ChatWidget({ apiUrl, wsUrl, shopDomain, widgetColor = '#667eea', welcom
   const [isConnecting, setIsConnecting] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   
+  // Store data
+  const [store, setStore] = useState(null);
+  const [storeId, setStoreId] = useState(null);
+  const [widgetSettings, setWidgetSettings] = useState({
+    primaryColor: '#667eea',
+    greeting: 'Hi! How can we help you today?',
+    placeholder: 'Type your message...',
+    position: 'bottom-right'
+  });
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+  
   const messagesEndRef = useRef(null);
   const wsRef = useRef(null);
   const reconnectTimeoutRef = useRef(null);
+
+  // Fetch store settings on mount
+  useEffect(() => {
+    fetchStoreSettings();
+  }, []);
+
+  const fetchStoreSettings = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      const response = await fetch(`${apiUrl}/api/widget/settings?store=${storeIdentifier}`);
+      
+      if (!response.ok) {
+        throw new Error('Store not found or inactive');
+      }
+      
+      const data = await response.json();
+      
+      setStore(data);
+      setStoreId(data.storeId);
+      setWidgetSettings({
+        primaryColor: data.primaryColor || '#667eea',
+        greeting: data.widgetSettings?.greeting || 'Hi! How can we help you today?',
+        placeholder: data.widgetSettings?.placeholder || 'Type your message...',
+        position: data.widgetSettings?.position || 'bottom-right'
+      });
+      
+      console.log('Widget settings loaded:', data);
+    } catch (error) {
+      console.error('Error loading widget settings:', error);
+      setError('Failed to load chat widget. Please try again later.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   // Auto-scroll to bottom
   const scrollToBottom = () => {
@@ -39,6 +87,7 @@ function ChatWidget({ apiUrl, wsUrl, shopDomain, widgetColor = '#667eea', welcom
         console.log('WebSocket connected');
         ws.send(JSON.stringify({
           type: 'join',
+          role: 'customer',
           conversationId: convId
         }));
       };
@@ -47,13 +96,24 @@ function ChatWidget({ apiUrl, wsUrl, shopDomain, widgetColor = '#667eea', welcom
         try {
           const data = JSON.parse(event.data);
           
-          if (data.type === 'message' && data.data) {
+          console.log('WebSocket message received:', data);
+          
+          // Handle different message types
+          if (data.type === 'new_message' && data.message) {
             setMessages(prev => {
               // Avoid duplicates
-              const exists = prev.some(m => m.id === data.data.id);
+              const exists = prev.some(m => m.id === data.message.id);
               if (exists) return prev;
-              return [...prev, data.data];
+              return [...prev, data.message];
             });
+            
+            // Show typing indicator when agent is typing
+            if (data.message.sender_type === 'agent') {
+              setIsTyping(false);
+            }
+          } else if (data.type === 'agent_typing') {
+            setIsTyping(true);
+            setTimeout(() => setIsTyping(false), 3000);
           }
         } catch (error) {
           console.error('Error parsing WebSocket message:', error);
@@ -81,7 +141,7 @@ function ChatWidget({ apiUrl, wsUrl, shopDomain, widgetColor = '#667eea', welcom
   };
 
   useEffect(() => {
-    if (conversationId) {
+    if (conversationId && storeId) {
       connectWebSocket(conversationId);
     }
     
@@ -93,14 +153,19 @@ function ChatWidget({ apiUrl, wsUrl, shopDomain, widgetColor = '#667eea', welcom
         clearTimeout(reconnectTimeoutRef.current);
       }
     };
-  }, [conversationId]);
+  }, [conversationId, storeId]);
 
   // Start conversation
   const startConversation = async (e) => {
     e.preventDefault();
     
     if (!customerEmail || !initialMessage) {
-      alert('Please fill in all fields');
+      alert('Please fill in all required fields');
+      return;
+    }
+    
+    if (!storeId) {
+      alert('Store not loaded. Please refresh the page.');
       return;
     }
     
@@ -111,36 +176,40 @@ function ChatWidget({ apiUrl, wsUrl, shopDomain, widgetColor = '#667eea', welcom
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Shop-Domain': shopDomain,
         },
         body: JSON.stringify({
-          customer_email: customerEmail,
-          customer_name: customerName || customerEmail,
-          initial_message: initialMessage,
+          storeIdentifier: storeIdentifier,
+          customerEmail: customerEmail,
+          customerName: customerName || customerEmail,
+          initialMessage: initialMessage,
         }),
       });
       
       if (!response.ok) {
-        throw new Error('Failed to start conversation');
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to start conversation');
       }
       
       const conversation = await response.json();
       setConversationId(conversation.id);
       setConversationStarted(true);
       
-      // Add initial message to local state
+      // The backend will create the initial message, so we'll wait for it via WebSocket
+      // But we can optimistically show it
       setMessages([{
-        id: Date.now(),
+        id: `temp-${Date.now()}`,
         sender_type: 'customer',
         sender_name: customerName || customerEmail,
         content: initialMessage,
-        timestamp: new Date().toISOString(),
+        sent_at: new Date().toISOString(),
       }]);
       
       setInitialMessage('');
+      
+      console.log('Conversation started:', conversation);
     } catch (error) {
       console.error('Error starting conversation:', error);
-      alert('Failed to start conversation. Please try again.');
+      alert(error.message || 'Failed to start conversation. Please try again.');
     } finally {
       setIsConnecting(false);
     }
@@ -150,7 +219,7 @@ function ChatWidget({ apiUrl, wsUrl, shopDomain, widgetColor = '#667eea', welcom
   const sendMessage = async (e) => {
     e.preventDefault();
     
-    if (!messageInput.trim() || !conversationId) {
+    if (!messageInput.trim() || !conversationId || !storeId) {
       return;
     }
     
@@ -159,12 +228,12 @@ function ChatWidget({ apiUrl, wsUrl, shopDomain, widgetColor = '#667eea', welcom
     
     // Optimistically add message to UI
     const tempMessage = {
-      id: Date.now(),
+      id: `temp-${Date.now()}`,
       conversation_id: conversationId,
       sender_type: 'customer',
       sender_name: customerName || customerEmail,
       content: messageContent,
-      timestamp: new Date().toISOString(),
+      sent_at: new Date().toISOString(),
     };
     
     setMessages(prev => [...prev, tempMessage]);
@@ -174,12 +243,12 @@ function ChatWidget({ apiUrl, wsUrl, shopDomain, widgetColor = '#667eea', welcom
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Shop-Domain': shopDomain,
         },
         body: JSON.stringify({
-          conversation_id: conversationId,
-          sender_type: 'customer',
-          sender_name: customerName || customerEmail,
+          conversationId: conversationId,
+          storeId: storeId,
+          senderType: 'customer',
+          senderName: customerName || customerEmail,
           content: messageContent,
         }),
       });
@@ -194,6 +263,8 @@ function ChatWidget({ apiUrl, wsUrl, shopDomain, widgetColor = '#667eea', welcom
       setMessages(prev => prev.map(m => 
         m.id === tempMessage.id ? savedMessage : m
       ));
+      
+      console.log('Message sent:', savedMessage);
     } catch (error) {
       console.error('Error sending message:', error);
       // Remove the failed message
@@ -201,6 +272,24 @@ function ChatWidget({ apiUrl, wsUrl, shopDomain, widgetColor = '#667eea', welcom
       alert('Failed to send message. Please try again.');
     }
   };
+
+  // Don't render if there's a critical error
+  if (error && !store) {
+    return null;
+  }
+
+  // Show loading state
+  if (isLoading) {
+    return (
+      <div className="fixed bottom-4 right-4 z-50">
+        <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center">
+          <Loader2 className="w-7 h-7 text-gray-600 animate-spin" />
+        </div>
+      </div>
+    );
+  }
+
+  const widgetColor = widgetSettings.primaryColor;
 
   return (
     <div className="fixed bottom-4 right-4 z-50 font-sans">
@@ -212,6 +301,7 @@ function ChatWidget({ apiUrl, wsUrl, shopDomain, widgetColor = '#667eea', welcom
           style={{ 
             background: `linear-gradient(135deg, ${widgetColor} 0%, ${widgetColor}dd 100%)` 
           }}
+          aria-label="Open chat"
         >
           <MessageCircle className="w-7 h-7 text-white" />
           <span className="absolute -top-1 -right-1 flex h-5 w-5">
@@ -234,13 +324,14 @@ function ChatWidget({ apiUrl, wsUrl, shopDomain, widgetColor = '#667eea', welcom
                 <MessageCircle className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="font-semibold text-lg">Live Chat</h3>
+                <h3 className="font-semibold text-lg">{store?.brandName || 'Live Chat'}</h3>
                 <p className="text-sm text-white text-opacity-90">We're here to help!</p>
               </div>
             </div>
             <button
               onClick={() => setIsOpen(false)}
               className="hover:bg-white hover:bg-opacity-20 p-2 rounded-lg transition-colors"
+              aria-label="Minimize chat"
             >
               <Minimize2 className="w-5 h-5" />
             </button>
@@ -251,7 +342,7 @@ function ChatWidget({ apiUrl, wsUrl, shopDomain, widgetColor = '#667eea', welcom
             <div className="flex-1 flex flex-col justify-center px-6 py-8">
               <div className="text-center mb-6">
                 <h4 className="text-2xl font-bold text-gray-800 mb-2">
-                  {welcomeMessage}
+                  {widgetSettings.greeting}
                 </h4>
                 <p className="text-gray-600">
                   Fill in the form below and we'll get back to you right away!
@@ -269,7 +360,7 @@ function ChatWidget({ apiUrl, wsUrl, shopDomain, widgetColor = '#667eea', welcom
                     onChange={(e) => setCustomerName(e.target.value)}
                     placeholder="Your name"
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-opacity-50 focus:outline-none transition-all"
-                    style={{ focusRing: widgetColor }}
+                    style={{ '--tw-ring-color': widgetColor }}
                   />
                 </div>
                 
@@ -294,7 +385,7 @@ function ChatWidget({ apiUrl, wsUrl, shopDomain, widgetColor = '#667eea', welcom
                   <textarea
                     value={initialMessage}
                     onChange={(e) => setInitialMessage(e.target.value)}
-                    placeholder="How can we help you?"
+                    placeholder={widgetSettings.placeholder}
                     required
                     rows={4}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-opacity-50 focus:outline-none resize-none transition-all"
@@ -304,12 +395,19 @@ function ChatWidget({ apiUrl, wsUrl, shopDomain, widgetColor = '#667eea', welcom
                 <button
                   type="submit"
                   disabled={isConnecting}
-                  className="w-full py-3 text-white font-semibold rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 disabled:opacity-50"
+                  className="w-full py-3 text-white font-semibold rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
                   style={{ 
                     background: `linear-gradient(135deg, ${widgetColor} 0%, ${widgetColor}dd 100%)` 
                   }}
                 >
-                  {isConnecting ? 'Starting Chat...' : 'Start Chat'}
+                  {isConnecting ? (
+                    <>
+                      <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                      Starting Chat...
+                    </>
+                  ) : (
+                    'Start Chat'
+                  )}
                 </button>
               </form>
             </div>
@@ -318,6 +416,12 @@ function ChatWidget({ apiUrl, wsUrl, shopDomain, widgetColor = '#667eea', welcom
             <>
               {/* Messages */}
               <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 bg-gray-50">
+                {messages.length === 0 && (
+                  <div className="text-center text-gray-500 mt-8">
+                    <p>Start typing to begin the conversation...</p>
+                  </div>
+                )}
+                
                 {messages.map((message, index) => (
                   <div
                     key={message.id || index}
@@ -335,11 +439,16 @@ function ChatWidget({ apiUrl, wsUrl, shopDomain, widgetColor = '#667eea', welcom
                           : {}
                       }
                     >
-                      <p className="text-sm leading-relaxed">{message.content}</p>
+                      {message.sender_type !== 'customer' && (
+                        <p className="text-xs font-semibold text-gray-600 mb-1">
+                          {message.sender_name || 'Agent'}
+                        </p>
+                      )}
+                      <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.content}</p>
                       <p className={`text-xs mt-1 ${
                         message.sender_type === 'customer' ? 'text-white text-opacity-70' : 'text-gray-500'
                       }`}>
-                        {new Date(message.timestamp).toLocaleTimeString([], { 
+                        {new Date(message.sent_at || message.timestamp).toLocaleTimeString([], { 
                           hour: '2-digit', 
                           minute: '2-digit' 
                         })}
@@ -347,6 +456,19 @@ function ChatWidget({ apiUrl, wsUrl, shopDomain, widgetColor = '#667eea', welcom
                     </div>
                   </div>
                 ))}
+                
+                {isTyping && (
+                  <div className="flex justify-start">
+                    <div className="bg-white text-gray-800 px-4 py-3 rounded-2xl rounded-bl-none shadow-sm">
+                      <div className="flex space-x-2">
+                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
                 <div ref={messagesEndRef} />
               </div>
 
@@ -357,7 +479,7 @@ function ChatWidget({ apiUrl, wsUrl, shopDomain, widgetColor = '#667eea', welcom
                     type="text"
                     value={messageInput}
                     onChange={(e) => setMessageInput(e.target.value)}
-                    placeholder="Type your message..."
+                    placeholder={widgetSettings.placeholder}
                     className="flex-1 px-4 py-3 border border-gray-300 rounded-full focus:ring-2 focus:ring-opacity-50 focus:outline-none transition-all"
                   />
                   <button
@@ -367,6 +489,7 @@ function ChatWidget({ apiUrl, wsUrl, shopDomain, widgetColor = '#667eea', welcom
                     style={{ 
                       background: `linear-gradient(135deg, ${widgetColor} 0%, ${widgetColor}dd 100%)` 
                     }}
+                    aria-label="Send message"
                   >
                     <Send className="w-5 h-5" />
                   </button>
