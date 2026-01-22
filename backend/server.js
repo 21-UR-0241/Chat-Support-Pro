@@ -798,6 +798,65 @@ function setupKeepAlive() {
   }, 60 * 1000);
 }
 
+// ============ DATABASE MIGRATION ENDPOINTS ============
+
+// Fix table name mismatch
+app.post('/debug/fix-table-names', async (req, res) => {
+  try {
+    console.log('🔧 Fixing table names...');
+    
+    const client = await db.pool.connect();
+    
+    try {
+      // Check if 'shops' table exists
+      const shopsExists = await client.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = 'shops'
+        );
+      `);
+      
+      // Check if 'stores' table exists
+      const storesExists = await client.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = 'stores'
+        );
+      `);
+      
+      const hasShops = shopsExists.rows[0].exists;
+      const hasStores = storesExists.rows[0].exists;
+      
+      console.log('Table status:', { hasShops, hasStores });
+      
+      if (hasShops && !hasStores) {
+        // Rename 'shops' to 'stores'
+        console.log('Renaming shops → stores...');
+        await client.query('ALTER TABLE shops RENAME TO stores;');
+        console.log('✅ Table renamed');
+      }
+      
+      res.json({
+        success: true,
+        message: 'Table names fixed',
+        hadShops: hasShops,
+        hadStores: hasStores
+      });
+      
+    } finally {
+      client.release();
+    }
+    
+  } catch (error) {
+    console.error('Error fixing table names:', error);
+    res.status(500).json({ 
+      error: error.message,
+      stack: error.stack 
+    });
+  }
+});
 // ============ START SERVER ============
 
 const PORT = process.env.PORT || 3000;
