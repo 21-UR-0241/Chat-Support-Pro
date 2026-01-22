@@ -327,7 +327,11 @@ app.get('/auth/callback', handleCallback);
 app.get('/api/stores', authenticateToken, async (req, res) => {
   try {
     const stores = await db.getAllActiveStores();
-    res.json(stores);
+    
+    // Convert to camelCase
+    const camelCaseStores = stores.map(store => snakeToCamel(store));
+    
+    res.json(camelCaseStores);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
