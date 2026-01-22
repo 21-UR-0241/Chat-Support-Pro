@@ -13,7 +13,7 @@ const { hashPassword, verifyPassword, generateToken, authenticateToken } = requi
 
 const app = express();
 const server = http.createServer(app);
-app.set('trust proxy', true);
+app.set('trust proxy', 1);
 
 // Initialize WebSocket server
 initWebSocketServer(server);
