@@ -2,11 +2,13 @@
  * WebSocket Service
  * Manages WebSocket connection for real-time updates
  */
-
-// Use proper WebSocket URL based on environment
 const WS_URL = import.meta.env.PROD
-  ? (import.meta.env.VITE_WS_URL || 'wss://your-app.herokuapp.com/ws')
-  : 'ws://localhost:3001/ws'; // Direct connection in development
+  ? (import.meta.env.VITE_WS_URL || null)
+  : 'ws://localhost:3000/ws';
+
+if (import.meta.env.PROD && !WS_URL) {
+  throw new Error('VITE_WS_URL is required in production');
+}
 
 class WebSocketService {
   constructor() {
@@ -16,6 +18,8 @@ class WebSocketService {
     this.reconnectDelay = 3000;
     this.listeners = new Map();
     this.employeeId = null;
+    this.queue = [];
+    this.isConnecting = false;
   }
 
   /**
@@ -26,8 +30,10 @@ class WebSocketService {
       console.log('WebSocket already connected');
       return;
     }
+    if (this.isConnecting) return;
 
     this.employeeId = employeeId;
+    this.isConnecting = true;
 
     try {
       this.ws = new WebSocket(WS_URL);
@@ -35,24 +41,26 @@ class WebSocketService {
       this.ws.onopen = () => {
         console.log('✅ WebSocket connected');
         this.reconnectAttempts = 0;
+        this.isConnecting = false;
 
-        // Authenticate as agent
+        // Authenticate as agent using JWT
+        const token = localStorage.getItem('token');
         this.send({
           type: 'auth',
           clientType: 'agent',
-          employeeId: this.employeeId,
+          token
         });
 
-        // Notify listeners
+        // Flush queued messages
+        this.queue.forEach(msg => this.ws.send(msg));
+        this.queue = [];
+
         this.emit('connected');
       };
 
       this.ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          console.log('📨 WebSocket message:', data.type);
-          
-          // Emit to listeners
           this.emit(data.type, data);
           this.emit('message', data);
         } catch (error) {
@@ -67,23 +75,19 @@ class WebSocketService {
 
       this.ws.onclose = () => {
         console.log('WebSocket closed');
+        this.isConnecting = false;
         this.emit('disconnected');
 
-        // Attempt to reconnect
         if (this.reconnectAttempts < this.maxReconnectAttempts) {
           this.reconnectAttempts++;
-          console.log(`Reconnecting... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
-          
-          setTimeout(() => {
-            this.connect(this.employeeId);
-          }, this.reconnectDelay);
+          setTimeout(() => this.connect(this.employeeId), this.reconnectDelay);
         } else {
-          console.error('Max reconnection attempts reached');
           this.emit('max_reconnect_reached');
         }
       };
     } catch (error) {
       console.error('Failed to create WebSocket:', error);
+      this.isConnecting = false;
     }
   }
 
@@ -101,10 +105,13 @@ class WebSocketService {
    * Send message through WebSocket
    */
   send(data) {
+    const payload = JSON.stringify(data);
+
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(data));
+      this.ws.send(payload);
     } else {
-      console.warn('WebSocket not connected, cannot send message');
+      // Queue while connecting
+      this.queue.push(payload);
     }
   }
 
@@ -148,7 +155,6 @@ class WebSocketService {
     }
     this.listeners.get(event).push(callback);
 
-    // Return unsubscribe function
     return () => {
       const callbacks = this.listeners.get(event);
       if (callbacks) {

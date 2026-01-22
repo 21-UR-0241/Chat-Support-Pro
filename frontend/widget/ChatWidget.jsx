@@ -174,9 +174,10 @@ function ChatWidget({ apiUrl, wsUrl, storeIdentifier }) {
     try {
       const response = await fetch(`${apiUrl}/api/conversations`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+headers: {
+  'Content-Type': 'application/json',
+  'Authorization': `Bearer ${sessionToken}`,
+},
         body: JSON.stringify({
           storeIdentifier: storeIdentifier,
           customerEmail: customerEmail,

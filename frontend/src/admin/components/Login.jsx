@@ -96,7 +96,6 @@ function Login({ onLogin }) {
               Email Address
             </label>
             <div className="input-wrapper">
-              <Mail className="input-icon" />
               <input
                 id="email"
                 type="email"
@@ -118,7 +117,6 @@ function Login({ onLogin }) {
               Password
             </label>
             <div className="input-wrapper">
-              <Lock className="input-icon" />
               <input
                 id="password"
                 type={showPassword ? 'text' : 'password'}

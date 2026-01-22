@@ -1,21 +1,20 @@
-
 //backend/db/index.js
-require('dotenv').config();
+require('dotenv').config({ path: '../.env' });
 const { drizzle } = require('drizzle-orm/node-postgres');
 const { Pool } = require('pg');
-const { eq, and, desc, sql, gte, ilike, or } = require('drizzle-orm');
+const { eq, and, desc, sql, ilike, or } = require('drizzle-orm');
 const schema = require('./schema');
 
+// ✅ Safer pool config for production
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
-  max: 50,
+  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: true } : false,
+  max: parseInt(process.env.DB_POOL_MAX || '20', 10),
 });
 
 const db = drizzle(pool, { schema });
 
 // ============ STORES ============
-
 async function registerStore(data) {
   const [result] = await db.insert(schema.stores).values(data)
     .onConflictDoUpdate({
@@ -27,13 +26,20 @@ async function registerStore(data) {
 
 async function getStoreByIdentifier(identifier) {
   const [result] = await db.select().from(schema.stores)
-    .where(and(eq(schema.stores.storeIdentifier, identifier), eq(schema.stores.isActive, true)));
+    .where(and(
+      eq(schema.stores.storeIdentifier, identifier),
+      eq(schema.stores.isActive, true)
+    ));
   return result;
 }
 
 async function getStoreByDomain(domain) {
+  const shopDomain = domain?.toLowerCase();
   const [result] = await db.select().from(schema.stores)
-    .where(and(eq(schema.stores.shopDomain, domain), eq(schema.stores.isActive, true)));
+    .where(and(
+      eq(schema.stores.shopDomain, shopDomain),
+      eq(schema.stores.isActive, true)
+    ));
   return result;
 }
 
@@ -64,7 +70,6 @@ async function updateStoreConnectionStatus(identifier, isConnected) {
 }
 
 // ============ CONVERSATIONS ============
-
 async function saveConversation(data) {
   const [result] = await db.insert(schema.conversations).values(data).returning();
   return result;
@@ -78,9 +83,14 @@ async function getConversation(conversationId) {
 
 async function getConversations(filters = {}) {
   const conditions = [];
-  
+
   if (filters.storeId) conditions.push(eq(schema.conversations.shopId, filters.storeId));
-  if (filters.storeIdentifier) conditions.push(eq(schema.conversations.shopDomain, filters.storeIdentifier));
+  if (filters.storeIdentifier) {
+    const store = await getStoreByIdentifier(filters.storeIdentifier);
+    if (store) {
+      conditions.push(eq(schema.conversations.shopId, store.id));
+    }
+  }
   if (filters.status) conditions.push(eq(schema.conversations.status, filters.status));
   if (filters.search) {
     conditions.push(or(
@@ -88,7 +98,7 @@ async function getConversations(filters = {}) {
       ilike(schema.conversations.customerName, `%${filters.search}%`)
     ));
   }
-  
+
   return await db.select().from(schema.conversations)
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(desc(schema.conversations.updatedAt))
@@ -113,16 +123,15 @@ async function closeConversation(conversationId) {
 }
 
 // ============ MESSAGES ============
-
 async function saveMessage(data) {
   return await db.transaction(async (tx) => {
     const [message] = await tx.insert(schema.messages).values(data).returning();
-    
+
     // Update conversation timestamp
     await tx.update(schema.conversations)
       .set({ updatedAt: sql`CURRENT_TIMESTAMP` })
       .where(eq(schema.conversations.id, data.conversationId));
-    
+
     return message;
   });
 }
@@ -135,24 +144,22 @@ async function getMessages(conversationId, limit = 100) {
 }
 
 // ============ EMPLOYEES ============
-
 async function createEmployee(data) {
   console.log('🔍 DB: Creating employee with data:', data);
-  
-  // Map snake_case to camelCase for Drizzle schema
+
   const employeeData = {
     email: data.email,
     name: data.name,
     role: data.role,
-    passwordHash: data.password_hash,  // Map snake_case to camelCase
+    passwordHash: data.password_hash,
     canViewAllStores: data.can_view_all_stores,
     assignedStores: data.assigned_stores || [],
   };
-  
+
   console.log('🔍 DB: Mapped to camelCase:', employeeData);
-  
+
   const [result] = await db.insert(schema.employees).values(employeeData).returning();
-  
+
   console.log('✅ DB: Employee created:', result.id);
   return result;
 }
@@ -190,7 +197,7 @@ async function updateEmployeeStatus(employeeId, status) {
     currentStatus: status, 
     isOnline: status === 'online' 
   };
-  
+
   await db.update(schema.employees)
     .set({ 
       ...updates, 
@@ -205,24 +212,33 @@ async function deleteEmployee(employeeId) {
   return true;
 }
 
-// ============ ANALYTICS ============
+// ============ WEBHOOK LOGS ============
+async function insertWebhookLog(data) {
+  const [result] = await db.insert(schema.webhookLogs).values({
+    storeId: data.storeId,
+    topic: data.topic,
+    payload: data.payload,
+    headers: data.headers
+  }).returning();
+  return result;
+}
 
+// ============ ANALYTICS ============
 async function getDashboardStats(filters = {}) {
   const conditions = [];
   if (filters.storeId) conditions.push(eq(schema.conversations.shopId, filters.storeId));
-  
+
   const [result] = await db.select({
     totalConversations: sql`COUNT(DISTINCT ${schema.conversations.id})`,
     openConversations: sql`COUNT(DISTINCT ${schema.conversations.id}) FILTER (WHERE ${schema.conversations.status} = 'open')`,
     activeStores: sql`COUNT(DISTINCT ${schema.conversations.shopId})`,
   }).from(schema.conversations)
     .where(conditions.length > 0 ? and(...conditions) : undefined);
-  
+
   return result;
 }
 
 // ============ UTILITIES ============
-
 async function testConnection() {
   const result = await pool.query('SELECT NOW()');
   console.log('✅ Connected:', result.rows[0].now);
@@ -261,6 +277,8 @@ module.exports = {
   updateEmployee,
   updateEmployeeStatus,
   deleteEmployee,
+  // Webhooks
+  insertWebhookLog,
   // Analytics
   getDashboardStats, 
   // Utilities

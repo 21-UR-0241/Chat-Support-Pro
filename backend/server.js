@@ -374,26 +374,26 @@ app.post('/api/conversations', async (req, res) => {
     }
     
     // Create conversation
-    const conversation = await db.saveConversation({
-      store_id: store.id,
-      store_identifier: storeIdentifier,
-      customer_email: customerEmail,
-      customer_name: customerName || customerEmail,
-      status: 'open',
-      first_message_at: new Date(),
-      last_message_at: new Date()
-    });
+const conversation = await db.saveConversation({
+  shopId: store.id,
+  shopDomain: store.shop_domain,
+  customerEmail,
+  customerName: customerName || customerEmail,
+  status: 'open',
+  createdAt: new Date(),
+  updatedAt: new Date()
+});
     
     // If there's an initial message, save it
     if (initialMessage) {
-      await db.saveMessage({
-        conversation_id: conversation.id,
-        store_id: store.id,
-        sender_type: 'customer',
-        sender_name: customerName || customerEmail,
-        content: initialMessage,
-        sent_at: new Date()
-      });
+await db.saveMessage({
+  conversationId: conversation.id,
+  storeId: store.id,
+  senderType: 'customer',
+  senderName: customerName || customerEmail,
+  content: initialMessage,
+  sentAt: new Date()
+});
     }
     
     // Broadcast to agents
@@ -422,7 +422,7 @@ app.put('/api/conversations/:id', authenticateToken, async (req, res) => {
 });
 
 // Close conversation (protected)
-app.post('/api/conversations/:id/close', authenticateToken, async (req, res) => {
+app.put('/api/conversations/:id/close', authenticateToken, async (req, res) => {
   try {
     const conversation = await db.closeConversation(parseInt(req.params.id));
     res.json(conversation);
@@ -444,7 +444,7 @@ app.get('/api/conversations/:id/messages', authenticateToken, async (req, res) =
 });
 
 // Send message (can be called by widget or agent)
-app.post('/api/messages', async (req, res) => {
+app.post('/api/messages', authenticateToken, async (req, res) => {
   try {
     const { conversationId, senderType, senderName, content, storeId } = req.body;
     
@@ -619,6 +619,41 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
+// ===== Widget Session Token =====
+app.get('/api/widget/session', async (req, res) => {
+  try {
+    const { store } = req.query;
+
+    if (!store) {
+      return res.status(400).json({ error: 'store parameter required' });
+    }
+
+    const storeRecord = await db.getStoreByIdentifier(store);
+    if (!storeRecord || !storeRecord.is_active) {
+      return res.status(404).json({ error: 'Store not found or inactive' });
+    }
+
+    // Optional: Verify Origin header if you store allowed domains
+    // const origin = req.get('Origin');
+    // if (origin && storeRecord.allowed_domains?.length) {
+    //   if (!storeRecord.allowed_domains.includes(origin)) {
+    //     return res.status(403).json({ error: 'Origin not allowed' });
+    //   }
+    // }
+
+    const { generateWidgetToken } = require('./auth');
+    const token = generateWidgetToken(storeRecord);
+
+    res.json({
+      token,
+      expiresIn: process.env.WIDGET_JWT_EXPIRES_IN || '2h'
+    });
+  } catch (error) {
+    console.error('Widget session error:', error);
+    res.status(500).json({ error: 'Failed to create widget session' });
+  }
+});
+
 // ============ START SERVER ============
 
 const PORT = process.env.PORT || 3000;
@@ -643,6 +678,8 @@ async function startServer() {
     process.exit(1);
   }
 }
+
+
 
 startServer();
 

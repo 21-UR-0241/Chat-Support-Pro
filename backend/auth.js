@@ -2,16 +2,19 @@
  * Authentication Module - Production Ready
  * JWT token generation and verification
  */
-
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'CHANGE-THIS-IN-PRODUCTION-USE-LONG-RANDOM-STRING';
-const JWT_EXPIRES_IN = '7d';
+const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 
-// Validate JWT_SECRET on startup
-if (JWT_SECRET === 'CHANGE-THIS-IN-PRODUCTION-USE-LONG-RANDOM-STRING') {
-  console.warn('⚠️  WARNING: Using default JWT_SECRET. Set JWT_SECRET in environment variables for production!');
+// Widget tokens (separate secret recommended)
+const WIDGET_JWT_SECRET = process.env.WIDGET_JWT_SECRET || JWT_SECRET;
+const WIDGET_JWT_EXPIRES_IN = process.env.WIDGET_JWT_EXPIRES_IN || '2h';
+
+// ✅ Enforce JWT secret in production
+if (process.env.NODE_ENV === 'production' && !JWT_SECRET) {
+  throw new Error('JWT_SECRET is required in production');
 }
 
 /**
@@ -30,7 +33,7 @@ async function verifyPassword(password, hash) {
 }
 
 /**
- * Generate JWT token
+ * Generate employee JWT token
  */
 function generateToken(employee) {
   return jwt.sign(
@@ -46,16 +49,42 @@ function generateToken(employee) {
 }
 
 /**
- * Verify JWT token
+ * Verify employee JWT token
  */
 function verifyToken(token) {
   try {
     return jwt.verify(token, JWT_SECRET);
   } catch (error) {
-    // Log token errors in development only
     if (process.env.NODE_ENV === 'development') {
       console.log('Token verification failed:', error.message);
     }
+    return null;
+  }
+}
+
+/**
+ * Generate widget JWT token
+ */
+function generateWidgetToken(store) {
+  return jwt.sign(
+    {
+      storeId: store.id,
+      storeIdentifier: store.store_identifier,
+      shopDomain: store.shop_domain,
+      type: 'widget'
+    },
+    WIDGET_JWT_SECRET,
+    { expiresIn: WIDGET_JWT_EXPIRES_IN }
+  );
+}
+
+/**
+ * Verify widget JWT token
+ */
+function verifyWidgetToken(token) {
+  try {
+    return jwt.verify(token, WIDGET_JWT_SECRET);
+  } catch {
     return null;
   }
 }
@@ -66,17 +95,14 @@ function verifyToken(token) {
 function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
-
   if (!token) {
     return res.status(401).json({ error: 'Access token required' });
   }
-
   const user = verifyToken(token);
-  
+
   if (!user) {
     return res.status(401).json({ error: 'Invalid or expired token' });
   }
-
   req.user = user;
   next();
 }
@@ -87,14 +113,13 @@ function authenticateToken(req, res, next) {
 function optionalAuth(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
-
   if (token) {
     const user = verifyToken(token);
     if (user) {
       req.user = user;
     }
   }
-  
+
   next();
 }
 
@@ -105,11 +130,11 @@ function requireAdmin(req, res, next) {
   if (!req.user) {
     return res.status(401).json({ error: 'Authentication required' });
   }
-  
+
   if (req.user.role !== 'admin') {
     return res.status(403).json({ error: 'Admin access required' });
   }
-  
+
   next();
 }
 
@@ -121,12 +146,12 @@ function canAccessStore(employee, storeId) {
   if (employee.role === 'admin' || employee.can_view_all_stores) {
     return true;
   }
-  
+
   // Check if store is in assigned stores
   if (employee.assigned_stores && employee.assigned_stores.includes(storeId)) {
     return true;
   }
-  
+
   return false;
 }
 
@@ -135,15 +160,15 @@ function canAccessStore(employee, storeId) {
  */
 function verifyStoreAccess(req, res, next) {
   const storeId = parseInt(req.params.storeId || req.query.storeId || req.body.storeId);
-  
+
   if (!storeId) {
     return res.status(400).json({ error: 'Store ID required' });
   }
-  
+
   if (!canAccessStore(req.user, storeId)) {
     return res.status(403).json({ error: 'Access to this store is not authorized' });
   }
-  
+
   next();
 }
 
@@ -152,6 +177,8 @@ module.exports = {
   verifyPassword,
   generateToken,
   verifyToken,
+  generateWidgetToken,
+  verifyWidgetToken,
   authenticateToken,
   optionalAuth,
   requireAdmin,

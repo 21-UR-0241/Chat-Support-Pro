@@ -131,9 +131,9 @@ handleUnauthorized() {
   }
 
   async closeConversation(id) {
-    return this.fetch(`/api/conversations/${id}/close`, {
-      method: 'PUT',
-    });
+return this.fetch(`/api/conversations/${id}/close`, {
+  method: 'PUT',
+});
   }
 
   // ============ Messages ============
