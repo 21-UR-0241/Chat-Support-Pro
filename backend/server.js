@@ -903,6 +903,123 @@ app.get('/api/stats/websocket', authenticateToken, (req, res) => {
   }
 });
 
+// Add this to server.js
+app.post('/debug/sync-messages-schema', async (req, res) => {
+  try {
+    console.log('🔧 Syncing messages table schema...');
+    
+    const client = await db.pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+      
+      const missingColumns = [];
+      
+      // Check and add message_type
+      const hasMessageType = await client.query(`
+        SELECT column_name FROM information_schema.columns 
+        WHERE table_name = 'messages' AND column_name = 'message_type';
+      `);
+      
+      if (hasMessageType.rows.length === 0) {
+        await client.query(`
+          ALTER TABLE messages 
+          ADD COLUMN message_type VARCHAR(50) DEFAULT 'text';
+        `);
+        missingColumns.push('message_type');
+      }
+      
+      // Check and add attachment_url
+      const hasAttachmentUrl = await client.query(`
+        SELECT column_name FROM information_schema.columns 
+        WHERE table_name = 'messages' AND column_name = 'attachment_url';
+      `);
+      
+      if (hasAttachmentUrl.rows.length === 0) {
+        await client.query(`
+          ALTER TABLE messages 
+          ADD COLUMN attachment_url TEXT;
+        `);
+        missingColumns.push('attachment_url');
+      }
+      
+      // Check and add attachment_type
+      const hasAttachmentType = await client.query(`
+        SELECT column_name FROM information_schema.columns 
+        WHERE table_name = 'messages' AND column_name = 'attachment_type';
+      `);
+      
+      if (hasAttachmentType.rows.length === 0) {
+        await client.query(`
+          ALTER TABLE messages 
+          ADD COLUMN attachment_type VARCHAR(50);
+        `);
+        missingColumns.push('attachment_type');
+      }
+      
+      // Check and add sent_at
+      const hasSentAt = await client.query(`
+        SELECT column_name FROM information_schema.columns 
+        WHERE table_name = 'messages' AND column_name = 'sent_at';
+      `);
+      
+      if (hasSentAt.rows.length === 0) {
+        await client.query(`
+          ALTER TABLE messages 
+          ADD COLUMN sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+        `);
+        missingColumns.push('sent_at');
+      }
+      
+      // Check and add delivered_at, read_at, failed, retry_count, etc.
+      const additionalColumns = [
+        { name: 'delivered_at', type: 'TIMESTAMP' },
+        { name: 'read_at', type: 'TIMESTAMP' },
+        { name: 'failed', type: 'BOOLEAN DEFAULT false' },
+        { name: 'retry_count', type: 'INTEGER DEFAULT 0' },
+        { name: 'routed_successfully', type: 'BOOLEAN DEFAULT true' },
+        { name: 'routing_error', type: 'TEXT' }
+      ];
+      
+      for (const col of additionalColumns) {
+        const hasCol = await client.query(`
+          SELECT column_name FROM information_schema.columns 
+          WHERE table_name = 'messages' AND column_name = $1;
+        `, [col.name]);
+        
+        if (hasCol.rows.length === 0) {
+          await client.query(`ALTER TABLE messages ADD COLUMN ${col.name} ${col.type};`);
+          missingColumns.push(col.name);
+        }
+      }
+      
+      await client.query('COMMIT');
+      
+      console.log('✅ Messages table schema synced');
+      
+      res.json({
+        success: true,
+        message: 'Messages table schema synchronized',
+        columnsAdded: missingColumns,
+        totalAdded: missingColumns.length
+      });
+      
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    
+  } catch (error) {
+    console.error('❌ Error syncing schema:', error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // ============ ERROR HANDLER ============
 
 app.use((err, req, res, next) => {
