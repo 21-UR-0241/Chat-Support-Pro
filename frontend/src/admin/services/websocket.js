@@ -3,9 +3,9 @@
  * Manages WebSocket connection for real-time updates
  */
 const WS_URL = import.meta.env.PROD
-  ? (import.meta.env.VITE_WS_URL || null)
+  ? (import.meta.env.VITE_WS_URL || 'wss://chat-support-pro.onrender.com/ws')
   : 'ws://localhost:3000/ws';
-
+  
 if (import.meta.env.PROD && !WS_URL) {
   throw new Error('VITE_WS_URL is required in production');
 }
