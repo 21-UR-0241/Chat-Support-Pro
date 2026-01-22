@@ -71,7 +71,8 @@ function camelToSnake(obj) {
 app.use(helmet({
   contentSecurityPolicy: false,
   crossOriginEmbedderPolicy: false,
-  crossOriginResourcePolicy: { policy: "cross-origin" }
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  frameguard: false  // 🔥 Allow iframe embedding
 }));
 
 // ⚠️ IMPORTANT: Webhook route BEFORE express.json()
@@ -84,7 +85,7 @@ app.use(express.json());
 // ============ WIDGET STATIC FILES ============
 // 🔥 CRITICAL: Widget routes MUST come BEFORE express.static()
 
-// Serve widget initializer with explicit CORS
+// Serve widget initializer with CORS
 app.get('/widget-init.js', (req, res) => {
   res.set({
     'Content-Type': 'application/javascript; charset=utf-8',
@@ -97,6 +98,21 @@ app.get('/widget-init.js', (req, res) => {
   
   console.log('📦 Serving widget-init.js with CORS headers');
   res.sendFile(__dirname + '/public/widget-init.js');
+});
+
+// Serve widget.html with iframe-friendly headers
+app.get('/widget.html', (req, res) => {
+  res.removeHeader('X-Frame-Options');
+  
+  res.set({
+    'Content-Type': 'text/html; charset=utf-8',
+    'X-Content-Type-Options': 'nosniff',
+    'Cache-Control': 'public, max-age=3600',
+    'Content-Security-Policy': "frame-ancestors *"
+  });
+  
+  console.log('📦 Serving widget.html for iframe');
+  res.sendFile(__dirname + '/public/widget.html');
 });
 
 // Serve other static files
@@ -723,6 +739,54 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
+// ============ KEEP-ALIVE MECHANISM ============
+// Prevents Render free tier from sleeping
+
+function setupKeepAlive() {
+  if (process.env.KEEP_ALIVE !== 'true') {
+    console.log('⏰ Keep-alive disabled');
+    return;
+  }
+
+  const APP_URL = process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`;
+  
+  console.log('⏰ Keep-alive enabled - pinging every 14 minutes');
+  
+  // Ping every 14 minutes (free tier sleeps after 15 minutes of inactivity)
+  setInterval(() => {
+    const now = new Date().toISOString();
+    
+    http.get(`${APP_URL}/health`, (res) => {
+      let data = '';
+      
+      res.on('data', (chunk) => {
+        data += chunk;
+      });
+      
+      res.on('end', () => {
+        if (res.statusCode === 200) {
+          console.log(`⏰ Keep-alive ping successful [${now}]`);
+        } else {
+          console.log(`⚠️ Keep-alive ping failed: ${res.statusCode} [${now}]`);
+        }
+      });
+    }).on('error', (err) => {
+      console.error(`❌ Keep-alive ping error [${now}]:`, err.message);
+    });
+    
+  }, 14 * 60 * 1000); // 14 minutes
+  
+  // Initial ping after 1 minute
+  setTimeout(() => {
+    console.log('⏰ Running initial keep-alive ping...');
+    http.get(`${APP_URL}/health`, (res) => {
+      console.log(`⏰ Initial ping: ${res.statusCode}`);
+    }).on('error', (err) => {
+      console.error('❌ Initial ping error:', err.message);
+    });
+  }, 60 * 1000);
+}
+
 // ============ START SERVER ============
 
 const PORT = process.env.PORT || 3000;
@@ -741,6 +805,9 @@ async function startServer() {
       console.log(`🔐 OAuth: http://localhost:${PORT}/auth?shop=STORE.myshopify.com`);
       console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+      
+      // Setup keep-alive after server starts
+      setupKeepAlive();
     });
   } catch (error) {
     console.error('Failed to start server:', error);
