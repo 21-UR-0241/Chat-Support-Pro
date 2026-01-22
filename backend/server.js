@@ -70,7 +70,18 @@ app.post('/webhooks/:shop/:topic', rawBodyMiddleware, handleWebhook);
 // JSON middleware for other routes
 app.use(express.json());
 
-// Serve chat widget static files
+// ============ WIDGET STATIC FILES ============
+// 🔥 IMPORTANT: Widget route MUST come BEFORE express.static() to enable CORS
+
+// Serve widget initializer with CORS (public)
+app.get('/widget-init.js', cors({ origin: '*' }), (req, res) => {
+  res.set('Content-Type', 'application/javascript');
+  res.set('Cache-Control', 'public, max-age=3600');
+  res.set('Access-Control-Allow-Origin', '*');
+  res.sendFile(__dirname + '/public/widget-init.js');
+});
+
+// Serve other chat widget static files
 app.use(express.static('public'));
 
 // Rate limiting with proper proxy validation
@@ -145,14 +156,7 @@ app.get('/health', async (req, res) => {
   }
 });
 
-// ============ WIDGET ENDPOINTS ============
-
-// Serve widget initializer (public)
-app.get('/widget-init.js', cors({ origin: '*' }), (req, res) => {
-  res.set('Content-Type', 'application/javascript');
-  res.set('Cache-Control', 'public, max-age=3600');
-  res.sendFile(__dirname + '/public/widget-init.js');
-});
+// ============ WIDGET API ENDPOINTS ============
 
 // Verify store is registered (public - called by widget)
 app.get('/api/stores/verify', async (req, res) => {
@@ -219,6 +223,33 @@ app.get('/api/widget/settings', async (req, res) => {
   } catch (error) {
     console.error('Widget settings error:', error);
     res.status(500).json({ error: 'Failed to fetch settings' });
+  }
+});
+
+// Widget session token (public - called by widget)
+app.get('/api/widget/session', async (req, res) => {
+  try {
+    const { store } = req.query;
+
+    if (!store) {
+      return res.status(400).json({ error: 'store parameter required' });
+    }
+
+    const storeRecord = await db.getStoreByIdentifier(store);
+    if (!storeRecord || !storeRecord.is_active) {
+      return res.status(404).json({ error: 'Store not found or inactive' });
+    }
+
+    const { generateWidgetToken } = require('./auth');
+    const token = generateWidgetToken(storeRecord);
+
+    res.json({
+      token,
+      expiresIn: process.env.WIDGET_JWT_EXPIRES_IN || '2h'
+    });
+  } catch (error) {
+    console.error('Widget session error:', error);
+    res.status(500).json({ error: 'Failed to create widget session' });
   }
 });
 
@@ -672,33 +703,6 @@ app.get('/api/stats/websocket', authenticateToken, (req, res) => {
 app.use((err, req, res, next) => {
   console.error('Server error:', err);
   res.status(500).json({ error: 'Internal server error' });
-});
-
-// ===== Widget Session Token =====
-app.get('/api/widget/session', async (req, res) => {
-  try {
-    const { store } = req.query;
-
-    if (!store) {
-      return res.status(400).json({ error: 'store parameter required' });
-    }
-
-    const storeRecord = await db.getStoreByIdentifier(store);
-    if (!storeRecord || !storeRecord.is_active) {
-      return res.status(404).json({ error: 'Store not found or inactive' });
-    }
-
-    const { generateWidgetToken } = require('./auth');
-    const token = generateWidgetToken(storeRecord);
-
-    res.json({
-      token,
-      expiresIn: process.env.WIDGET_JWT_EXPIRES_IN || '2h'
-    });
-  } catch (error) {
-    console.error('Widget session error:', error);
-    res.status(500).json({ error: 'Failed to create widget session' });
-  }
 });
 
 // ============ START SERVER ============
