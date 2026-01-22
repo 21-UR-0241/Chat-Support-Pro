@@ -13,12 +13,44 @@ const { hashPassword, verifyPassword, generateToken, authenticateToken } = requi
 
 const app = express();
 const server = http.createServer(app);
+
+// Trust only first proxy (Render's load balancer)
 app.set('trust proxy', 1);
 
 // Initialize WebSocket server
 initWebSocketServer(server);
 
 console.log('\n🚀 Multi-Store Chat Server Starting...\n');
+
+// ============ HELPER FUNCTIONS ============
+
+// Convert snake_case to camelCase
+function snakeToCamel(obj) {
+  if (!obj) return obj;
+  if (Array.isArray(obj)) return obj.map(snakeToCamel);
+  if (typeof obj !== 'object') return obj;
+  
+  const camelObj = {};
+  for (const [key, value] of Object.entries(obj)) {
+    const camelKey = key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+    camelObj[camelKey] = value;
+  }
+  return camelObj;
+}
+
+// Convert camelCase to snake_case
+function camelToSnake(obj) {
+  if (!obj) return obj;
+  if (Array.isArray(obj)) return obj.map(camelToSnake);
+  if (typeof obj !== 'object') return obj;
+  
+  const snakeObj = {};
+  for (const [key, value] of Object.entries(obj)) {
+    const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+    snakeObj[snakeKey] = value;
+  }
+  return snakeObj;
+}
 
 // Security headers
 app.use(helmet({
@@ -41,13 +73,17 @@ app.use(express.json());
 // Serve chat widget static files
 app.use(express.static('public'));
 
-// Rate limiting
+// Rate limiting with proper proxy validation
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100,
   message: 'Too many requests from this IP, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
+  validate: {
+    xForwardedForHeader: false,
+    trustProxy: false
+  }
 });
 
 app.use('/api/', limiter);
@@ -58,6 +94,10 @@ const loginLimiter = rateLimit({
   max: 5,
   message: 'Too many login attempts, please try again later.',
   skipSuccessfulRequests: true,
+  validate: {
+    xForwardedForHeader: false,
+    trustProxy: false
+  }
 });
 
 // Force HTTPS in production
@@ -224,7 +264,7 @@ app.post('/api/employees/login', loginLimiter, async (req, res) => {
     delete employee.api_token;
     
     res.json({
-      employee,
+      employee: snakeToCamel(employee),
       token,
       expiresIn: '7d'
     });
@@ -257,7 +297,7 @@ app.get('/api/auth/verify', authenticateToken, async (req, res) => {
     delete employee.password_hash;
     delete employee.api_token;
     
-    res.json({ employee });
+    res.json({ employee: snakeToCamel(employee) });
   } catch (error) {
     res.status(500).json({ error: 'Verification failed' });
   }
@@ -375,26 +415,26 @@ app.post('/api/conversations', async (req, res) => {
     }
     
     // Create conversation
-const conversation = await db.saveConversation({
-  shopId: store.id,
-  shopDomain: store.shop_domain,
-  customerEmail,
-  customerName: customerName || customerEmail,
-  status: 'open',
-  createdAt: new Date(),
-  updatedAt: new Date()
-});
+    const conversation = await db.saveConversation({
+      shopId: store.id,
+      shopDomain: store.shop_domain,
+      customerEmail,
+      customerName: customerName || customerEmail,
+      status: 'open',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    });
     
     // If there's an initial message, save it
     if (initialMessage) {
-await db.saveMessage({
-  conversationId: conversation.id,
-  storeId: store.id,
-  senderType: 'customer',
-  senderName: customerName || customerEmail,
-  content: initialMessage,
-  sentAt: new Date()
-});
+      await db.saveMessage({
+        conversationId: conversation.id,
+        storeId: store.id,
+        senderType: 'customer',
+        senderName: customerName || customerEmail,
+        content: initialMessage,
+        sentAt: new Date()
+      });
     }
     
     // Broadcast to agents
@@ -486,9 +526,10 @@ app.get('/api/employees', authenticateToken, async (req, res) => {
     
     const employees = await db.getAllEmployees();
     
+    // Convert to camelCase and sanitize
     const sanitized = employees.map(emp => {
       const { password_hash, api_token, ...safe } = emp;
-      return safe;
+      return snakeToCamel(safe);
     });
     
     res.json(sanitized);
@@ -505,7 +546,7 @@ app.post('/api/employees', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Admin access required' });
     }
     
-    const { email, name, role, password, canViewAllStores } = req.body;
+    const { email, name, role, password, canViewAllStores, isActive } = req.body;
     
     if (!email || !name || !password) {
       return res.status(400).json({ error: 'Email, name, and password are required' });
@@ -519,13 +560,14 @@ app.post('/api/employees', authenticateToken, async (req, res) => {
       role: role || 'agent',
       password_hash,
       can_view_all_stores: canViewAllStores !== undefined ? canViewAllStores : true,
+      is_active: isActive !== undefined ? isActive : true,
       assigned_stores: []
     });
     
     delete employee.password_hash;
     delete employee.api_token;
     
-    res.json(employee);
+    res.json(snakeToCamel(employee));
   } catch (error) {
     console.error('Create employee error:', error);
     res.status(500).json({ error: error.message });
@@ -542,17 +584,25 @@ app.put('/api/employees/:id', authenticateToken, async (req, res) => {
     const employeeId = parseInt(req.params.id);
     const updates = req.body;
     
+    // Convert camelCase to snake_case for database
+    const dbUpdates = {};
+    if (updates.name !== undefined) dbUpdates.name = updates.name;
+    if (updates.email !== undefined) dbUpdates.email = updates.email;
+    if (updates.role !== undefined) dbUpdates.role = updates.role;
+    if (updates.isActive !== undefined) dbUpdates.is_active = updates.isActive;
+    if (updates.canViewAllStores !== undefined) dbUpdates.can_view_all_stores = updates.canViewAllStores;
+    if (updates.assignedStores !== undefined) dbUpdates.assigned_stores = updates.assignedStores;
+    
     if (updates.password) {
-      updates.password_hash = await hashPassword(updates.password);
-      delete updates.password;
+      dbUpdates.password_hash = await hashPassword(updates.password);
     }
     
-    const employee = await db.updateEmployee(employeeId, updates);
+    const employee = await db.updateEmployee(employeeId, dbUpdates);
     
     delete employee.password_hash;
     delete employee.api_token;
     
-    res.json(employee);
+    res.json(snakeToCamel(employee));
   } catch (error) {
     console.error('Update employee error:', error);
     res.status(500).json({ error: 'Failed to update employee' });
@@ -634,14 +684,6 @@ app.get('/api/widget/session', async (req, res) => {
       return res.status(404).json({ error: 'Store not found or inactive' });
     }
 
-    // Optional: Verify Origin header if you store allowed domains
-    // const origin = req.get('Origin');
-    // if (origin && storeRecord.allowed_domains?.length) {
-    //   if (!storeRecord.allowed_domains.includes(origin)) {
-    //     return res.status(403).json({ error: 'Origin not allowed' });
-    //   }
-    // }
-
     const { generateWidgetToken } = require('./auth');
     const token = generateWidgetToken(storeRecord);
 
@@ -679,8 +721,6 @@ async function startServer() {
     process.exit(1);
   }
 }
-
-
 
 startServer();
 
