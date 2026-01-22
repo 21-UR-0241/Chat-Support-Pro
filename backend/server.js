@@ -800,6 +800,134 @@ function setupKeepAlive() {
 
 // ============ DATABASE MIGRATION ENDPOINTS ============
 
+app.post('/debug/fix-constraints', async (req, res) => {
+  try {
+    console.log('🔧 Fixing foreign key constraints...');
+    
+    const client = await db.pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+      
+      // Check what tables exist
+      const tables = await client.query(`
+        SELECT table_name 
+        FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name IN ('shops', 'stores')
+      `);
+      
+      console.log('Tables found:', tables.rows);
+      
+      // Drop and recreate conversations table with correct constraint
+      console.log('Dropping conversations table...');
+      await client.query('DROP TABLE IF EXISTS conversations CASCADE;');
+      
+      console.log('Recreating conversations table...');
+      await client.query(`
+        CREATE TABLE conversations (
+          id SERIAL PRIMARY KEY,
+          shop_id INTEGER REFERENCES stores(id) ON DELETE CASCADE,
+          shop_domain VARCHAR(255) NOT NULL,
+          
+          customer_email VARCHAR(255) NOT NULL,
+          customer_name VARCHAR(255),
+          customer_id VARCHAR(255),
+          customer_phone VARCHAR(50),
+          
+          status VARCHAR(50) DEFAULT 'open',
+          priority VARCHAR(20) DEFAULT 'normal',
+          assigned_to VARCHAR(255),
+          tags TEXT[],
+          
+          first_message_at TIMESTAMP,
+          last_message_at TIMESTAMP,
+          last_customer_message_at TIMESTAMP,
+          last_agent_message_at TIMESTAMP,
+          response_time_seconds INTEGER,
+          
+          customer_message_count INTEGER DEFAULT 0,
+          agent_message_count INTEGER DEFAULT 0,
+          total_message_count INTEGER DEFAULT 0,
+          
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          closed_at TIMESTAMP
+        );
+      `);
+      
+      console.log('Creating indexes...');
+      await client.query(`
+        CREATE INDEX idx_conversations_shop ON conversations(shop_id);
+        CREATE INDEX idx_conversations_status ON conversations(status);
+        CREATE INDEX idx_conversations_customer_email ON conversations(customer_email);
+      `);
+      
+      // Also drop and recreate messages table
+      console.log('Dropping messages table...');
+      await client.query('DROP TABLE IF EXISTS messages CASCADE;');
+      
+      console.log('Recreating messages table...');
+      await client.query(`
+        CREATE TABLE messages (
+          id SERIAL PRIMARY KEY,
+          conversation_id INTEGER REFERENCES conversations(id) ON DELETE CASCADE,
+          shop_id INTEGER REFERENCES stores(id) ON DELETE CASCADE,
+          
+          sender_type VARCHAR(50) NOT NULL,
+          sender_name VARCHAR(255),
+          sender_id VARCHAR(255),
+          content TEXT NOT NULL,
+          
+          message_type VARCHAR(50) DEFAULT 'text',
+          attachment_url TEXT,
+          attachment_type VARCHAR(50),
+          
+          sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          delivered_at TIMESTAMP,
+          read_at TIMESTAMP,
+          failed BOOLEAN DEFAULT false,
+          retry_count INTEGER DEFAULT 0,
+          
+          routed_successfully BOOLEAN DEFAULT true,
+          routing_error TEXT,
+          
+          timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+      
+      console.log('Creating message indexes...');
+      await client.query(`
+        CREATE INDEX idx_messages_conversation ON messages(conversation_id);
+        CREATE INDEX idx_messages_shop ON messages(shop_id);
+        CREATE INDEX idx_messages_timestamp ON messages(timestamp DESC);
+      `);
+      
+      await client.query('COMMIT');
+      
+      console.log('✅ Constraints fixed!');
+      
+      res.json({
+        success: true,
+        message: 'Foreign key constraints fixed. Tables recreated with correct references.'
+      });
+      
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    
+  } catch (error) {
+    console.error('❌ Error fixing constraints:', error);
+    res.status(500).json({ 
+      error: error.message,
+      stack: error.stack 
+    });
+  }
+});
+
 // Fix table name mismatch
 app.post('/debug/fix-table-names', async (req, res) => {
   try {
