@@ -1282,7 +1282,6 @@
 // };
 
 
-
 //backend/database.js
 const { Pool } = require('pg');
 require('dotenv').config();
@@ -1639,10 +1638,10 @@ async function runMigrations() {
   
   try {
     // Run each migration in order
-    await migration_001_add_message_type();
+    await migration_001_add_message_columns();
     
     // Add future migrations here:
-    // await migration_002_add_new_column();
+    // await migration_002_add_new_feature();
     // await migration_003_add_indexes();
     
     console.log('✅ All migrations completed successfully');
@@ -1653,32 +1652,58 @@ async function runMigrations() {
 }
 
 /**
- * Migration 001: Add message_type column to messages table
- * This column was missing in production database
+ * Migration 001: Add all missing columns to messages table
+ * Adds: message_type, attachment_url, attachment_type, sent_at, 
+ *       delivered_at, read_at, failed, retry_count, routed_successfully, routing_error
  */
-async function migration_001_add_message_type() {
+async function migration_001_add_message_columns() {
   const client = await pool.connect();
   
   try {
-    // Check if column exists
-    const check = await client.query(`
+    console.log('📝 [Migration 001] Checking messages table schema...');
+    
+    // Get current columns
+    const currentColumns = await client.query(`
       SELECT column_name 
       FROM information_schema.columns 
-      WHERE table_name = 'messages' 
-      AND column_name = 'message_type'
+      WHERE table_name = 'messages'
     `);
     
-    if (check.rows.length === 0) {
-      console.log('📝 [Migration 001] Adding message_type column to messages table...');
-      
-      await client.query(`
-        ALTER TABLE messages 
-        ADD COLUMN message_type VARCHAR(50) DEFAULT 'text';
-      `);
-      
-      console.log('✅ [Migration 001] message_type column added successfully');
+    const existingColumns = currentColumns.rows.map(row => row.column_name);
+    console.log('   Current columns:', existingColumns.join(', '));
+    
+    // Define all columns that should exist
+    const requiredColumns = [
+      { name: 'message_type', sql: 'VARCHAR(50) DEFAULT \'text\'' },
+      { name: 'attachment_url', sql: 'TEXT' },
+      { name: 'attachment_type', sql: 'VARCHAR(50)' },
+      { name: 'sent_at', sql: 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP' },
+      { name: 'delivered_at', sql: 'TIMESTAMP' },
+      { name: 'read_at', sql: 'TIMESTAMP' },
+      { name: 'failed', sql: 'BOOLEAN DEFAULT false' },
+      { name: 'retry_count', sql: 'INTEGER DEFAULT 0' },
+      { name: 'routed_successfully', sql: 'BOOLEAN DEFAULT true' },
+      { name: 'routing_error', sql: 'TEXT' }
+    ];
+    
+    const columnsAdded = [];
+    
+    // Add each missing column
+    for (const column of requiredColumns) {
+      if (!existingColumns.includes(column.name)) {
+        console.log(`   Adding column: ${column.name}...`);
+        await client.query(`
+          ALTER TABLE messages 
+          ADD COLUMN ${column.name} ${column.sql};
+        `);
+        columnsAdded.push(column.name);
+      }
+    }
+    
+    if (columnsAdded.length > 0) {
+      console.log(`✅ [Migration 001] Added ${columnsAdded.length} columns: ${columnsAdded.join(', ')}`);
     } else {
-      console.log('⏭️  [Migration 001] message_type column already exists, skipping');
+      console.log('⏭️  [Migration 001] All columns already exist, skipping');
     }
   } catch (error) {
     console.error('❌ [Migration 001] Failed:', error);
@@ -2598,7 +2623,7 @@ module.exports = {
   
   // Database management
   initDatabase,
-  runMigrations,  // ⭐ NEW - Run this on startup
+  runMigrations,
   testConnection,
   closePool,
   
