@@ -17,6 +17,21 @@ const server = http.createServer(app);
 // Trust only first proxy (Render's load balancer)
 app.set('trust proxy', 1);
 
+// ============ UNIVERSAL CORS FIX ============
+// This ensures ALL responses have CORS headers
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
+
 // Initialize WebSocket server
 initWebSocketServer(server);
 
@@ -52,15 +67,11 @@ function camelToSnake(obj) {
   return snakeObj;
 }
 
-// Security headers
+// Security headers (relaxed for widget embedding)
 app.use(helmet({
-  contentSecurityPolicy: false, // Disable for widget embedding
-}));
-
-// CORS - Allow widget to be embedded
-app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS === '*' ? '*' : process.env.ALLOWED_ORIGINS?.split(','),
-  credentials: true
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
 // ⚠️ IMPORTANT: Webhook route BEFORE express.json()
@@ -71,17 +82,24 @@ app.post('/webhooks/:shop/:topic', rawBodyMiddleware, handleWebhook);
 app.use(express.json());
 
 // ============ WIDGET STATIC FILES ============
-// 🔥 IMPORTANT: Widget route MUST come BEFORE express.static() to enable CORS
+// 🔥 CRITICAL: Widget routes MUST come BEFORE express.static()
 
-// Serve widget initializer with CORS (public)
-app.get('/widget-init.js', cors({ origin: '*' }), (req, res) => {
-  res.set('Content-Type', 'application/javascript');
-  res.set('Cache-Control', 'public, max-age=3600');
-  res.set('Access-Control-Allow-Origin', '*');
+// Serve widget initializer with explicit CORS
+app.get('/widget-init.js', (req, res) => {
+  res.set({
+    'Content-Type': 'application/javascript; charset=utf-8',
+    'Cache-Control': 'public, max-age=3600',
+    'X-Content-Type-Options': 'nosniff',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+  });
+  
+  console.log('📦 Serving widget-init.js with CORS headers');
   res.sendFile(__dirname + '/public/widget-init.js');
 });
 
-// Serve other chat widget static files
+// Serve other static files
 app.use(express.static('public'));
 
 // Rate limiting with proper proxy validation
