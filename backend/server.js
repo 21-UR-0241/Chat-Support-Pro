@@ -1956,11 +1956,16 @@ app.get('/api/conversations/:id/messages', authenticateToken, async (req, res) =
   }
 });
 
+// In server.js, update the POST /api/messages endpoint:
+
 app.post('/api/messages', authenticateToken, async (req, res) => {
   try {
     const { conversationId, senderType, senderName, content, storeId } = req.body;
     
+    console.log('📨 Sending message:', { conversationId, senderType, senderName, content, storeId });
+    
     if (!conversationId || !senderType || !content) {
+      console.log('❌ Missing required fields');
       return res.status(400).json({ error: 'Missing required fields' });
     }
     
@@ -1973,6 +1978,103 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
       sent_at: new Date()
     });
     
+    console.log('✅ Message saved:', message);
+    
+    sendToConversation(conversationId, {
+      type: 'new_message',
+      message
+    });
+    
+    console.log('✅ Message sent via WebSocket');
+    
+    res.json(message);
+  } catch (error) {
+    console.error('❌ Send message error:', error);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Add this endpoint if it doesn't exist for widget messages
+app.post('/api/widget/messages', async (req, res) => {
+  try {
+    const { conversationId, customerEmail, customerName, content, storeIdentifier } = req.body;
+    
+    console.log('📨 Widget message:', { conversationId, customerEmail, content });
+    
+    if (!conversationId || !content) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    
+    const store = await db.getStoreByIdentifier(storeIdentifier);
+    if (!store) {
+      return res.status(404).json({ error: 'Store not found' });
+    }
+    
+    const message = await db.saveMessage({
+      conversation_id: conversationId,
+      store_id: store.id,
+      sender_type: 'customer',
+      sender_name: customerName || customerEmail,
+      sender_id: customerEmail,
+      content,
+      message_type: 'text'
+    });
+    
+    console.log('✅ Widget message saved:', message);
+    
+    // Broadcast to agents
+    broadcastToAgents({
+      type: 'new_message',
+      message,
+      conversationId,
+      storeId: store.id
+    });
+    
+    res.json(message);
+  } catch (error) {
+    console.error('❌ Widget message error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+// Add this endpoint after the POST /api/messages endpoint in server.js
+
+app.post('/api/widget/messages', async (req, res) => {
+  try {
+    const { conversationId, customerEmail, customerName, content, storeIdentifier } = req.body;
+    
+    console.log('📨 Widget message:', { conversationId, customerEmail, content });
+    
+    if (!conversationId || !content) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    
+    const store = await db.getStoreByIdentifier(storeIdentifier);
+    if (!store) {
+      return res.status(404).json({ error: 'Store not found' });
+    }
+    
+    const message = await db.saveMessage({
+      conversation_id: conversationId,
+      store_id: store.id,
+      sender_type: 'customer',
+      sender_name: customerName || customerEmail,
+      sender_id: customerEmail,
+      content,
+      message_type: 'text'
+    });
+    
+    console.log('✅ Widget message saved:', message.id);
+    
+    // Broadcast to agents via WebSocket
+    broadcastToAgents({
+      type: 'new_message',
+      message,
+      conversationId,
+      storeId: store.id
+    });
+    
+    // Also send to conversation participants
     sendToConversation(conversationId, {
       type: 'new_message',
       message
@@ -1980,11 +2082,10 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
     
     res.json(message);
   } catch (error) {
-    console.error('Send message error:', error);
+    console.error('❌ Widget message error:', error);
     res.status(500).json({ error: error.message });
   }
 });
-
 // ============ EMPLOYEE ENDPOINTS ============
 
 app.get('/api/employees', authenticateToken, async (req, res) => {
