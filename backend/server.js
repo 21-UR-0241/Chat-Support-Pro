@@ -473,6 +473,8 @@ app.post('/api/conversations', async (req, res) => {
   try {
     const { storeIdentifier, customerEmail, customerName, initialMessage } = req.body;
     
+    console.log('📝 Creating conversation:', { storeIdentifier, customerEmail, customerName });
+    
     if (!storeIdentifier || !customerEmail) {
       return res.status(400).json({ error: 'storeIdentifier and customerEmail required' });
     }
@@ -480,30 +482,35 @@ app.post('/api/conversations', async (req, res) => {
     // Get store
     const store = await db.getStoreByIdentifier(storeIdentifier);
     if (!store) {
+      console.log('❌ Store not found:', storeIdentifier);
       return res.status(404).json({ error: 'Store not found' });
     }
     
-    // Create conversation
+    console.log('✅ Store found:', store.id, store.shop_domain);
+    
+    // Create conversation with CORRECT parameter names (snake_case)
     const conversation = await db.saveConversation({
-      shopId: store.id,
-      shopDomain: store.shop_domain,
-      customerEmail,
-      customerName: customerName || customerEmail,
+      store_id: store.id,                    // ✅ Fixed
+      store_identifier: store.shop_domain,   // ✅ Fixed
+      customer_email: customerEmail,         // ✅ Fixed
+      customer_name: customerName || customerEmail,  // ✅ Fixed
       status: 'open',
-      createdAt: new Date(),
-      updatedAt: new Date()
+      priority: 'normal'
     });
+    
+    console.log('✅ Conversation created:', conversation.id);
     
     // If there's an initial message, save it
     if (initialMessage) {
+      console.log('💬 Saving initial message...');
       await db.saveMessage({
-        conversationId: conversation.id,
-        storeId: store.id,
-        senderType: 'customer',
-        senderName: customerName || customerEmail,
-        content: initialMessage,
-        sentAt: new Date()
+        conversation_id: conversation.id,
+        store_id: store.id,
+        sender_type: 'customer',
+        sender_name: customerName || customerEmail,
+        content: initialMessage
       });
+      console.log('✅ Initial message saved');
     }
     
     // Broadcast to agents
@@ -516,8 +523,12 @@ app.post('/api/conversations', async (req, res) => {
     
     res.json(conversation);
   } catch (error) {
-    console.error('Create conversation error:', error);
-    res.status(500).json({ error: error.message });
+    console.error('❌ Create conversation error:', error);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ 
+      error: error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 });
 
