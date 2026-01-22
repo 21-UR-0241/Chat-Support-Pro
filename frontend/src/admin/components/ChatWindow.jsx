@@ -344,9 +344,42 @@ function ChatWindow({
   const textareaRef = useRef(null);
   const typingTimeoutRef = useRef(null);
 
+  // 🐛 DEBUG: Log messages data
+  useEffect(() => {
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('📊 Messages state updated');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('Total messages:', messages?.length);
+    
+    if (messages && messages.length > 0) {
+      messages.forEach((msg, i) => {
+        console.log(`\n📨 Message ${i}:`, {
+          id: msg.id,
+          createdAt: msg.createdAt,
+          sentAt: msg.sentAt,
+          timestamp: msg.timestamp,
+          content: msg.content?.substring(0, 50) + '...',
+          senderType: msg.senderType,
+          hasAllFields: {
+            id: !!msg.id,
+            content: !!msg.content,
+            createdAt: !!msg.createdAt,
+            sentAt: !!msg.sentAt,
+            timestamp: !!msg.timestamp,
+            senderType: !!msg.senderType
+          }
+        });
+      });
+    } else {
+      console.log('⚠️ No messages in state');
+    }
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+  }, [messages]);
+
   // Load messages when conversation changes
   useEffect(() => {
     if (conversation) {
+      console.log('🔄 Loading messages for conversation:', conversation.id);
       loadMessages();
     }
   }, [conversation?.id]);

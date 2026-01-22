@@ -4,13 +4,30 @@
  */
 
 import React from 'react';
-import { format } from 'date-fns';
+import { format, isValid } from 'date-fns';
 
-function MessageBubble({ message, showAvatar }) {
-  const { senderType, senderName, content, createdAt, _optimistic } = message;
+function MessageBubble({ message, showAvatar = true }) {
+  const { senderType, senderName, content, createdAt, sentAt, _optimistic } = message;
   
   const isAgent = senderType === 'agent';
-  const time = format(new Date(createdAt), 'HH:mm');
+  
+  // Safe date formatting with fallback
+  const formatTime = () => {
+    try {
+      const dateValue = createdAt || sentAt;
+      if (!dateValue) return '';
+      
+      const date = new Date(dateValue);
+      if (!isValid(date)) return '';
+      
+      return format(date, 'HH:mm');
+    } catch (error) {
+      console.error('Date formatting error:', error, { createdAt, sentAt });
+      return '';
+    }
+  };
+
+  const time = formatTime();
 
   return (
     <div className={`message-bubble ${isAgent ? 'agent' : 'customer'} ${_optimistic ? 'sending' : ''}`}>
@@ -27,10 +44,12 @@ function MessageBubble({ message, showAvatar }) {
         
         <div className="message-text">{content}</div>
         
-        <div className="message-time">
-          {time}
-          {_optimistic && <span className="sending-indicator">Sending...</span>}
-        </div>
+        {time && (
+          <div className="message-time">
+            {time}
+            {_optimistic && <span className="sending-indicator">Sending...</span>}
+          </div>
+        )}
       </div>
     </div>
   );
