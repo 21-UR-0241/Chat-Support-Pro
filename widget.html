@@ -3,69 +3,670 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chat Support Pro - Widget Demo</title>
-  <meta name="description" content="Test the Chat Support Pro widget in action">
+  <title>Chat Widget</title>
   <style>
-    body {
+    * {
       margin: 0;
-      padding: 20px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: #f8f9fc;
+      padding: 0;
+      box-sizing: border-box;
     }
-    .container {
-      max-width: 800px;
-      margin: 0 auto;
-      background: white;
-      padding: 40px;
-      border-radius: 12px;
+
+    :root {
+      --primary-color: #667eea;
+      --primary-dark: #5a67d8;
+      --success-color: #48bb78;
+      --bg-color: #f7f8fa;
+      --text-color: #2d3748;
+      --text-secondary: #718096;
+      --border-color: #e2e8f0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: var(--bg-color);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* Header */
+    #chat-header {
+      background: linear-gradient(135deg, var(--primary-color) 0%, #764ba2 100%);
+      color: white;
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
       box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      flex-shrink: 0;
     }
-    h1 {
-      color: #333;
+
+    #chat-header .avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      backdrop-filter: blur(10px);
+    }
+
+    #chat-header .info {
+      flex: 1;
+    }
+
+    #chat-header .info h3 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+
+    #chat-header .info p {
+      font-size: 12px;
+      opacity: 0.9;
+    }
+
+    .status-indicator {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #48bb78;
+      margin-right: 6px;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    /* Messages Container */
+    #chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      background: var(--bg-color);
+    }
+
+    #chat-messages::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    #chat-messages::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    #chat-messages::-webkit-scrollbar-thumb {
+      background: #cbd5e0;
+      border-radius: 3px;
+    }
+
+    /* Welcome Message */
+    #welcome-message {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--text-secondary);
+    }
+
+    #welcome-message .welcome-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+
+    #welcome-message h2 {
+      font-size: 18px;
       margin-bottom: 8px;
+      color: var(--text-color);
     }
-    p {
-      color: #666;
-      line-height: 1.6;
+
+    #welcome-message p {
+      font-size: 14px;
+      line-height: 1.5;
     }
-    .demo-info {
-      background: #f0f7ff;
-      border-left: 4px solid #667eea;
-      padding: 16px;
-      margin: 24px 0;
-      border-radius: 4px;
+
+    /* Message Bubble */
+    .message {
+      display: flex;
+      gap: 8px;
+      max-width: 85%;
+      animation: slideIn 0.3s ease;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .message.customer {
+      align-self: flex-end;
+      flex-direction: row-reverse;
+    }
+
+    .message .avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: var(--primary-color);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+
+    .message.customer .avatar {
+      background: var(--success-color);
+    }
+
+    .message .bubble {
+      background: white;
+      padding: 10px 14px;
+      border-radius: 16px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+      max-width: 100%;
+    }
+
+    .message.customer .bubble {
+      background: var(--primary-color);
+      color: white;
+      border-bottom-right-radius: 4px;
+    }
+
+    .message.agent .bubble {
+      border-bottom-left-radius: 4px;
+    }
+
+    .message .text {
+      font-size: 14px;
+      line-height: 1.5;
+      word-wrap: break-word;
+      white-space: pre-wrap;
+    }
+
+    .message .time {
+      font-size: 11px;
+      color: var(--text-secondary);
+      margin-top: 4px;
+      opacity: 0.7;
+    }
+
+    .message.customer .time {
+      color: rgba(255,255,255,0.9);
+      text-align: right;
+    }
+
+    /* System Message */
+    .message.system {
+      align-self: center;
+      max-width: 100%;
+    }
+
+    .message.system .bubble {
+      background: #fff5f5;
+      color: #c53030;
+      font-size: 13px;
+      padding: 8px 12px;
+    }
+
+    /* Typing Indicator */
+    .typing-indicator {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      background: white;
+      border-radius: 16px;
+      width: fit-content;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+    }
+
+    .typing-indicator .dots {
+      display: flex;
+      gap: 4px;
+    }
+
+    .typing-indicator .dots span {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #cbd5e0;
+      animation: typing 1.4s infinite;
+    }
+
+    .typing-indicator .dots span:nth-child(2) {
+      animation-delay: 0.2s;
+    }
+
+    .typing-indicator .dots span:nth-child(3) {
+      animation-delay: 0.4s;
+    }
+
+    @keyframes typing {
+      0%, 60%, 100% {
+        transform: translateY(0);
+        opacity: 0.5;
+      }
+      30% {
+        transform: translateY(-8px);
+        opacity: 1;
+      }
+    }
+
+    /* Input Container */
+    #chat-input-container {
+      padding: 16px 20px;
+      background: white;
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    #chat-input {
+      flex: 1;
+      padding: 12px 16px;
+      border: 1px solid var(--border-color);
+      border-radius: 24px;
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+      transition: all 0.2s;
+      resize: none;
+      max-height: 120px;
+      line-height: 1.4;
+    }
+
+    #chat-input:focus {
+      border-color: var(--primary-color);
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+
+    #chat-input::placeholder {
+      color: #a0aec0;
+    }
+
+    #send-button {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: var(--primary-color);
+      border: none;
+      color: white;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+      flex-shrink: 0;
+    }
+
+    #send-button:hover:not(:disabled) {
+      background: var(--primary-dark);
+      transform: scale(1.05);
+    }
+
+    #send-button:active:not(:disabled) {
+      transform: scale(0.95);
+    }
+
+    #send-button:disabled {
+      background: #cbd5e0;
+      cursor: not-allowed;
+      opacity: 0.6;
+    }
+
+    /* Loading State */
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: var(--text-secondary);
+    }
+
+    .spinner {
+      border: 3px solid #f3f3f3;
+      border-top: 3px solid var(--primary-color);
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 16px;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    /* Error State */
+    .error-message {
+      background: #fff5f5;
+      color: #c53030;
+      padding: 12px 16px;
+      border-radius: 8px;
+      margin: 20px;
+      font-size: 14px;
+      border-left: 4px solid #fc8181;
+    }
+
+    /* Mobile Responsive */
+    @media (max-width: 480px) {
+      #chat-header {
+        padding: 12px 16px;
+      }
+      
+      #chat-messages {
+        padding: 16px;
+      }
+      
+      #chat-input-container {
+        padding: 12px 16px;
+      }
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>💬 Chat Support Pro - Widget Demo</h1>
-    <p>This page demonstrates the Chat Support Pro widget in action.</p>
-    
-    <div class="demo-info">
-      <strong>👋 Try it out!</strong><br>
-      Click the chat button in the bottom right corner to start a conversation.
+  <div id="chat-header">
+    <div class="avatar">💬</div>
+    <div class="info">
+      <h3 id="brand-name">Chat Support Pro</h3>
+      <p id="status">
+        <span class="status-indicator"></span>
+        <span id="status-text">We're online</span>
+      </p>
     </div>
-
-    <h2>Features</h2>
-    <ul>
-      <li>Real-time messaging with WebSocket</li>
-      <li>Customizable appearance</li>
-      <li>Mobile responsive</li>
-      <li>File upload support</li>
-      <li>Typing indicators</li>
-      <li>Read receipts</li>
-    </ul>
   </div>
 
-  <!-- Chat Widget -->
+  <div id="chat-messages">
+    <div id="welcome-message">
+      <div class="welcome-icon">👋</div>
+      <h2>Welcome to Chat Support!</h2>
+      <p>How can we help you today?<br>Send us a message and we'll get back to you right away.</p>
+    </div>
+  </div>
+
+  <div id="chat-input-container">
+    <textarea 
+      id="chat-input" 
+      placeholder="Type your message..."
+      rows="1"
+      autocomplete="off"
+    ></textarea>
+    <button id="send-button" disabled aria-label="Send message">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="22" y1="2" x2="11" y2="13"></line>
+        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+      </svg>
+    </button>
+  </div>
+
   <script>
-    window.chatConfig = {
-      storeId: 'demo-store',
-      apiUrl: 'http://localhost:3000',
-      primaryColor: '#667eea'
-    };
+    // Configuration
+    const urlParams = new URLSearchParams(window.location.search);
+    const STORE_ID = urlParams.get('store');
+    const API_URL = window.location.origin;
+
+    // State
+    let conversationId = null;
+    let ws = null;
+    let customerEmail = null;
+    let customerName = null;
+
+    // DOM Elements
+    const chatMessages = document.getElementById('chat-messages');
+    const chatInput = document.getElementById('chat-input');
+    const sendButton = document.getElementById('send-button');
+    const welcomeMessage = document.getElementById('welcome-message');
+    const brandName = document.getElementById('brand-name');
+    const statusText = document.getElementById('status-text');
+
+    // Check if store ID exists
+    if (!STORE_ID) {
+      showError('Widget configuration error. Please contact support.');
+      console.error('No store ID provided');
+    }
+
+    // Initialize
+    async function init() {
+      try {
+        await loadSettings();
+        setupEventListeners();
+        
+        // Get customer info from localStorage if exists
+        customerEmail = localStorage.getItem('chat_customer_email');
+        customerName = localStorage.getItem('chat_customer_name');
+        
+        console.log('✅ Chat widget initialized');
+      } catch (error) {
+        console.error('Failed to initialize widget:', error);
+        showError('Failed to load chat. Please refresh the page.');
+      }
+    }
+
+    // Load widget settings
+    async function loadSettings() {
+      try {
+        const response = await fetch(`${API_URL}/api/widget/settings?store=${STORE_ID}`);
+        
+        if (!response.ok) {
+          throw new Error('Failed to load settings');
+        }
+        
+        const settings = await response.json();
+        
+        // Apply settings
+        brandName.textContent = settings.brandName || 'Chat Support Pro';
+        
+        if (settings.primaryColor) {
+          document.documentElement.style.setProperty('--primary-color', settings.primaryColor);
+        }
+        
+        if (settings.widgetSettings?.greeting) {
+          welcomeMessage.querySelector('p').textContent = settings.widgetSettings.greeting;
+        }
+        
+        if (settings.widgetSettings?.placeholder) {
+          chatInput.placeholder = settings.widgetSettings.placeholder;
+        }
+        
+      } catch (error) {
+        console.error('Failed to load settings:', error);
+        // Continue with defaults
+      }
+    }
+
+    // Setup event listeners
+    function setupEventListeners() {
+      // Enable/disable send button based on input
+      chatInput.addEventListener('input', () => {
+        sendButton.disabled = !chatInput.value.trim();
+        autoResizeTextarea();
+      });
+
+      // Send on Enter (without Shift)
+      chatInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          if (chatInput.value.trim()) {
+            sendMessage();
+          }
+        }
+      });
+
+      // Send on button click
+      sendButton.addEventListener('click', sendMessage);
+
+      // Focus input on load
+      chatInput.focus();
+    }
+
+    // Auto-resize textarea
+    function autoResizeTextarea() {
+      chatInput.style.height = 'auto';
+      chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px';
+    }
+
+    // Send message
+    async function sendMessage() {
+      const message = chatInput.value.trim();
+      if (!message) return;
+
+      // Disable input while sending
+      chatInput.disabled = true;
+      sendButton.disabled = true;
+
+      // Add message to UI
+      addMessage('customer', message, 'You');
+      
+      // Clear input
+      chatInput.value = '';
+      chatInput.style.height = 'auto';
+
+      // Hide welcome message
+      if (welcomeMessage) {
+        welcomeMessage.style.display = 'none';
+      }
+
+      try {
+        // Prompt for email if not set (first message)
+        if (!customerEmail) {
+          customerEmail = prompt('Please enter your email:') || 'anonymous@example.com';
+          customerName = prompt('Please enter your name:') || 'Customer';
+          
+          // Save to localStorage
+          localStorage.setItem('chat_customer_email', customerEmail);
+          localStorage.setItem('chat_customer_name', customerName);
+        }
+
+        // Create conversation if needed
+        if (!conversationId) {
+          const convResponse = await fetch(`${API_URL}/api/conversations`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              storeIdentifier: STORE_ID,
+              customerEmail: customerEmail,
+              customerName: customerName,
+              initialMessage: message
+            })
+          });
+
+          if (!convResponse.ok) {
+            throw new Error('Failed to create conversation');
+          }
+
+          const conv = await convResponse.json();
+          conversationId = conv.id;
+          
+          console.log('✅ Conversation created:', conversationId);
+          
+          // Show auto-reply
+          setTimeout(() => {
+            addMessage('agent', 'Thanks for reaching out! An agent will be with you shortly.', 'Support Team');
+          }, 800);
+        }
+
+        // Re-enable input
+        chatInput.disabled = false;
+        chatInput.focus();
+        
+      } catch (error) {
+        console.error('Failed to send message:', error);
+        addMessage('system', 'Failed to send message. Please try again.', 'System');
+        
+        // Re-enable input
+        chatInput.disabled = false;
+        sendButton.disabled = false;
+        chatInput.focus();
+      }
+    }
+
+    // Add message to UI
+    function addMessage(type, text, sender) {
+      const messageDiv = document.createElement('div');
+      messageDiv.className = `message ${type}`;
+      
+      const time = new Date().toLocaleTimeString('en-US', { 
+        hour: 'numeric', 
+        minute: '2-digit' 
+      });
+      
+      const avatarIcon = type === 'customer' ? '👤' : 
+                         type === 'agent' ? '👨‍💼' : 
+                         '⚠️';
+      
+      messageDiv.innerHTML = `
+        <div class="avatar">${avatarIcon}</div>
+        <div class="bubble">
+          <div class="text">${escapeHtml(text)}</div>
+          <div class="time">${time}</div>
+        </div>
+      `;
+      
+      chatMessages.appendChild(messageDiv);
+      scrollToBottom();
+    }
+
+    // Show typing indicator
+    function showTypingIndicator() {
+      const indicator = document.createElement('div');
+      indicator.className = 'typing-indicator';
+      indicator.id = 'typing-indicator';
+      indicator.innerHTML = `
+        <div class="dots">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+      `;
+      chatMessages.appendChild(indicator);
+      scrollToBottom();
+    }
+
+    // Hide typing indicator
+    function hideTypingIndicator() {
+      const indicator = document.getElementById('typing-indicator');
+      if (indicator) {
+        indicator.remove();
+      }
+    }
+
+    // Scroll to bottom
+    function scrollToBottom() {
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    // Show error
+    function showError(message) {
+      const errorDiv = document.createElement('div');
+      errorDiv.className = 'error-message';
+      errorDiv.textContent = message;
+      chatMessages.innerHTML = '';
+      chatMessages.appendChild(errorDiv);
+    }
+
+    // Escape HTML to prevent XSS
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // Initialize on load
+    init();
   </script>
-  <script src="/widget-init.js"></script>
 </body>
 </html>
