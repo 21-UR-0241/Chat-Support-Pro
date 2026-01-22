@@ -18,14 +18,12 @@ const server = http.createServer(app);
 app.set('trust proxy', 1);
 
 // ============ UNIVERSAL CORS FIX ============
-// This ensures ALL responses have CORS headers
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
   res.header('Access-Control-Allow-Credentials', 'true');
   
-  // Handle preflight requests
   if (req.method === 'OPTIONS') {
     return res.sendStatus(204);
   }
@@ -39,7 +37,6 @@ console.log('\n🚀 Multi-Store Chat Server Starting...\n');
 
 // ============ HELPER FUNCTIONS ============
 
-// Convert snake_case to camelCase
 function snakeToCamel(obj) {
   if (!obj) return obj;
   if (Array.isArray(obj)) return obj.map(snakeToCamel);
@@ -53,7 +50,6 @@ function snakeToCamel(obj) {
   return camelObj;
 }
 
-// Convert camelCase to snake_case
 function camelToSnake(obj) {
   if (!obj) return obj;
   if (Array.isArray(obj)) return obj.map(camelToSnake);
@@ -72,20 +68,17 @@ app.use(helmet({
   contentSecurityPolicy: false,
   crossOriginEmbedderPolicy: false,
   crossOriginResourcePolicy: { policy: "cross-origin" },
-  frameguard: false  // 🔥 Allow iframe embedding
+  frameguard: false
 }));
 
 // ⚠️ IMPORTANT: Webhook route BEFORE express.json()
-// Webhooks need raw body for HMAC verification
 app.post('/webhooks/:shop/:topic', rawBodyMiddleware, handleWebhook);
 
 // JSON middleware for other routes
 app.use(express.json());
 
 // ============ WIDGET STATIC FILES ============
-// 🔥 CRITICAL: Widget routes MUST come BEFORE express.static()
 
-// Serve widget initializer with CORS
 app.get('/widget-init.js', (req, res) => {
   res.set({
     'Content-Type': 'application/javascript; charset=utf-8',
@@ -100,7 +93,6 @@ app.get('/widget-init.js', (req, res) => {
   res.sendFile(__dirname + '/public/widget-init.js');
 });
 
-// Serve widget.html with iframe-friendly headers
 app.get('/widget.html', (req, res) => {
   res.removeHeader('X-Frame-Options');
   
@@ -115,12 +107,11 @@ app.get('/widget.html', (req, res) => {
   res.sendFile(__dirname + '/public/widget.html');
 });
 
-// Serve other static files
 app.use(express.static('public'));
 
-// Rate limiting with proper proxy validation
+// Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 15 * 60 * 1000,
   max: 100,
   message: 'Too many requests from this IP, please try again later.',
   standardHeaders: true,
@@ -133,7 +124,6 @@ const limiter = rateLimit({
 
 app.use('/api/', limiter);
 
-// Stricter rate limit for login
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 5,
@@ -190,9 +180,212 @@ app.get('/health', async (req, res) => {
   }
 });
 
+// ============ DATABASE MIGRATION ENDPOINTS ============
+
+// Rename 'shop' table to 'stores'
+app.post('/debug/rename-shop-table', async (req, res) => {
+  try {
+    console.log('🔧 Renaming shop table to stores...');
+    
+    const client = await db.pool.connect();
+    
+    try {
+      // Check if 'shop' table exists
+      const shopExists = await client.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = 'shop'
+        );
+      `);
+      
+      // Check if 'stores' table exists
+      const storesExists = await client.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = 'stores'
+        );
+      `);
+      
+      const hasShop = shopExists.rows[0].exists;
+      const hasStores = storesExists.rows[0].exists;
+      
+      console.log('Table status:', { hasShop, hasStores });
+      
+      if (hasShop && !hasStores) {
+        console.log('Renaming shop → stores...');
+        await client.query('ALTER TABLE shop RENAME TO stores;');
+        console.log('✅ Table renamed');
+        
+        res.json({
+          success: true,
+          message: 'Table renamed from "shop" to "stores"'
+        });
+      } else if (hasStores) {
+        res.json({
+          success: true,
+          message: 'Table "stores" already exists, no rename needed'
+        });
+      } else {
+        res.json({
+          success: false,
+          message: 'Table "shop" not found'
+        });
+      }
+      
+    } finally {
+      client.release();
+    }
+    
+  } catch (error) {
+    console.error('❌ Error renaming table:', error);
+    res.status(500).json({ 
+      error: error.message,
+      stack: error.stack 
+    });
+  }
+});
+
+// Fix foreign key constraints to point to 'stores' table
+app.post('/debug/fix-fk-constraints', async (req, res) => {
+  try {
+    console.log('🔧 Fixing foreign key constraints...');
+    
+    const client = await db.pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+      
+      // Fix conversations table constraints
+      console.log('Dropping old constraint on conversations...');
+      await client.query(`
+        ALTER TABLE conversations 
+        DROP CONSTRAINT IF EXISTS conversations_shop_id_fkey CASCADE;
+      `);
+      
+      console.log('Adding new constraint pointing to stores...');
+      await client.query(`
+        ALTER TABLE conversations 
+        ADD CONSTRAINT conversations_shop_id_fkey 
+        FOREIGN KEY (shop_id) REFERENCES stores(id) ON DELETE CASCADE;
+      `);
+      
+      // Fix messages table constraints
+      console.log('Dropping old constraint on messages...');
+      await client.query(`
+        ALTER TABLE messages 
+        DROP CONSTRAINT IF EXISTS messages_shop_id_fkey CASCADE;
+      `);
+      
+      console.log('Adding new constraint on messages...');
+      await client.query(`
+        ALTER TABLE messages 
+        ADD CONSTRAINT messages_shop_id_fkey 
+        FOREIGN KEY (shop_id) REFERENCES stores(id) ON DELETE CASCADE;
+      `);
+      
+      // Fix any other tables that reference shop
+      console.log('Checking for other tables...');
+      const otherTables = await client.query(`
+        SELECT DISTINCT
+          tc.table_name,
+          tc.constraint_name
+        FROM information_schema.table_constraints AS tc
+        JOIN information_schema.constraint_column_usage AS ccu
+          ON ccu.constraint_name = tc.constraint_name
+        WHERE tc.constraint_type = 'FOREIGN KEY'
+          AND ccu.table_name IN ('shop', 'shops')
+          AND tc.table_name NOT IN ('conversations', 'messages');
+      `);
+      
+      for (const row of otherTables.rows) {
+        console.log(`Fixing constraint on ${row.table_name}...`);
+        await client.query(`
+          ALTER TABLE ${row.table_name}
+          DROP CONSTRAINT IF EXISTS ${row.constraint_name} CASCADE;
+        `);
+        await client.query(`
+          ALTER TABLE ${row.table_name}
+          ADD CONSTRAINT ${row.constraint_name}
+          FOREIGN KEY (shop_id) REFERENCES stores(id) ON DELETE CASCADE;
+        `);
+      }
+      
+      await client.query('COMMIT');
+      
+      console.log('✅ Constraints fixed!');
+      
+      res.json({
+        success: true,
+        message: 'Foreign key constraints updated to reference stores table',
+        tablesFixed: ['conversations', 'messages', ...otherTables.rows.map(r => r.table_name)]
+      });
+      
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    
+  } catch (error) {
+    console.error('❌ Error fixing constraints:', error);
+    res.status(500).json({ 
+      error: error.message,
+      stack: error.stack 
+    });
+  }
+});
+
+// Check database status
+app.get('/debug/check-tables', async (req, res) => {
+  try {
+    const client = await db.pool.connect();
+    
+    try {
+      // Get all tables
+      const tables = await client.query(`
+        SELECT table_name 
+        FROM information_schema.tables 
+        WHERE table_schema = 'public'
+        ORDER BY table_name;
+      `);
+      
+      // Get foreign key constraints
+      const constraints = await client.query(`
+        SELECT
+          tc.table_name,
+          tc.constraint_name,
+          tc.constraint_type,
+          ccu.table_name AS foreign_table_name,
+          ccu.column_name AS foreign_column_name
+        FROM information_schema.table_constraints AS tc
+        JOIN information_schema.constraint_column_usage AS ccu
+          ON ccu.constraint_name = tc.constraint_name
+        WHERE tc.constraint_type = 'FOREIGN KEY'
+        ORDER BY tc.table_name;
+      `);
+      
+      res.json({
+        success: true,
+        tables: tables.rows.map(r => r.table_name),
+        foreignKeys: constraints.rows
+      });
+      
+    } finally {
+      client.release();
+    }
+    
+  } catch (error) {
+    res.status(500).json({ 
+      error: error.message 
+    });
+  }
+});
+
 // ============ WIDGET API ENDPOINTS ============
 
-// Verify store is registered (public - called by widget)
 app.get('/api/stores/verify', async (req, res) => {
   try {
     const { domain } = req.query;
@@ -224,7 +417,6 @@ app.get('/api/stores/verify', async (req, res) => {
   }
 });
 
-// Get widget settings (public - called by widget)
 app.get('/api/widget/settings', async (req, res) => {
   try {
     const { store: storeIdentifier } = req.query;
@@ -260,7 +452,6 @@ app.get('/api/widget/settings', async (req, res) => {
   }
 });
 
-// Widget session token (public - called by widget)
 app.get('/api/widget/session', async (req, res) => {
   try {
     const { store } = req.query;
@@ -289,7 +480,6 @@ app.get('/api/widget/session', async (req, res) => {
 
 // ============ AUTHENTICATION ENDPOINTS ============
 
-// Login
 app.post('/api/employees/login', loginLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -339,7 +529,6 @@ app.post('/api/employees/login', loginLimiter, async (req, res) => {
   }
 });
 
-// Logout
 app.post('/api/employees/logout', authenticateToken, async (req, res) => {
   try {
     await db.updateEmployeeStatus(req.user.id, { is_online: false });
@@ -350,7 +539,6 @@ app.post('/api/employees/logout', authenticateToken, async (req, res) => {
   }
 });
 
-// Verify token
 app.get('/api/auth/verify', authenticateToken, async (req, res) => {
   try {
     const employee = await db.getEmployeeByEmail(req.user.email);
@@ -388,21 +576,16 @@ app.get('/auth/callback', handleCallback);
 
 // ============ STORE ENDPOINTS ============
 
-// Get all stores (protected)
 app.get('/api/stores', authenticateToken, async (req, res) => {
   try {
     const stores = await db.getAllActiveStores();
-    
-    // Convert to camelCase
     const camelCaseStores = stores.map(store => snakeToCamel(store));
-    
     res.json(camelCaseStores);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Get customer context from Shopify (protected)
 app.get('/api/customer-context/:storeId/:email', authenticateToken, async (req, res) => {
   try {
     const store = await db.getStoreByIdentifier(req.params.storeId);
@@ -418,7 +601,6 @@ app.get('/api/customer-context/:storeId/:email', authenticateToken, async (req, 
   }
 });
 
-// Register webhooks for store (protected)
 app.post('/api/stores/:storeId/webhooks', authenticateToken, async (req, res) => {
   try {
     const store = await db.getStoreByIdentifier(req.params.storeId);
@@ -437,7 +619,6 @@ app.post('/api/stores/:storeId/webhooks', authenticateToken, async (req, res) =>
 
 // ============ CONVERSATION ENDPOINTS ============
 
-// Get conversations (protected)
 app.get('/api/conversations', authenticateToken, async (req, res) => {
   try {
     const { storeId, status, limit, offset } = req.query;
@@ -455,7 +636,6 @@ app.get('/api/conversations', authenticateToken, async (req, res) => {
   }
 });
 
-// Get single conversation (protected)
 app.get('/api/conversations/:id', authenticateToken, async (req, res) => {
   try {
     const conversation = await db.getConversation(parseInt(req.params.id));
@@ -468,7 +648,6 @@ app.get('/api/conversations/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Create conversation (public - can be called by widget)
 app.post('/api/conversations', async (req, res) => {
   try {
     const { storeIdentifier, customerEmail, customerName, initialMessage } = req.body;
@@ -479,7 +658,6 @@ app.post('/api/conversations', async (req, res) => {
       return res.status(400).json({ error: 'storeIdentifier and customerEmail required' });
     }
     
-    // Get store
     const store = await db.getStoreByIdentifier(storeIdentifier);
     if (!store) {
       console.log('❌ Store not found:', storeIdentifier);
@@ -488,19 +666,17 @@ app.post('/api/conversations', async (req, res) => {
     
     console.log('✅ Store found:', store.id, store.shop_domain);
     
-    // Create conversation with CORRECT parameter names (snake_case)
     const conversation = await db.saveConversation({
-      store_id: store.id,                    // ✅ Fixed
-      store_identifier: store.shop_domain,   // ✅ Fixed
-      customer_email: customerEmail,         // ✅ Fixed
-      customer_name: customerName || customerEmail,  // ✅ Fixed
+      store_id: store.id,
+      store_identifier: store.shop_domain,
+      customer_email: customerEmail,
+      customer_name: customerName || customerEmail,
       status: 'open',
       priority: 'normal'
     });
     
     console.log('✅ Conversation created:', conversation.id);
     
-    // If there's an initial message, save it
     if (initialMessage) {
       console.log('💬 Saving initial message...');
       await db.saveMessage({
@@ -513,7 +689,6 @@ app.post('/api/conversations', async (req, res) => {
       console.log('✅ Initial message saved');
     }
     
-    // Broadcast to agents
     broadcastToAgents({
       type: 'new_conversation',
       conversation,
@@ -532,7 +707,6 @@ app.post('/api/conversations', async (req, res) => {
   }
 });
 
-// Update conversation (protected)
 app.put('/api/conversations/:id', authenticateToken, async (req, res) => {
   try {
     const conversation = await db.updateConversation(parseInt(req.params.id), req.body);
@@ -542,7 +716,6 @@ app.put('/api/conversations/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Close conversation (protected)
 app.put('/api/conversations/:id/close', authenticateToken, async (req, res) => {
   try {
     const conversation = await db.closeConversation(parseInt(req.params.id));
@@ -554,7 +727,6 @@ app.put('/api/conversations/:id/close', authenticateToken, async (req, res) => {
 
 // ============ MESSAGE ENDPOINTS ============
 
-// Get messages (protected)
 app.get('/api/conversations/:id/messages', authenticateToken, async (req, res) => {
   try {
     const messages = await db.getMessages(parseInt(req.params.id));
@@ -564,7 +736,6 @@ app.get('/api/conversations/:id/messages', authenticateToken, async (req, res) =
   }
 });
 
-// Send message (can be called by widget or agent)
 app.post('/api/messages', authenticateToken, async (req, res) => {
   try {
     const { conversationId, senderType, senderName, content, storeId } = req.body;
@@ -582,7 +753,6 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
       sent_at: new Date()
     });
     
-    // Send via WebSocket
     sendToConversation(conversationId, {
       type: 'new_message',
       message
@@ -597,7 +767,6 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
 
 // ============ EMPLOYEE ENDPOINTS ============
 
-// Get all employees (protected - admin only)
 app.get('/api/employees', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'admin') {
@@ -605,8 +774,6 @@ app.get('/api/employees', authenticateToken, async (req, res) => {
     }
     
     const employees = await db.getAllEmployees();
-    
-    // Convert to camelCase and sanitize
     const sanitized = employees.map(emp => {
       const { password_hash, api_token, ...safe } = emp;
       return snakeToCamel(safe);
@@ -619,7 +786,6 @@ app.get('/api/employees', authenticateToken, async (req, res) => {
   }
 });
 
-// Create employee (protected - admin only)
 app.post('/api/employees', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'admin') {
@@ -654,7 +820,6 @@ app.post('/api/employees', authenticateToken, async (req, res) => {
   }
 });
 
-// Update employee (protected - admin only)
 app.put('/api/employees/:id', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'admin') {
@@ -664,7 +829,6 @@ app.put('/api/employees/:id', authenticateToken, async (req, res) => {
     const employeeId = parseInt(req.params.id);
     const updates = req.body;
     
-    // Convert camelCase to snake_case for database
     const dbUpdates = {};
     if (updates.name !== undefined) dbUpdates.name = updates.name;
     if (updates.email !== undefined) dbUpdates.email = updates.email;
@@ -689,7 +853,6 @@ app.put('/api/employees/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Delete employee (protected - admin only)
 app.delete('/api/employees/:id', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'admin') {
@@ -711,7 +874,6 @@ app.delete('/api/employees/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Update employee status (protected)
 app.put('/api/employees/:id/status', authenticateToken, async (req, res) => {
   try {
     await db.updateEmployeeStatus(parseInt(req.params.id), req.body.status);
@@ -723,7 +885,6 @@ app.put('/api/employees/:id/status', authenticateToken, async (req, res) => {
 
 // ============ STATS ENDPOINTS ============
 
-// Dashboard stats (protected)
 app.get('/api/stats/dashboard', authenticateToken, async (req, res) => {
   try {
     const stats = await db.getDashboardStats(req.query);
@@ -733,7 +894,6 @@ app.get('/api/stats/dashboard', authenticateToken, async (req, res) => {
   }
 });
 
-// WebSocket stats (protected)
 app.get('/api/stats/websocket', authenticateToken, (req, res) => {
   try {
     const stats = getWebSocketStats();
@@ -746,12 +906,22 @@ app.get('/api/stats/websocket', authenticateToken, (req, res) => {
 // ============ ERROR HANDLER ============
 
 app.use((err, req, res, next) => {
-  console.error('Server error:', err);
-  res.status(500).json({ error: 'Internal server error' });
+  console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.error('❌ SERVER ERROR:', err);
+  console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.error('Error message:', err.message);
+  console.error('Error stack:', err.stack);
+  console.error('Request URL:', req.url);
+  console.error('Request method:', req.method);
+  console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  
+  res.status(500).json({ 
+    error: 'Internal server error',
+    message: process.env.NODE_ENV === 'development' ? err.message : undefined
+  });
 });
 
 // ============ KEEP-ALIVE MECHANISM ============
-// Prevents Render free tier from sleeping
 
 function setupKeepAlive() {
   if (process.env.KEEP_ALIVE !== 'true') {
@@ -763,7 +933,6 @@ function setupKeepAlive() {
   
   console.log('⏰ Keep-alive enabled - pinging every 14 minutes');
   
-  // Ping every 14 minutes (free tier sleeps after 15 minutes of inactivity)
   setInterval(() => {
     const now = new Date().toISOString();
     
@@ -785,9 +954,8 @@ function setupKeepAlive() {
       console.error(`❌ Keep-alive ping error [${now}]:`, err.message);
     });
     
-  }, 14 * 60 * 1000); // 14 minutes
+  }, 14 * 60 * 1000);
   
-  // Initial ping after 1 minute
   setTimeout(() => {
     console.log('⏰ Running initial keep-alive ping...');
     http.get(`${APP_URL}/health`, (res) => {
@@ -798,193 +966,6 @@ function setupKeepAlive() {
   }, 60 * 1000);
 }
 
-// ============ DATABASE MIGRATION ENDPOINTS ============
-
-app.post('/debug/fix-constraints', async (req, res) => {
-  try {
-    console.log('🔧 Fixing foreign key constraints...');
-    
-    const client = await db.pool.connect();
-    
-    try {
-      await client.query('BEGIN');
-      
-      // Check what tables exist
-      const tables = await client.query(`
-        SELECT table_name 
-        FROM information_schema.tables 
-        WHERE table_schema = 'public' 
-        AND table_name IN ('shops', 'stores')
-      `);
-      
-      console.log('Tables found:', tables.rows);
-      
-      // Drop and recreate conversations table with correct constraint
-      console.log('Dropping conversations table...');
-      await client.query('DROP TABLE IF EXISTS conversations CASCADE;');
-      
-      console.log('Recreating conversations table...');
-      await client.query(`
-        CREATE TABLE conversations (
-          id SERIAL PRIMARY KEY,
-          shop_id INTEGER REFERENCES stores(id) ON DELETE CASCADE,
-          shop_domain VARCHAR(255) NOT NULL,
-          
-          customer_email VARCHAR(255) NOT NULL,
-          customer_name VARCHAR(255),
-          customer_id VARCHAR(255),
-          customer_phone VARCHAR(50),
-          
-          status VARCHAR(50) DEFAULT 'open',
-          priority VARCHAR(20) DEFAULT 'normal',
-          assigned_to VARCHAR(255),
-          tags TEXT[],
-          
-          first_message_at TIMESTAMP,
-          last_message_at TIMESTAMP,
-          last_customer_message_at TIMESTAMP,
-          last_agent_message_at TIMESTAMP,
-          response_time_seconds INTEGER,
-          
-          customer_message_count INTEGER DEFAULT 0,
-          agent_message_count INTEGER DEFAULT 0,
-          total_message_count INTEGER DEFAULT 0,
-          
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          closed_at TIMESTAMP
-        );
-      `);
-      
-      console.log('Creating indexes...');
-      await client.query(`
-        CREATE INDEX idx_conversations_shop ON conversations(shop_id);
-        CREATE INDEX idx_conversations_status ON conversations(status);
-        CREATE INDEX idx_conversations_customer_email ON conversations(customer_email);
-      `);
-      
-      // Also drop and recreate messages table
-      console.log('Dropping messages table...');
-      await client.query('DROP TABLE IF EXISTS messages CASCADE;');
-      
-      console.log('Recreating messages table...');
-      await client.query(`
-        CREATE TABLE messages (
-          id SERIAL PRIMARY KEY,
-          conversation_id INTEGER REFERENCES conversations(id) ON DELETE CASCADE,
-          shop_id INTEGER REFERENCES stores(id) ON DELETE CASCADE,
-          
-          sender_type VARCHAR(50) NOT NULL,
-          sender_name VARCHAR(255),
-          sender_id VARCHAR(255),
-          content TEXT NOT NULL,
-          
-          message_type VARCHAR(50) DEFAULT 'text',
-          attachment_url TEXT,
-          attachment_type VARCHAR(50),
-          
-          sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          delivered_at TIMESTAMP,
-          read_at TIMESTAMP,
-          failed BOOLEAN DEFAULT false,
-          retry_count INTEGER DEFAULT 0,
-          
-          routed_successfully BOOLEAN DEFAULT true,
-          routing_error TEXT,
-          
-          timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-      `);
-      
-      console.log('Creating message indexes...');
-      await client.query(`
-        CREATE INDEX idx_messages_conversation ON messages(conversation_id);
-        CREATE INDEX idx_messages_shop ON messages(shop_id);
-        CREATE INDEX idx_messages_timestamp ON messages(timestamp DESC);
-      `);
-      
-      await client.query('COMMIT');
-      
-      console.log('✅ Constraints fixed!');
-      
-      res.json({
-        success: true,
-        message: 'Foreign key constraints fixed. Tables recreated with correct references.'
-      });
-      
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
-    
-  } catch (error) {
-    console.error('❌ Error fixing constraints:', error);
-    res.status(500).json({ 
-      error: error.message,
-      stack: error.stack 
-    });
-  }
-});
-
-// Fix table name mismatch
-app.post('/debug/fix-table-names', async (req, res) => {
-  try {
-    console.log('🔧 Fixing table names...');
-    
-    const client = await db.pool.connect();
-    
-    try {
-      // Check if 'shops' table exists
-      const shopsExists = await client.query(`
-        SELECT EXISTS (
-          SELECT FROM information_schema.tables 
-          WHERE table_schema = 'public' 
-          AND table_name = 'shops'
-        );
-      `);
-      
-      // Check if 'stores' table exists
-      const storesExists = await client.query(`
-        SELECT EXISTS (
-          SELECT FROM information_schema.tables 
-          WHERE table_schema = 'public' 
-          AND table_name = 'stores'
-        );
-      `);
-      
-      const hasShops = shopsExists.rows[0].exists;
-      const hasStores = storesExists.rows[0].exists;
-      
-      console.log('Table status:', { hasShops, hasStores });
-      
-      if (hasShops && !hasStores) {
-        // Rename 'shops' to 'stores'
-        console.log('Renaming shops → stores...');
-        await client.query('ALTER TABLE shops RENAME TO stores;');
-        console.log('✅ Table renamed');
-      }
-      
-      res.json({
-        success: true,
-        message: 'Table names fixed',
-        hadShops: hasShops,
-        hadStores: hasStores
-      });
-      
-    } finally {
-      client.release();
-    }
-    
-  } catch (error) {
-    console.error('Error fixing table names:', error);
-    res.status(500).json({ 
-      error: error.message,
-      stack: error.stack 
-    });
-  }
-});
 // ============ START SERVER ============
 
 const PORT = process.env.PORT || 3000;
@@ -1004,7 +985,6 @@ async function startServer() {
       console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
       
-      // Setup keep-alive after server starts
       setupKeepAlive();
     });
   } catch (error) {
