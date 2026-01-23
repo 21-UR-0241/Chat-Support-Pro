@@ -1706,19 +1706,17 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
   }
 });
 
-// Enhanced /api/widget/messages endpoint with better error handling
-// Replace in server.js around line 733
-// OPTIMIZED /api/widget/messages endpoint
-// Broadcasts IMMEDIATELY, saves to database in background
-// Replace in server.js
+
+// 🔥 FIXED /api/widget/messages endpoint
+// Add this to replace your current endpoint around line 733
 
 app.post('/api/widget/messages', async (req, res) => {
   try {
     const { conversationId, customerEmail, customerName, content, storeIdentifier } = req.body;
     
-    console.log('⚡ INSTANT MESSAGE - Broadcasting immediately');
+    console.log('📨 Widget message received:', { conversationId, customerEmail });
     
-    // Validate
+    // Validate required fields
     if (!conversationId || !content) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
@@ -1728,6 +1726,28 @@ app.post('/api/widget/messages', async (req, res) => {
     if (!store) {
       return res.status(404).json({ error: 'Store not found' });
     }
+    
+    // 🔥 CHECK IF CONVERSATION EXISTS (THIS IS THE KEY FIX!)
+    const conversation = await db.getConversation(conversationId);
+    
+    if (!conversation) {
+      console.log(`❌ Conversation ${conversationId} not found (database cleared?)`);
+      return res.status(404).json({ 
+        error: 'conversation_not_found',
+        message: 'This conversation no longer exists. Please start a new conversation.'
+      });
+    }
+    
+    // Verify conversation belongs to this store
+    if (conversation.store_id !== store.id) {
+      console.log(`❌ Conversation ${conversationId} belongs to different store`);
+      return res.status(403).json({ 
+        error: 'Store mismatch',
+        message: 'This conversation belongs to a different store'
+      });
+    }
+    
+    console.log('✅ Conversation exists, proceeding with message...');
     
     // Create temporary message object for instant broadcast
     const timestamp = new Date();
@@ -1741,7 +1761,7 @@ app.post('/api/widget/messages', async (req, res) => {
       senderName: customerName || customerEmail,
       content: content,
       createdAt: timestamp,
-      pending: true // Flag as pending
+      pending: true
     };
     
     // 🔥 BROADCAST IMMEDIATELY (don't wait for database)
@@ -1815,9 +1835,121 @@ app.post('/api/widget/messages', async (req, res) => {
     
   } catch (error) {
     console.error('❌ Widget message error:', error);
-    res.status(500).json({ error: error.message });
+    
+    // Return 500 for unexpected errors
+    res.status(500).json({ 
+      error: 'Failed to send message',
+      message: error.message 
+    });
   }
 });
+
+// app.post('/api/widget/messages', async (req, res) => {
+//   try {
+//     const { conversationId, customerEmail, customerName, content, storeIdentifier } = req.body;
+    
+//     console.log('⚡ INSTANT MESSAGE - Broadcasting immediately');
+    
+//     // Validate
+//     if (!conversationId || !content) {
+//       return res.status(400).json({ error: 'Missing required fields' });
+//     }
+    
+//     // Get store
+//     const store = await db.getStoreByIdentifier(storeIdentifier);
+//     if (!store) {
+//       return res.status(404).json({ error: 'Store not found' });
+//     }
+    
+//     // Create temporary message object for instant broadcast
+//     const timestamp = new Date();
+//     const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+//     const tempMessage = {
+//       id: tempId,
+//       conversationId: conversationId,
+//       storeId: store.id,
+//       senderType: 'customer',
+//       senderName: customerName || customerEmail,
+//       content: content,
+//       createdAt: timestamp,
+//       pending: true // Flag as pending
+//     };
+    
+//     // 🔥 BROADCAST IMMEDIATELY (don't wait for database)
+//     console.log('📡 Broadcasting message INSTANTLY...');
+    
+//     sendToConversation(conversationId, {
+//       type: 'new_message',
+//       message: snakeToCamel(tempMessage)
+//     });
+    
+//     broadcastToAgents({
+//       type: 'new_message',
+//       message: snakeToCamel(tempMessage),
+//       conversationId,
+//       storeId: store.id
+//     });
+    
+//     console.log('✅ Message broadcast INSTANTLY (before DB save)');
+    
+//     // Return immediate response (don't wait for DB)
+//     res.json(snakeToCamel(tempMessage));
+    
+//     // 💾 Save to database in background (async, non-blocking)
+//     setImmediate(async () => {
+//       try {
+//         const savedMessage = await db.saveMessage({
+//           conversation_id: conversationId,
+//           store_id: store.id,
+//           sender_type: 'customer',
+//           sender_name: customerName || customerEmail,
+//           content
+//         });
+        
+//         console.log('✅ Message saved to database:', savedMessage.id);
+        
+//         // Send confirmation with real ID
+//         const confirmedMessage = snakeToCamel(savedMessage);
+        
+//         sendToConversation(conversationId, {
+//           type: 'message_confirmed',
+//           tempId: tempId,
+//           message: confirmedMessage
+//         });
+        
+//         broadcastToAgents({
+//           type: 'message_confirmed',
+//           tempId: tempId,
+//           message: confirmedMessage,
+//           conversationId,
+//           storeId: store.id
+//         });
+        
+//       } catch (error) {
+//         console.error('❌ Failed to save message to database:', error);
+        
+//         // Send failure notification
+//         sendToConversation(conversationId, {
+//           type: 'message_failed',
+//           tempId: tempId,
+//           error: 'Failed to save message'
+//         });
+        
+//         broadcastToAgents({
+//           type: 'message_failed',
+//           tempId: tempId,
+//           conversationId,
+//           storeId: store.id
+//         });
+//       }
+//     });
+    
+//   } catch (error) {
+//     console.error('❌ Widget message error:', error);
+//     res.status(500).json({ error: error.message });
+//   }
+// });
 
 // Same optimization for agent messages
 app.post('/api/messages', authenticateToken, async (req, res) => {
