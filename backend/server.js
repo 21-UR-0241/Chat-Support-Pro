@@ -1708,123 +1708,208 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
 
 // Enhanced /api/widget/messages endpoint with better error handling
 // Replace in server.js around line 733
+// OPTIMIZED /api/widget/messages endpoint
+// Broadcasts IMMEDIATELY, saves to database in background
+// Replace in server.js
 
 app.post('/api/widget/messages', async (req, res) => {
   try {
     const { conversationId, customerEmail, customerName, content, storeIdentifier } = req.body;
     
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('📨 CUSTOMER MESSAGE (Widget)');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('Conversation ID:', conversationId);
-    console.log('Customer:', customerName || customerEmail);
-    console.log('Content:', content.substring(0, 50) + '...');
-    console.log('Store Identifier:', storeIdentifier);
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('⚡ INSTANT MESSAGE - Broadcasting immediately');
     
-    // Validate required fields
+    // Validate
     if (!conversationId || !content) {
-      console.log('❌ Missing required fields');
-      return res.status(400).json({ 
-        error: 'Missing required fields',
-        message: 'conversationId and content are required'
-      });
+      return res.status(400).json({ error: 'Missing required fields' });
     }
     
     // Get store
-    console.log('🔍 Looking up store:', storeIdentifier);
     const store = await db.getStoreByIdentifier(storeIdentifier);
-    
     if (!store) {
-      console.log('❌ Store not found:', storeIdentifier);
-      return res.status(404).json({ 
-        error: 'Store not found',
-        message: 'The store identifier is invalid'
-      });
+      return res.status(404).json({ error: 'Store not found' });
     }
     
-    console.log('✅ Store found:', store.id);
+    // Create temporary message object for instant broadcast
+    const timestamp = new Date();
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     
-    // IMPORTANT: Verify conversation exists before trying to save message
-    console.log('🔍 Verifying conversation exists...');
-    const conversation = await db.getConversation(conversationId);
+    const tempMessage = {
+      id: tempId,
+      conversationId: conversationId,
+      storeId: store.id,
+      senderType: 'customer',
+      senderName: customerName || customerEmail,
+      content: content,
+      createdAt: timestamp,
+      pending: true // Flag as pending
+    };
     
-    if (!conversation) {
-      console.log('❌ Conversation not found:', conversationId);
-      return res.status(404).json({ 
-        error: 'conversation_not_found',
-        message: `Conversation ${conversationId} no longer exists. Please start a new conversation.`,
-        conversationId: conversationId
-      });
-    }
+    // 🔥 BROADCAST IMMEDIATELY (don't wait for database)
+    console.log('📡 Broadcasting message INSTANTLY...');
     
-    console.log('✅ Conversation found:', conversationId);
-    
-    // Save message to database
-    console.log('💾 Saving message to database...');
-    const message = await db.saveMessage({
-      conversation_id: conversationId,
-      store_id: store.id,
-      sender_type: 'customer',
-      sender_name: customerName || customerEmail,
-      content
-    });
-    
-    console.log('✅ Message saved to database:', message.id);
-    
-    const camelMessage = snakeToCamel(message);
-    
-    // 🔥 BROADCAST VIA WEBSOCKET
-    console.log('📡 Broadcasting via WebSocket...');
-    
-    // Send to conversation participants
     sendToConversation(conversationId, {
       type: 'new_message',
-      message: camelMessage
+      message: snakeToCamel(tempMessage)
     });
-    console.log('✅ Sent to conversation participants');
     
-    // Broadcast to all agents
     broadcastToAgents({
       type: 'new_message',
-      message: camelMessage,
+      message: snakeToCamel(tempMessage),
       conversationId,
       storeId: store.id
     });
-    console.log('✅ Broadcast to all agents');
     
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('✅ MESSAGE SENT SUCCESSFULLY');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+    console.log('✅ Message broadcast INSTANTLY (before DB save)');
     
-    res.json(camelMessage);
-  } catch (error) {
-    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.error('❌ WIDGET MESSAGE ERROR');
-    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.error('Error message:', error.message);
-    console.error('Error code:', error.code);
-    console.error('Error stack:', error.stack);
-    console.error('Request body:', req.body);
-    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    // Return immediate response (don't wait for DB)
+    res.json(snakeToCamel(tempMessage));
     
-    // Handle specific database errors
-    if (error.code === '23503') { // Foreign key violation
-      if (error.detail && error.detail.includes('conversation_id')) {
-        return res.status(404).json({ 
-          error: 'conversation_not_found',
-          message: 'Conversation no longer exists. Please start a new conversation.',
-          detail: error.detail
+    // 💾 Save to database in background (async, non-blocking)
+    setImmediate(async () => {
+      try {
+        const savedMessage = await db.saveMessage({
+          conversation_id: conversationId,
+          store_id: store.id,
+          sender_type: 'customer',
+          sender_name: customerName || customerEmail,
+          content
+        });
+        
+        console.log('✅ Message saved to database:', savedMessage.id);
+        
+        // Send confirmation with real ID
+        const confirmedMessage = snakeToCamel(savedMessage);
+        
+        sendToConversation(conversationId, {
+          type: 'message_confirmed',
+          tempId: tempId,
+          message: confirmedMessage
+        });
+        
+        broadcastToAgents({
+          type: 'message_confirmed',
+          tempId: tempId,
+          message: confirmedMessage,
+          conversationId,
+          storeId: store.id
+        });
+        
+      } catch (error) {
+        console.error('❌ Failed to save message to database:', error);
+        
+        // Send failure notification
+        sendToConversation(conversationId, {
+          type: 'message_failed',
+          tempId: tempId,
+          error: 'Failed to save message'
+        });
+        
+        broadcastToAgents({
+          type: 'message_failed',
+          tempId: tempId,
+          conversationId,
+          storeId: store.id
         });
       }
-    }
-    
-    res.status(500).json({ 
-      error: error.message,
-      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
+    
+  } catch (error) {
+    console.error('❌ Widget message error:', error);
+    res.status(500).json({ error: error.message });
   }
 });
+
+// Same optimization for agent messages
+app.post('/api/messages', authenticateToken, async (req, res) => {
+  try {
+    const { conversationId, senderType, senderName, content, storeId } = req.body;
+    
+    console.log('⚡ INSTANT MESSAGE - Broadcasting immediately');
+    
+    if (!conversationId || !senderType || !content) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    
+    // Create temporary message
+    const timestamp = new Date();
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    const tempMessage = {
+      id: tempId,
+      conversationId: conversationId,
+      storeId: storeId,
+      senderType: senderType,
+      senderName: senderName,
+      content: content,
+      createdAt: timestamp,
+      pending: true
+    };
+    
+    // 🔥 BROADCAST IMMEDIATELY
+    console.log('📡 Broadcasting agent message INSTANTLY...');
+    
+    sendToConversation(conversationId, {
+      type: 'new_message',
+      message: snakeToCamel(tempMessage)
+    });
+    
+    broadcastToAgents({
+      type: 'new_message',
+      message: snakeToCamel(tempMessage),
+      conversationId,
+      storeId
+    });
+    
+    console.log('✅ Agent message broadcast INSTANTLY');
+    
+    // Return immediately
+    res.json(snakeToCamel(tempMessage));
+    
+    // Save to database in background
+    setImmediate(async () => {
+      try {
+        const savedMessage = await db.saveMessage({
+          conversation_id: conversationId,
+          store_id: storeId,
+          sender_type: senderType,
+          sender_name: senderName,
+          content,
+          sent_at: timestamp
+        });
+        
+        console.log('✅ Agent message saved:', savedMessage.id);
+        
+        // Send confirmation
+        sendToConversation(conversationId, {
+          type: 'message_confirmed',
+          tempId: tempId,
+          message: snakeToCamel(savedMessage)
+        });
+        
+        broadcastToAgents({
+          type: 'message_confirmed',
+          tempId: tempId,
+          message: snakeToCamel(savedMessage),
+          conversationId,
+          storeId
+        });
+        
+      } catch (error) {
+        console.error('❌ Failed to save agent message:', error);
+        
+        sendToConversation(conversationId, {
+          type: 'message_failed',
+          tempId: tempId
+        });
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Send message error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ============ EMPLOYEE ENDPOINTS ============
 
 app.get('/api/employees', authenticateToken, async (req, res) => {

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chat Widget - Fixed</title>
+  <title>Chat Widget - Optimized Real-Time</title>
   <style>
     * {
       margin: 0;
@@ -233,6 +233,7 @@
       border-radius: 16px;
       box-shadow: 0 1px 2px rgba(0,0,0,0.08);
       max-width: 100%;
+      position: relative;
     }
 
     .message.customer .bubble {
@@ -243,6 +244,36 @@
 
     .message.agent .bubble {
       border-bottom-left-radius: 4px;
+    }
+
+    /* Pending state */
+    .message.pending .bubble {
+      opacity: 0.8;
+    }
+
+    .message.pending .bubble::after {
+      content: '⏱';
+      position: absolute;
+      bottom: 6px;
+      right: 10px;
+      font-size: 11px;
+      opacity: 0.6;
+    }
+
+    /* Failed state */
+    .message.failed .bubble {
+      opacity: 0.9;
+      border: 1px solid #fc8181;
+      background: #fff5f5 !important;
+      color: var(--text-color) !important;
+    }
+
+    .message.failed .bubble::after {
+      content: '⚠️';
+      position: absolute;
+      bottom: 6px;
+      right: 10px;
+      font-size: 11px;
     }
 
     .message .sender-name {
@@ -445,7 +476,7 @@
   </div>
 
   <script>
-    console.log('🚀 [Widget] Initializing...');
+    console.log('🚀 [Widget] Initializing (Optimized Real-Time Version)...');
 
     // Configuration
     const urlParams = new URLSearchParams(window.location.search);
@@ -464,7 +495,7 @@
     let maxReconnectAttempts = 5;
     let reconnectDelay = 2000;
     let displayedMessageIds = new Set();
-    let isTyping = false;
+    let typingTimeout = null;
     let debugLogs = [];
 
     // DOM Elements
@@ -564,7 +595,7 @@
             hasToken: !!wsToken,
             hasConversation: !!conversationId
           });
-          updateStatus('online', "We're online (HTTP only)");
+          updateStatus('online', "We're online");
         }
         
         debugLog('INIT', 'Initialization complete');
@@ -728,7 +759,7 @@
           
         case 'auth_ok':
           debugLog('WS', 'Authentication successful');
-          updateStatus('online', "We're online (Real-time)");
+          updateStatus('online', "We're online ⚡");
           
           // Join conversation
           const joinMessage = {
@@ -747,7 +778,7 @@
           
         case 'joined':
           debugLog('WS', 'Successfully joined conversation');
-          updateStatus('online', "We're online (Real-time)");
+          updateStatus('online', "We're online ⚡");
           break;
           
         case 'new_message':
@@ -757,24 +788,31 @@
           }
           break;
           
+        case 'message_confirmed':
+          debugLog('MESSAGE', 'Message confirmed', { tempId: data.tempId, realId: data.message?.id });
+          updateMessageStatus(data.tempId, 'confirmed', data.message);
+          break;
+          
+        case 'message_failed':
+          debugLog('ERROR', 'Message failed to save', { tempId: data.tempId });
+          updateMessageStatus(data.tempId, 'failed');
+          break;
+          
         case 'typing':
-          debugLog('UI', 'Typing indicator received', { isTyping: data.isTyping, sender: data.senderName });
+          debugLog('UI', 'Typing indicator', { isTyping: data.isTyping, sender: data.senderName });
           if (data.isTyping && data.senderType === 'agent') {
             showTypingIndicator();
-          } else {
+          } else if (!data.isTyping) {
             hideTypingIndicator();
           }
           break;
           
         case 'agent_joined':
           debugLog('WS', 'Agent joined conversation', data);
-          // Optionally show a system message
-          // addMessage('system', `${data.agentName || 'An agent'} has joined the conversation`, 'System');
           break;
           
         case 'customer_joined':
           debugLog('WS', 'Customer joined conversation (self)', data);
-          // This is the customer's own join notification - ignore
           break;
           
         case 'customer_left':
@@ -806,7 +844,8 @@
         senderType: message.senderType || message.sender_type,
         senderName: message.senderName || message.sender_name,
         content: message.content,
-        conversationId: message.conversationId || message.conversation_id
+        conversationId: message.conversationId || message.conversation_id,
+        pending: message.pending
       };
       
       debugLog('MESSAGE', 'Processing message', normalizedMessage);
@@ -842,8 +881,30 @@
       addMessage(
         normalizedMessage.senderType,
         normalizedMessage.content,
-        normalizedMessage.senderName || 'Support'
+        normalizedMessage.senderName || 'Support',
+        normalizedMessage.id,
+        normalizedMessage.pending
       );
+    }
+
+    // Update message status (confirmed/failed)
+    function updateMessageStatus(tempId, status, confirmedMessage = null) {
+      const messageElements = document.querySelectorAll('.message');
+      messageElements.forEach(el => {
+        if (el.dataset.messageId === tempId) {
+          if (status === 'confirmed') {
+            // Update with real ID and remove pending state
+            el.dataset.messageId = confirmedMessage?.id || tempId;
+            el.classList.remove('pending');
+            debugLog('MESSAGE', 'Message confirmed in UI', { tempId, realId: confirmedMessage?.id });
+          } else if (status === 'failed') {
+            // Mark as failed
+            el.classList.remove('pending');
+            el.classList.add('failed');
+            debugLog('MESSAGE', 'Message marked as failed in UI', { tempId });
+          }
+        }
+      });
     }
 
     // Setup event listeners
@@ -852,6 +913,33 @@
       chatInput.addEventListener('input', () => {
         sendButton.disabled = !chatInput.value.trim();
         autoResizeTextarea();
+        
+        // Send typing indicator
+        if (ws && ws.readyState === WebSocket.OPEN && conversationId) {
+          // Clear previous timeout
+          clearTimeout(typingTimeout);
+          
+          // Send "typing started"
+          ws.send(JSON.stringify({
+            type: 'typing',
+            conversationId: parseInt(conversationId),
+            isTyping: true,
+            senderType: 'customer',
+            senderName: customerName || 'Customer'
+          }));
+          
+          // Send "typing stopped" after 1 second of inactivity
+          typingTimeout = setTimeout(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({
+                type: 'typing',
+                conversationId: parseInt(conversationId),
+                isTyping: false,
+                senderType: 'customer'
+              }));
+            }
+          }, 1000);
+        }
       });
 
       // Send on Enter (without Shift)
@@ -884,12 +972,25 @@
 
       debugLog('MESSAGE', 'Sending message', { message: message.substring(0, 50) + '...' });
 
+      // Stop typing indicator
+      if (ws && ws.readyState === WebSocket.OPEN && conversationId) {
+        ws.send(JSON.stringify({
+          type: 'typing',
+          conversationId: parseInt(conversationId),
+          isTyping: false,
+          senderType: 'customer'
+        }));
+      }
+
       // Disable input while sending
       chatInput.disabled = true;
       sendButton.disabled = true;
 
-      // Add message to UI immediately
-      addMessage('customer', message, customerName || 'You');
+      // Generate temp ID for optimistic display
+      const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+      // Add message to UI immediately with pending state
+      addMessage('customer', message, customerName || 'You', tempId, true);
       
       // Clear input
       chatInput.value = '';
@@ -942,6 +1043,9 @@
           
           debugLog('CONVERSATION', 'Conversation created', { conversationId });
           
+          // Update the temp message status
+          updateMessageStatus(tempId, 'confirmed', { id: tempId });
+          
           // Get a fresh WebSocket token for this conversation
           debugLog('WS', 'Getting fresh WebSocket token for new conversation');
           const sessionResponse = await fetch(`${API_URL}/api/widget/session?store=${STORE_ID}&conversationId=${conversationId}`);
@@ -977,7 +1081,8 @@
               customerEmail: customerEmail,
               customerName: customerName,
               content: message,
-              storeIdentifier: STORE_ID
+              storeIdentifier: STORE_ID,
+              tempId: tempId
             })
           });
 
@@ -985,8 +1090,11 @@
             const errorData = await msgResponse.json().catch(() => ({}));
             debugLog('ERROR', 'Message send failed', { status: msgResponse.status, error: errorData });
             
+            // Mark message as failed
+            updateMessageStatus(tempId, 'failed');
+            
             // If conversation no longer exists, clear it and create a new one
-            if (errorData.error && errorData.error.includes('conversation')) {
+            if (errorData.error && (errorData.error.includes('conversation') || errorData.error === 'conversation_not_found')) {
               debugLog('ERROR', 'Conversation no longer exists - creating new one');
               
               // Clear old conversation data
@@ -999,8 +1107,15 @@
                 ws = null;
               }
               
+              // Remove failed message
+              const failedMsg = document.querySelector(`[data-message-id="${tempId}"]`);
+              if (failedMsg) failedMsg.remove();
+              
               // Create new conversation with this message
               debugLog('MESSAGE', 'Creating fresh conversation');
+              
+              const newTempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+              addMessage('customer', message, customerName || 'You', newTempId, true);
               
               const convResponse = await fetch(`${API_URL}/api/conversations`, {
                 method: 'POST',
@@ -1024,6 +1139,8 @@
               localStorage.setItem(`chat_conv_${STORE_ID}`, conversationId);
               
               debugLog('MESSAGE', 'New conversation created', { conversationId });
+              
+              updateMessageStatus(newTempId, 'confirmed', { id: newTempId });
               
               // Get fresh WebSocket token
               const sessionResponse = await fetch(`${API_URL}/api/widget/session?store=${STORE_ID}&conversationId=${conversationId}`);
@@ -1049,6 +1166,9 @@
             const sentMessage = await msgResponse.json();
             debugLog('MESSAGE', 'Message sent successfully', sentMessage);
             
+            // Update message with real ID
+            updateMessageStatus(tempId, 'confirmed', sentMessage);
+            
             // Mark as displayed
             if (sentMessage.id) {
               displayedMessageIds.add(sentMessage.id);
@@ -1064,6 +1184,9 @@
       } catch (error) {
         debugLog('ERROR', 'Failed to send message', { error: error.message });
         console.error('❌ [Widget] Failed to send message:', error);
+        
+        // Mark message as failed
+        updateMessageStatus(tempId, 'failed');
         addMessage('system', 'Failed to send message. Please try again.', 'System');
         
         // Re-enable input
@@ -1074,9 +1197,13 @@
     }
 
     // Add message to UI
-    function addMessage(type, text, sender) {
+    function addMessage(type, text, sender, messageId = null, pending = false) {
       const messageDiv = document.createElement('div');
       messageDiv.className = `message ${type}`;
+      if (pending) {
+        messageDiv.classList.add('pending');
+      }
+      messageDiv.dataset.messageId = messageId || `local-${Date.now()}`;
       
       const time = new Date().toLocaleTimeString('en-US', { 
         hour: 'numeric', 
