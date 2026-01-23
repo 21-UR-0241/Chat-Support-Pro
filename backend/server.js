@@ -645,9 +645,18 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
     
     const camelMessage = snakeToCamel(message);
     
+    // 🔥 IMPORTANT: Send to BOTH conversation participants AND broadcast to agents
     sendToConversation(conversationId, {
       type: 'new_message',
       message: camelMessage
+    });
+    
+    // Also broadcast to all agents for real-time updates
+    broadcastToAgents({
+      type: 'new_message',
+      message: camelMessage,
+      conversationId,
+      storeId
     });
     
     console.log('✅ Message sent via WebSocket');

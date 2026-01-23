@@ -1,3 +1,236 @@
+// // backend/websocket-server.js
+// const { WebSocketServer, WebSocket } = require('ws');
+// const redisManager = process.env.REDIS_URL 
+//   ? require('./redis-manager')
+//   : require('./redis-manager-stub');
+// const { verifyToken, verifyWidgetToken } = require('./auth');
+
+// const connections = new Map();
+// let wss = null;
+
+// function generateId() {
+//   return Math.random().toString(36).substring(2, 15) + 
+//          Math.random().toString(36).substring(2, 15);
+// }
+
+// function initWebSocketServer(server) {
+//   wss = new WebSocketServer({ server, path: '/ws' });
+
+//   console.log('🔌 WebSocket server initializing...');
+
+//   redisManager.subscribe('chat:broadcast', (message) => {
+//     broadcastToLocal(message);
+//   });
+
+//   wss.on('connection', async (ws) => {
+//     const connectionId = generateId();
+//     console.log(`✅ WebSocket connected: ${connectionId}`);
+
+//     ws.send(JSON.stringify({ type: 'connected', connectionId, timestamp: new Date().toISOString() }));
+
+//     ws.on('message', async (data) => {
+//       try {
+//         const message = JSON.parse(data.toString());
+//         await handleWebSocketMessage(ws, connectionId, message);
+//       } catch (error) {
+//         ws.send(JSON.stringify({ type: 'error', message: 'Invalid message format' }));
+//       }
+//     });
+
+//     ws.on('close', async () => {
+//       const conn = connections.get(connectionId);
+//       if (conn) {
+//         await redisManager.removeSocket(connectionId);
+//         if (conn.conversationId) {
+//           await redisManager.removeActiveConversation(conn.storeId, conn.conversationId);
+//         }
+//         connections.delete(connectionId);
+//       }
+//     });
+//   });
+
+//   console.log('✅ WebSocket server initialized');
+// }
+
+// async function handleWebSocketMessage(ws, connectionId, message) {
+//   const { type } = message;
+
+//   switch (type) {
+//     case 'auth':
+//       await handleAuth(ws, connectionId, message);
+//       break;
+//     case 'join':
+//       await handleJoin(ws, connectionId, message);
+//       break;
+//     case 'typing':
+//       await handleTyping(connectionId, message);
+//       break;
+//     case 'ping':
+//       ws.send(JSON.stringify({ type: 'pong' }));
+//       break;
+//     default:
+//       ws.send(JSON.stringify({ type: 'error', message: 'Unknown message type' }));
+//   }
+// }
+
+// async function handleAuth(ws, connectionId, message) {
+//   const { token, clientType } = message;
+
+//   if (!token) {
+//     ws.send(JSON.stringify({ type: 'error', message: 'Missing token' }));
+//     ws.close();
+//     return;
+//   }
+
+//   if (clientType === 'agent') {
+//     const user = verifyToken(token);
+//     if (!user) {
+//       ws.send(JSON.stringify({ type: 'error', message: 'Unauthorized' }));
+//       ws.close();
+//       return;
+//     }
+//     connections.set(connectionId, { ws, role: 'agent', user });
+//     ws.send(JSON.stringify({ type: 'auth_ok', role: 'agent' }));
+//     return;
+//   }
+
+//   ws.send(JSON.stringify({ type: 'error', message: 'Invalid client type' }));
+//   ws.close();
+// }
+
+// async function handleJoin(ws, connectionId, message) {
+//   const { conversationId, role, storeId, token } = message;
+
+//   if (!conversationId || !role) {
+//     ws.send(JSON.stringify({ type: 'error', message: 'conversationId and role required' }));
+//     return;
+//   }
+
+//   if (role === 'customer') {
+//     const widget = verifyWidgetToken(token);
+//     if (!widget) {
+//       ws.send(JSON.stringify({ type: 'error', message: 'Unauthorized' }));
+//       ws.close();
+//       return;
+//     }
+
+//     connections.set(connectionId, {
+//       ws,
+//       conversationId,
+//       role: 'customer',
+//       storeId: widget.storeId
+//     });
+
+//     await redisManager.mapSocketToStore(connectionId, widget.storeId);
+//     await redisManager.addActiveConversation(widget.storeId, conversationId);
+
+//     ws.send(JSON.stringify({ type: 'joined', conversationId, role }));
+//     return;
+//   }
+
+//   const conn = connections.get(connectionId);
+//   if (!conn || conn.role !== 'agent') {
+//     ws.send(JSON.stringify({ type: 'error', message: 'Unauthorized' }));
+//     ws.close();
+//     return;
+//   }
+
+//   conn.conversationId = conversationId;
+//   connections.set(connectionId, conn);
+
+//   ws.send(JSON.stringify({ type: 'joined', conversationId, role }));
+// }
+
+// async function handleTyping(connectionId, message) {
+//   const conn = connections.get(connectionId);
+//   if (!conn) return;
+
+//   const { conversationId, isTyping, sender } = message;
+
+//   for (const [id, c] of connections.entries()) {
+//     if (id !== connectionId &&
+//         c.conversationId === conversationId &&
+//         c.ws.readyState === WebSocket.OPEN) {
+//       c.ws.send(JSON.stringify({ type: 'agent_typing', conversationId, isTyping, sender }));
+//     }
+//   }
+// }
+
+// function sendToConversation(conversationId, message) {
+//   const data = JSON.stringify(message);
+//   let sent = 0;
+
+//   for (const conn of connections.values()) {
+//     if (conn.conversationId === conversationId && conn.ws.readyState === WebSocket.OPEN) {
+//       conn.ws.send(data);
+//       sent++;
+//     }
+//   }
+
+//   redisManager.publishMessage(`conversation:${conversationId}`, message);
+// }
+
+// function broadcastToAgents(message) {
+//   const data = JSON.stringify(message);
+//   for (const conn of connections.values()) {
+//     if (conn.role === 'agent' && conn.ws.readyState === WebSocket.OPEN) {
+//       conn.ws.send(data);
+//     }
+//   }
+//   redisManager.publishMessage('chat:broadcast', message);
+// }
+
+// function broadcastToStore(storeId, message) {
+//   const data = JSON.stringify(message);
+//   for (const conn of connections.values()) {
+//     if (conn.storeId === storeId && conn.ws.readyState === WebSocket.OPEN) {
+//       conn.ws.send(data);
+//     }
+//   }
+//   redisManager.publishMessage(`store:${storeId}`, message);
+// }
+
+// function broadcastToLocal(message) {
+//   const data = JSON.stringify(message);
+//   for (const conn of connections.values()) {
+//     if (conn.ws.readyState === WebSocket.OPEN) {
+//       conn.ws.send(data);
+//     }
+//   }
+// }
+
+// function getWebSocketStats() {
+//   const stats = { totalConnections: connections.size, agentCount: 0, customerCount: 0, stores: new Set() };
+
+//   for (const conn of connections.values()) {
+//     if (conn.role === 'agent') stats.agentCount++;
+//     if (conn.role === 'customer') stats.customerCount++;
+//     if (conn.storeId) stats.stores.add(conn.storeId);
+//   }
+
+//   stats.activeStores = stats.stores.size;
+//   delete stats.stores;
+//   return stats;
+// }
+
+// function closeAll() {
+//   for (const conn of connections.values()) {
+//     if (conn.ws.readyState === WebSocket.OPEN) {
+//       conn.ws.close();
+//     }
+//   }
+//   connections.clear();
+// }
+
+// module.exports = {
+//   initWebSocketServer,
+//   sendToConversation,
+//   broadcastToAgents,
+//   broadcastToStore,
+//   getWebSocketStats,
+//   closeAll
+// };
+
 // backend/websocket-server.js
 const { WebSocketServer, WebSocket } = require('ws');
 const redisManager = process.env.REDIS_URL 
@@ -18,38 +251,68 @@ function initWebSocketServer(server) {
 
   console.log('🔌 WebSocket server initializing...');
 
+  // Subscribe to Redis broadcast channel
   redisManager.subscribe('chat:broadcast', (message) => {
     broadcastToLocal(message);
   });
 
-  wss.on('connection', async (ws) => {
+  wss.on('connection', async (ws, req) => {
     const connectionId = generateId();
-    console.log(`✅ WebSocket connected: ${connectionId}`);
+    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    
+    console.log(`✅ New WebSocket connection: ${connectionId} from ${clientIp}`);
 
-    ws.send(JSON.stringify({ type: 'connected', connectionId, timestamp: new Date().toISOString() }));
+    // Send initial connection acknowledgment
+    ws.send(JSON.stringify({ 
+      type: 'connected', 
+      connectionId, 
+      timestamp: new Date().toISOString() 
+    }));
+
+    // Store connection with basic info
+    connections.set(connectionId, {
+      ws,
+      connectedAt: new Date(),
+      authenticated: false
+    });
 
     ws.on('message', async (data) => {
       try {
         const message = JSON.parse(data.toString());
+        console.log(`📨 Message from ${connectionId}:`, message.type);
         await handleWebSocketMessage(ws, connectionId, message);
       } catch (error) {
-        ws.send(JSON.stringify({ type: 'error', message: 'Invalid message format' }));
+        console.error(`❌ Error handling message from ${connectionId}:`, error);
+        ws.send(JSON.stringify({ 
+          type: 'error', 
+          message: 'Invalid message format',
+          details: error.message 
+        }));
       }
     });
 
     ws.on('close', async () => {
       const conn = connections.get(connectionId);
       if (conn) {
+        console.log(`🔌 WebSocket disconnected: ${connectionId} (role: ${conn.role || 'unknown'})`);
+        
+        // Clean up Redis mappings
         await redisManager.removeSocket(connectionId);
-        if (conn.conversationId) {
+        
+        if (conn.conversationId && conn.storeId) {
           await redisManager.removeActiveConversation(conn.storeId, conn.conversationId);
         }
+        
         connections.delete(connectionId);
       }
     });
+
+    ws.on('error', (error) => {
+      console.error(`❌ WebSocket error for ${connectionId}:`, error);
+    });
   });
 
-  console.log('✅ WebSocket server initialized');
+  console.log('✅ WebSocket server initialized on /ws');
 }
 
 async function handleWebSocketMessage(ws, connectionId, message) {
@@ -59,167 +322,377 @@ async function handleWebSocketMessage(ws, connectionId, message) {
     case 'auth':
       await handleAuth(ws, connectionId, message);
       break;
+      
     case 'join':
+    case 'join_conversation':
       await handleJoin(ws, connectionId, message);
       break;
+      
     case 'typing':
       await handleTyping(connectionId, message);
       break;
+      
     case 'ping':
-      ws.send(JSON.stringify({ type: 'pong' }));
+      ws.send(JSON.stringify({ type: 'pong', timestamp: new Date().toISOString() }));
       break;
+      
     default:
-      ws.send(JSON.stringify({ type: 'error', message: 'Unknown message type' }));
+      console.warn(`⚠️ Unknown message type: ${type} from ${connectionId}`);
+      ws.send(JSON.stringify({ 
+        type: 'error', 
+        message: `Unknown message type: ${type}` 
+      }));
   }
 }
 
 async function handleAuth(ws, connectionId, message) {
   const { token, clientType } = message;
 
+  console.log(`🔐 Auth attempt: ${connectionId}, clientType: ${clientType}`);
+
   if (!token) {
+    console.error(`❌ Auth failed: Missing token for ${connectionId}`);
     ws.send(JSON.stringify({ type: 'error', message: 'Missing token' }));
     ws.close();
     return;
   }
 
+  // Handle agent authentication
   if (clientType === 'agent') {
-    const user = verifyToken(token);
-    if (!user) {
-      ws.send(JSON.stringify({ type: 'error', message: 'Unauthorized' }));
+    try {
+      const user = verifyToken(token);
+      if (!user) {
+        console.error(`❌ Auth failed: Invalid agent token for ${connectionId}`);
+        ws.send(JSON.stringify({ type: 'error', message: 'Unauthorized' }));
+        ws.close();
+        return;
+      }
+      
+      connections.set(connectionId, { 
+        ws, 
+        role: 'agent', 
+        user,
+        authenticated: true,
+        connectedAt: new Date()
+      });
+      
+      console.log(`✅ Agent authenticated: ${connectionId} (${user.email})`);
+      ws.send(JSON.stringify({ type: 'auth_ok', role: 'agent', user: { id: user.id, email: user.email } }));
+      return;
+    } catch (error) {
+      console.error(`❌ Auth error for ${connectionId}:`, error);
+      ws.send(JSON.stringify({ type: 'error', message: 'Authentication failed' }));
       ws.close();
       return;
     }
-    connections.set(connectionId, { ws, role: 'agent', user });
-    ws.send(JSON.stringify({ type: 'auth_ok', role: 'agent' }));
-    return;
   }
 
+  // Handle customer authentication (widget)
+  if (clientType === 'customer') {
+    try {
+      const widget = verifyWidgetToken(token);
+      if (!widget) {
+        console.error(`❌ Auth failed: Invalid widget token for ${connectionId}`);
+        ws.send(JSON.stringify({ type: 'error', message: 'Unauthorized' }));
+        ws.close();
+        return;
+      }
+      
+      connections.set(connectionId, { 
+        ws, 
+        role: 'customer', 
+        storeId: widget.storeId,
+        authenticated: true,
+        connectedAt: new Date()
+      });
+      
+      console.log(`✅ Customer authenticated: ${connectionId} (store: ${widget.storeId})`);
+      ws.send(JSON.stringify({ type: 'auth_ok', role: 'customer' }));
+      
+      await redisManager.mapSocketToStore(connectionId, widget.storeId);
+      return;
+    } catch (error) {
+      console.error(`❌ Auth error for ${connectionId}:`, error);
+      ws.send(JSON.stringify({ type: 'error', message: 'Authentication failed' }));
+      ws.close();
+      return;
+    }
+  }
+
+  console.error(`❌ Invalid client type: ${clientType}`);
   ws.send(JSON.stringify({ type: 'error', message: 'Invalid client type' }));
   ws.close();
 }
 
 async function handleJoin(ws, connectionId, message) {
-  const { conversationId, role, storeId, token } = message;
+  const { conversationId, role, storeId, token, employeeName, customerEmail, customerName } = message;
+
+  console.log(`🚪 Join request: ${connectionId}, conversation: ${conversationId}, role: ${role}`);
 
   if (!conversationId || !role) {
+    console.error(`❌ Join failed: Missing conversationId or role`);
     ws.send(JSON.stringify({ type: 'error', message: 'conversationId and role required' }));
     return;
   }
 
+  const conn = connections.get(connectionId);
+  if (!conn) {
+    console.error(`❌ Join failed: Connection not found`);
+    ws.send(JSON.stringify({ type: 'error', message: 'Connection not found' }));
+    return;
+  }
+
+  // Handle customer joining
   if (role === 'customer') {
-    const widget = verifyWidgetToken(token);
-    if (!widget) {
+    // If not authenticated yet, try to authenticate with token
+    if (!conn.authenticated && token) {
+      try {
+        const widget = verifyWidgetToken(token);
+        if (!widget) {
+          console.error(`❌ Join failed: Invalid token for customer`);
+          ws.send(JSON.stringify({ type: 'error', message: 'Unauthorized' }));
+          ws.close();
+          return;
+        }
+        
+        conn.authenticated = true;
+        conn.storeId = widget.storeId;
+        await redisManager.mapSocketToStore(connectionId, widget.storeId);
+      } catch (error) {
+        console.error(`❌ Join error:`, error);
+        ws.send(JSON.stringify({ type: 'error', message: 'Authentication failed' }));
+        ws.close();
+        return;
+      }
+    }
+
+    // Update connection with conversation details
+    conn.conversationId = conversationId;
+    conn.role = 'customer';
+    if (customerEmail) conn.customerEmail = customerEmail;
+    if (customerName) conn.customerName = customerName;
+    if (storeId && !conn.storeId) conn.storeId = storeId;
+    
+    connections.set(connectionId, conn);
+
+    // Add to active conversations
+    if (conn.storeId) {
+      await redisManager.addActiveConversation(conn.storeId, conversationId);
+    }
+
+    console.log(`✅ Customer joined conversation: ${conversationId}`);
+    ws.send(JSON.stringify({ type: 'joined', conversationId, role: 'customer' }));
+    
+    // Notify agents that customer joined
+    broadcastToAgents({
+      type: 'customer_joined',
+      conversationId,
+      customerName: conn.customerName,
+      timestamp: new Date().toISOString()
+    });
+    
+    return;
+  }
+
+  // Handle agent joining
+  if (role === 'agent') {
+    // Verify agent is authenticated
+    if (!conn.authenticated || conn.role !== 'agent') {
+      console.error(`❌ Join failed: Agent not authenticated`);
       ws.send(JSON.stringify({ type: 'error', message: 'Unauthorized' }));
       ws.close();
       return;
     }
 
-    connections.set(connectionId, {
-      ws,
+    // Update connection with conversation details
+    conn.conversationId = conversationId;
+    if (employeeName) conn.employeeName = employeeName;
+    
+    connections.set(connectionId, conn);
+
+    console.log(`✅ Agent joined conversation: ${conversationId} (${employeeName})`);
+    ws.send(JSON.stringify({ type: 'joined', conversationId, role: 'agent' }));
+    
+    // Notify customer that agent joined
+    sendToConversation(conversationId, {
+      type: 'agent_joined',
       conversationId,
-      role: 'customer',
-      storeId: widget.storeId
+      agentName: employeeName,
+      timestamp: new Date().toISOString()
     });
-
-    await redisManager.mapSocketToStore(connectionId, widget.storeId);
-    await redisManager.addActiveConversation(widget.storeId, conversationId);
-
-    ws.send(JSON.stringify({ type: 'joined', conversationId, role }));
+    
     return;
   }
 
-  const conn = connections.get(connectionId);
-  if (!conn || conn.role !== 'agent') {
-    ws.send(JSON.stringify({ type: 'error', message: 'Unauthorized' }));
-    ws.close();
-    return;
-  }
-
-  conn.conversationId = conversationId;
-  connections.set(connectionId, conn);
-
-  ws.send(JSON.stringify({ type: 'joined', conversationId, role }));
+  console.error(`❌ Join failed: Invalid role: ${role}`);
+  ws.send(JSON.stringify({ type: 'error', message: 'Invalid role' }));
 }
 
 async function handleTyping(connectionId, message) {
   const conn = connections.get(connectionId);
-  if (!conn) return;
+  if (!conn || !conn.conversationId) {
+    console.warn(`⚠️ Typing indicator from unknown connection: ${connectionId}`);
+    return;
+  }
 
-  const { conversationId, isTyping, sender } = message;
+  const { conversationId, isTyping, senderType, senderName } = message;
 
+  console.log(`⌨️ Typing indicator: ${connectionId}, conversation: ${conversationId}, typing: ${isTyping}`);
+
+  const typingMessage = {
+    type: 'typing',
+    conversationId,
+    isTyping: isTyping !== false, // Default to true if not specified
+    senderType: senderType || conn.role,
+    senderName: senderName || conn.employeeName || conn.customerName || 'Unknown',
+    timestamp: new Date().toISOString()
+  };
+
+  // Send typing indicator to all other participants in the conversation
+  let sent = 0;
   for (const [id, c] of connections.entries()) {
     if (id !== connectionId &&
         c.conversationId === conversationId &&
         c.ws.readyState === WebSocket.OPEN) {
-      c.ws.send(JSON.stringify({ type: 'agent_typing', conversationId, isTyping, sender }));
+      c.ws.send(JSON.stringify(typingMessage));
+      sent++;
     }
   }
+
+  console.log(`✅ Typing indicator sent to ${sent} participant(s)`);
+
+  // Also publish to Redis for multi-server setups
+  await redisManager.publishMessage(`conversation:${conversationId}`, typingMessage);
 }
 
 function sendToConversation(conversationId, message) {
   const data = JSON.stringify(message);
   let sent = 0;
 
+  console.log(`📤 Sending to conversation ${conversationId}:`, message.type);
+
   for (const conn of connections.values()) {
     if (conn.conversationId === conversationId && conn.ws.readyState === WebSocket.OPEN) {
-      conn.ws.send(data);
-      sent++;
+      try {
+        conn.ws.send(data);
+        sent++;
+      } catch (error) {
+        console.error(`❌ Failed to send to connection:`, error);
+      }
     }
   }
 
+  console.log(`✅ Message sent to ${sent} connection(s) in conversation ${conversationId}`);
+
+  // Publish to Redis for multi-server setups
   redisManager.publishMessage(`conversation:${conversationId}`, message);
 }
 
 function broadcastToAgents(message) {
   const data = JSON.stringify(message);
+  let sent = 0;
+
+  console.log(`📤 Broadcasting to all agents:`, message.type);
+
   for (const conn of connections.values()) {
     if (conn.role === 'agent' && conn.ws.readyState === WebSocket.OPEN) {
-      conn.ws.send(data);
+      try {
+        conn.ws.send(data);
+        sent++;
+      } catch (error) {
+        console.error(`❌ Failed to send to agent:`, error);
+      }
     }
   }
+
+  console.log(`✅ Message broadcast to ${sent} agent(s)`);
+
+  // Publish to Redis for multi-server setups
   redisManager.publishMessage('chat:broadcast', message);
 }
 
 function broadcastToStore(storeId, message) {
   const data = JSON.stringify(message);
+  let sent = 0;
+
+  console.log(`📤 Broadcasting to store ${storeId}:`, message.type);
+
   for (const conn of connections.values()) {
     if (conn.storeId === storeId && conn.ws.readyState === WebSocket.OPEN) {
-      conn.ws.send(data);
+      try {
+        conn.ws.send(data);
+        sent++;
+      } catch (error) {
+        console.error(`❌ Failed to send to store connection:`, error);
+      }
     }
   }
+
+  console.log(`✅ Message broadcast to ${sent} connection(s) in store ${storeId}`);
+
+  // Publish to Redis for multi-server setups
   redisManager.publishMessage(`store:${storeId}`, message);
 }
 
 function broadcastToLocal(message) {
   const data = JSON.stringify(message);
+  let sent = 0;
+
   for (const conn of connections.values()) {
     if (conn.ws.readyState === WebSocket.OPEN) {
-      conn.ws.send(data);
+      try {
+        conn.ws.send(data);
+        sent++;
+      } catch (error) {
+        console.error(`❌ Failed to broadcast:`, error);
+      }
     }
   }
+
+  console.log(`✅ Broadcast sent to ${sent} connection(s)`);
 }
 
 function getWebSocketStats() {
-  const stats = { totalConnections: connections.size, agentCount: 0, customerCount: 0, stores: new Set() };
+  const stats = { 
+    totalConnections: connections.size, 
+    agentCount: 0, 
+    customerCount: 0, 
+    authenticatedCount: 0,
+    stores: new Set(),
+    conversations: new Set()
+  };
 
   for (const conn of connections.values()) {
     if (conn.role === 'agent') stats.agentCount++;
     if (conn.role === 'customer') stats.customerCount++;
+    if (conn.authenticated) stats.authenticatedCount++;
     if (conn.storeId) stats.stores.add(conn.storeId);
+    if (conn.conversationId) stats.conversations.add(conn.conversationId);
   }
 
   stats.activeStores = stats.stores.size;
+  stats.activeConversations = stats.conversations.size;
   delete stats.stores;
+  delete stats.conversations;
+  
   return stats;
 }
 
 function closeAll() {
+  console.log(`🔌 Closing all WebSocket connections (${connections.size})`);
+  
   for (const conn of connections.values()) {
     if (conn.ws.readyState === WebSocket.OPEN) {
-      conn.ws.close();
+      try {
+        conn.ws.close();
+      } catch (error) {
+        console.error(`❌ Error closing connection:`, error);
+      }
     }
   }
+  
   connections.clear();
+  console.log('✅ All WebSocket connections closed');
 }
 
 module.exports = {
