@@ -94,6 +94,51 @@
       50% { opacity: 0.5; }
     }
 
+    /* Debug Panel */
+    #debug-panel {
+      position: fixed;
+      bottom: 80px;
+      right: 20px;
+      background: white;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 11px;
+      font-family: monospace;
+      max-width: 300px;
+      max-height: 200px;
+      overflow-y: auto;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      z-index: 1000;
+      display: none;
+    }
+
+    #debug-panel.show {
+      display: block;
+    }
+
+    #debug-panel .debug-item {
+      margin: 4px 0;
+      padding: 4px;
+      background: #f7fafc;
+      border-radius: 4px;
+    }
+
+    #debug-toggle {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: var(--primary-color);
+      color: white;
+      border: none;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      cursor: pointer;
+      font-size: 18px;
+      z-index: 1001;
+    }
+
     /* Messages Container */
     #chat-messages {
       flex: 1;
@@ -424,6 +469,12 @@
     </button>
   </div>
 
+  <!-- Debug Panel -->
+  <button id="debug-toggle" title="Toggle Debug">🐛</button>
+  <div id="debug-panel">
+    <div id="debug-content"></div>
+  </div>
+
   <script>
     console.log('🚀 [Widget] Initializing (Zero-Delay Optimized Version)...');
 
@@ -445,6 +496,7 @@
     let reconnectDelay = 2000;
     let displayedMessageIds = new Set();
     let typingTimeout = null;
+    let debugLogs = [];
 
     // DOM Elements
     const chatMessages = document.getElementById('chat-messages');
@@ -454,17 +506,63 @@
     const brandName = document.getElementById('brand-name');
     const statusText = document.getElementById('status-text');
     const statusIndicator = document.getElementById('status-indicator');
+    const debugPanel = document.getElementById('debug-panel');
+    const debugContent = document.getElementById('debug-content');
+    const debugToggle = document.getElementById('debug-toggle');
+
+    // Debug logging
+    function debugLog(category, message, data = null) {
+      const timestamp = new Date().toLocaleTimeString();
+      const logEntry = {
+        time: timestamp,
+        category,
+        message,
+        data
+      };
+      
+      debugLogs.push(logEntry);
+      if (debugLogs.length > 50) debugLogs.shift();
+      
+      updateDebugPanel();
+      
+      // Also log to console
+      if (data) {
+        console.log(`[${category}] ${message}`, data);
+      } else {
+        console.log(`[${category}] ${message}`);
+      }
+    }
+
+    function updateDebugPanel() {
+      debugContent.innerHTML = debugLogs
+        .slice(-20)
+        .reverse()
+        .map(log => `
+          <div class="debug-item">
+            <strong>${log.time} [${log.category}]</strong><br>
+            ${log.message}
+            ${log.data ? `<br><pre>${JSON.stringify(log.data, null, 2).substring(0, 200)}</pre>` : ''}
+          </div>
+        `)
+        .join('');
+    }
+
+    debugToggle.addEventListener('click', () => {
+      debugPanel.classList.toggle('show');
+    });
 
     // Check if store ID exists
     if (!STORE_ID) {
       showError('Widget configuration error. Please contact support.');
-      console.error('[Widget] No store ID provided');
+      debugLog('ERROR', 'No store ID provided');
+    } else {
+      debugLog('INIT', 'Store ID found', { STORE_ID });
     }
 
     // Initialize
     async function init() {
       try {
-        console.log('[Widget] Starting initialization');
+        debugLog('INIT', 'Starting initialization');
         
         await loadSettings();
         setupEventListeners();
@@ -474,15 +572,35 @@
         customerName = localStorage.getItem(`chat_name_${STORE_ID}`);
         conversationId = localStorage.getItem(`chat_conv_${STORE_ID}`);
         
+        debugLog('STORAGE', 'Loaded from localStorage', { 
+          customerEmail, 
+          customerName, 
+          conversationId 
+        });
+        
+        // Log WebSocket connection state
+        debugLog('WS', 'WebSocket connection check', {
+          hasToken: !!wsToken,
+          hasConversation: !!conversationId,
+          wsUrl: WS_URL,
+          willConnect: !!(conversationId && wsToken)
+        });
+        
         // Connect WebSocket if we have a conversation
         if (conversationId && wsToken) {
+          debugLog('WS', 'Attempting WebSocket connection');
           await connectWebSocket();
         } else {
+          debugLog('WS', 'Skipping WebSocket - missing requirements', {
+            hasToken: !!wsToken,
+            hasConversation: !!conversationId
+          });
           updateStatus('online', "We're online");
         }
         
-        console.log('[Widget] Initialization complete');
+        debugLog('INIT', 'Initialization complete');
       } catch (error) {
+        debugLog('ERROR', 'Initialization failed', { error: error.message });
         console.error('❌ [Widget] Initialization failed:', error);
         showError('Failed to load chat. Please refresh the page.');
         updateStatus('offline', 'Offline');
@@ -501,11 +619,15 @@
       } else {
         statusIndicator.classList.add('offline');
       }
+      
+      debugLog('STATUS', `Status changed: ${status}`, { text });
     }
 
     // Load widget settings
     async function loadSettings() {
       try {
+        debugLog('SETTINGS', 'Loading settings');
+        
         const response = await fetch(`${API_URL}/api/widget/settings?store=${STORE_ID}`);
         
         if (!response.ok) {
@@ -513,6 +635,7 @@
         }
         
         storeSettings = await response.json();
+        debugLog('SETTINGS', 'Settings loaded', storeSettings);
         
         // Apply settings
         brandName.textContent = storeSettings.brandName || 'Chat Support Pro';
@@ -530,14 +653,19 @@
         }
         
         // Get WebSocket token
+        debugLog('WS', 'Requesting WebSocket token');
         const sessionResponse = await fetch(`${API_URL}/api/widget/session?store=${STORE_ID}`);
         
         if (sessionResponse.ok) {
           const sessionData = await sessionResponse.json();
           wsToken = sessionData.token;
+          debugLog('WS', 'WebSocket token obtained', { tokenLength: wsToken?.length });
+        } else {
+          debugLog('WS', 'Failed to get WebSocket token', { status: sessionResponse.status });
         }
         
       } catch (error) {
+        debugLog('ERROR', 'Failed to load settings', { error: error.message });
         console.error('❌ [Widget] Failed to load settings:', error);
       }
     }
@@ -545,15 +673,20 @@
     // Connect to WebSocket
     async function connectWebSocket() {
       if (!wsToken || !conversationId) {
+        debugLog('WS', 'Cannot connect - missing requirements', {
+          hasToken: !!wsToken,
+          hasConversation: !!conversationId
+        });
         return;
       }
 
       try {
-        console.log('[WebSocket] Connecting...');
+        debugLog('WS', 'Connecting to WebSocket', { url: WS_URL });
         updateStatus('connecting', 'Connecting...');
         
         // Close existing connection
         if (ws) {
+          debugLog('WS', 'Closing existing connection');
           ws.close();
           ws = null;
         }
@@ -561,7 +694,7 @@
         ws = new WebSocket(WS_URL);
         
         ws.onopen = () => {
-          console.log('[WebSocket] Connection opened');
+          debugLog('WS', 'Connection opened');
           reconnectAttempts = 0;
           
           // Authenticate
@@ -571,25 +704,27 @@
             clientType: 'customer'
           };
           
+          debugLog('WS', 'Sending auth message', authMessage);
           ws.send(JSON.stringify(authMessage));
         };
         
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
+            debugLog('WS', `Received: ${data.type}`, data);
             handleWebSocketMessage(data);
           } catch (error) {
-            console.error('[WebSocket] Failed to parse message:', error);
+            debugLog('ERROR', 'Failed to parse WebSocket message', { error: error.message });
           }
         };
         
         ws.onerror = (error) => {
-          console.error('[WebSocket] Error:', error);
+          debugLog('ERROR', 'WebSocket error', { error: error.message || 'Unknown error' });
           updateStatus('offline', 'Connection error');
         };
         
         ws.onclose = (event) => {
-          console.log('[WebSocket] Connection closed:', event.code);
+          debugLog('WS', 'Connection closed', { code: event.code, reason: event.reason });
           updateStatus('offline', 'Disconnected');
           ws = null;
           
@@ -597,19 +732,20 @@
           if (reconnectAttempts < maxReconnectAttempts && conversationId) {
             reconnectAttempts++;
             const delay = reconnectDelay * reconnectAttempts;
-            console.log(`[WebSocket] Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
+            debugLog('WS', `Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
             updateStatus('connecting', 'Reconnecting...');
             
             setTimeout(() => {
               connectWebSocket();
             }, delay);
           } else if (reconnectAttempts >= maxReconnectAttempts) {
+            debugLog('ERROR', 'Max reconnection attempts reached');
             updateStatus('offline', 'Offline');
           }
         };
         
       } catch (error) {
-        console.error('[WebSocket] Connection failed:', error);
+        debugLog('ERROR', 'WebSocket connection failed', { error: error.message });
         updateStatus('offline', 'Connection failed');
       }
     }
@@ -618,11 +754,11 @@
     function handleWebSocketMessage(data) {
       switch (data.type) {
         case 'connected':
-          console.log('[WebSocket] Connected');
+          debugLog('WS', 'Connection established');
           break;
           
         case 'auth_ok':
-          console.log('[WebSocket] Authenticated');
+          debugLog('WS', 'Authentication successful');
           updateStatus('online', "We're online ⚡");
           
           // Join conversation
@@ -636,29 +772,34 @@
             storeId: storeSettings?.storeId
           };
           
+          debugLog('WS', 'Joining conversation', joinMessage);
           ws.send(JSON.stringify(joinMessage));
           break;
           
         case 'joined':
-          console.log('[WebSocket] Joined conversation');
+          debugLog('WS', 'Successfully joined conversation');
           updateStatus('online', "We're online ⚡");
           break;
           
         case 'new_message':
           if (data.message) {
+            debugLog('MESSAGE', 'New message received', data.message);
             displayMessageFromWebSocket(data.message);
           }
           break;
           
         case 'message_confirmed':
+          debugLog('MESSAGE', 'Message confirmed', { tempId: data.tempId, realId: data.message?.id });
           updateMessageStatus(data.tempId, 'confirmed', data.message);
           break;
           
         case 'message_failed':
+          debugLog('ERROR', 'Message failed to save', { tempId: data.tempId });
           updateMessageStatus(data.tempId, 'failed');
           break;
           
         case 'typing':
+          debugLog('UI', 'Typing indicator', { isTyping: data.isTyping, sender: data.senderName });
           if (data.isTyping && data.senderType === 'agent') {
             showTypingIndicator();
           } else if (!data.isTyping) {
@@ -667,21 +808,31 @@
           break;
           
         case 'agent_joined':
+          debugLog('WS', 'Agent joined conversation', data);
+          break;
+          
         case 'customer_joined':
+          debugLog('WS', 'Customer joined conversation (self)', data);
+          break;
+          
         case 'customer_left':
         case 'agent_left':
-          console.log(`[WebSocket] ${data.type}:`, data);
+          debugLog('WS', 'Participant left', data);
           break;
           
         case 'error':
-          console.error('[WebSocket] Error:', data.message);
+          debugLog('ERROR', 'WebSocket error message', data);
+          if (data.message) {
+            console.error('WebSocket error:', data.message);
+          }
           break;
           
         case 'pong':
+          debugLog('WS', 'Pong received');
           break;
           
         default:
-          console.log(`[WebSocket] Unhandled message type: ${data.type}`, data);
+          debugLog('WS', `Unhandled message type: ${data.type}`, data);
       }
     }
 
@@ -697,22 +848,29 @@
         pending: message.pending
       };
       
+      debugLog('MESSAGE', 'Processing message', normalizedMessage);
+      
       // Check conversation ID
       if (normalizedMessage.conversationId && 
           normalizedMessage.conversationId !== parseInt(conversationId)) {
+        debugLog('MESSAGE', 'Message for different conversation - skipping');
         return;
       }
       
       // Prevent duplicate messages
       if (displayedMessageIds.has(normalizedMessage.id)) {
+        debugLog('MESSAGE', 'Duplicate message - skipping');
         return;
       }
       
       // Don't display customer's own messages (already shown optimistically)
       if (normalizedMessage.senderType === 'customer') {
+        debugLog('MESSAGE', 'Customer message - skipping (already displayed)');
         displayedMessageIds.add(normalizedMessage.id);
         return;
       }
+      
+      debugLog('MESSAGE', 'Displaying agent message');
       
       hideTypingIndicator();
       
@@ -738,10 +896,12 @@
             // Update with real ID and remove pending state
             el.dataset.messageId = confirmedMessage?.id || tempId;
             el.classList.remove('pending');
+            debugLog('MESSAGE', 'Message confirmed in UI', { tempId, realId: confirmedMessage?.id });
           } else if (status === 'failed') {
             // Mark as failed
             el.classList.remove('pending');
             el.classList.add('failed');
+            debugLog('MESSAGE', 'Message marked as failed in UI', { tempId });
           }
         }
       });
@@ -754,7 +914,7 @@
         sendButton.disabled = !chatInput.value.trim();
         autoResizeTextarea();
         
-        // Send typing indicator
+        // Send typing indicator (no auto-stop timeout - instant)
         if (ws && ws.readyState === WebSocket.OPEN && conversationId) {
           ws.send(JSON.stringify({
             type: 'typing',
@@ -794,6 +954,8 @@
       const message = chatInput.value.trim();
       if (!message) return;
 
+      debugLog('MESSAGE', 'Sending message', { message: message.substring(0, 50) + '...' });
+
       // Stop typing indicator immediately
       if (ws && ws.readyState === WebSocket.OPEN && conversationId) {
         ws.send(JSON.stringify({
@@ -832,10 +994,14 @@
           // Save to localStorage
           localStorage.setItem(`chat_email_${STORE_ID}`, customerEmail);
           localStorage.setItem(`chat_name_${STORE_ID}`, customerName);
+          
+          debugLog('USER', 'Customer info saved', { customerEmail, customerName });
         }
 
         // Create conversation if needed
         if (!conversationId) {
+          debugLog('CONVERSATION', 'Creating new conversation');
+          
           const convResponse = await fetch(`${API_URL}/api/conversations`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -848,6 +1014,8 @@
           });
 
           if (!convResponse.ok) {
+            const errorText = await convResponse.text();
+            debugLog('ERROR', 'Conversation creation failed', { status: convResponse.status, error: errorText });
             throw new Error('Failed to create conversation');
           }
 
@@ -857,27 +1025,36 @@
           // Save conversation ID
           localStorage.setItem(`chat_conv_${STORE_ID}`, conversationId);
           
+          debugLog('CONVERSATION', 'Conversation created', { conversationId });
+          
           // Update the temp message status
           updateMessageStatus(tempId, 'confirmed', { id: tempId });
           
           // Get a fresh WebSocket token for this conversation
+          debugLog('WS', 'Getting fresh WebSocket token for new conversation');
           const sessionResponse = await fetch(`${API_URL}/api/widget/session?store=${STORE_ID}&conversationId=${conversationId}`);
           
           if (sessionResponse.ok) {
             const sessionData = await sessionResponse.json();
             wsToken = sessionData.token;
+            debugLog('WS', 'Fresh token obtained', { tokenLength: wsToken?.length });
           }
           
           // Connect to WebSocket now
           if (wsToken) {
+            debugLog('WS', 'Connecting WebSocket after conversation creation');
             await connectWebSocket();
+          } else {
+            debugLog('ERROR', 'Cannot connect WebSocket - no token');
           }
           
-          // Show auto-reply instantly
+          // Show auto-reply INSTANTLY (no timeout)
           addMessage('agent', 'Thanks for reaching out! An agent will be with you shortly.', 'Support Team');
           
         } else {
           // Send message to existing conversation
+          debugLog('MESSAGE', 'Sending to existing conversation', { conversationId });
+          
           const msgResponse = await fetch(`${API_URL}/api/widget/messages`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -893,12 +1070,15 @@
 
           if (!msgResponse.ok) {
             const errorData = await msgResponse.json().catch(() => ({}));
+            debugLog('ERROR', 'Message send failed', { status: msgResponse.status, error: errorData });
             
             // Mark message as failed
             updateMessageStatus(tempId, 'failed');
             
             // If conversation no longer exists, clear it and create a new one
             if (errorData.error && (errorData.error.includes('conversation') || errorData.error === 'conversation_not_found')) {
+              debugLog('ERROR', 'Conversation no longer exists - creating new one');
+              
               // Clear old conversation data
               localStorage.removeItem(`chat_conv_${STORE_ID}`);
               conversationId = null;
@@ -914,6 +1094,8 @@
               if (failedMsg) failedMsg.remove();
               
               // Create new conversation with this message
+              debugLog('MESSAGE', 'Creating fresh conversation');
+              
               const newTempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
               addMessage('customer', message, customerName || 'You', newTempId, true);
               
@@ -938,6 +1120,8 @@
               // Save new conversation ID
               localStorage.setItem(`chat_conv_${STORE_ID}`, conversationId);
               
+              debugLog('MESSAGE', 'New conversation created', { conversationId });
+              
               updateMessageStatus(newTempId, 'confirmed', { id: newTempId });
               
               // Get fresh WebSocket token
@@ -952,7 +1136,7 @@
                 await connectWebSocket();
               }
               
-              // Show auto-reply instantly
+              // Show auto-reply INSTANTLY (no timeout)
               addMessage('agent', 'Thanks for reaching out! An agent will be with you shortly.', 'Support Team');
               
             } else {
@@ -960,6 +1144,7 @@
             }
           } else {
             const sentMessage = await msgResponse.json();
+            debugLog('MESSAGE', 'Message sent successfully', sentMessage);
             
             // Update message with real ID
             updateMessageStatus(tempId, 'confirmed', sentMessage);
@@ -977,6 +1162,7 @@
         chatInput.focus();
         
       } catch (error) {
+        debugLog('ERROR', 'Failed to send message', { error: error.message });
         console.error('❌ [Widget] Failed to send message:', error);
         
         // Mark message as failed
@@ -1028,6 +1214,8 @@
     function showTypingIndicator() {
       hideTypingIndicator();
       
+      debugLog('UI', 'Showing typing indicator');
+      
       const indicator = document.createElement('div');
       indicator.className = 'message agent';
       indicator.id = 'typing-indicator';
@@ -1049,6 +1237,7 @@
     function hideTypingIndicator() {
       const indicator = document.getElementById('typing-indicator');
       if (indicator) {
+        debugLog('UI', 'Hiding typing indicator');
         indicator.remove();
       }
     }
@@ -1077,6 +1266,7 @@
     // Cleanup on page unload
     window.addEventListener('beforeunload', () => {
       if (ws && ws.readyState === WebSocket.OPEN) {
+        debugLog('WS', 'Closing WebSocket on page unload');
         ws.close();
       }
     });
