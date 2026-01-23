@@ -466,14 +466,16 @@ async function handleAuth(ws, connectionId, message) {
   ws.close();
 }
 
+// Replace the handleJoin function in websocket-server.js with this improved version
+
 async function handleJoin(ws, connectionId, message) {
   const { conversationId, role, storeId, token, employeeName, customerEmail, customerName } = message;
 
   console.log(`🚪 Join request: ${connectionId}, conversation: ${conversationId}, role: ${role}`);
 
-  if (!conversationId || !role) {
-    console.error(`❌ Join failed: Missing conversationId or role`);
-    ws.send(JSON.stringify({ type: 'error', message: 'conversationId and role required' }));
+  if (!conversationId) {
+    console.error(`❌ Join failed: Missing conversationId`);
+    ws.send(JSON.stringify({ type: 'error', message: 'conversationId required' }));
     return;
   }
 
@@ -484,8 +486,25 @@ async function handleJoin(ws, connectionId, message) {
     return;
   }
 
+  // 🔥 SMART ROLE DETECTION
+  // If role not provided in message, use the role from authenticated connection
+  let effectiveRole = role;
+  
+  if (!effectiveRole && conn.role) {
+    effectiveRole = conn.role; // Use role from authentication
+    console.log(`ℹ️ Role inferred from authentication: ${effectiveRole}`);
+  }
+  
+  if (!effectiveRole) {
+    console.error(`❌ Join failed: Cannot determine role`);
+    ws.send(JSON.stringify({ type: 'error', message: 'Role required or authenticate first' }));
+    return;
+  }
+
+  console.log(`✅ Using role: ${effectiveRole}`);
+
   // Handle customer joining
-  if (role === 'customer') {
+  if (effectiveRole === 'customer') {
     // If not authenticated yet, try to authenticate with token
     if (!conn.authenticated && token) {
       try {
@@ -510,7 +529,7 @@ async function handleJoin(ws, connectionId, message) {
 
     // Update connection with conversation details
     conn.conversationId = conversationId;
-    conn.role = 'customer';
+    conn.role = 'customer'; // Ensure role is set
     if (customerEmail) conn.customerEmail = customerEmail;
     if (customerName) conn.customerName = customerName;
     if (storeId && !conn.storeId) conn.storeId = storeId;
@@ -537,11 +556,11 @@ async function handleJoin(ws, connectionId, message) {
   }
 
   // Handle agent joining
-  if (role === 'agent') {
+  if (effectiveRole === 'agent') {
     // Verify agent is authenticated
     if (!conn.authenticated || conn.role !== 'agent') {
       console.error(`❌ Join failed: Agent not authenticated`);
-      ws.send(JSON.stringify({ type: 'error', message: 'Unauthorized' }));
+      ws.send(JSON.stringify({ type: 'error', message: 'Unauthorized - authenticate first' }));
       ws.close();
       return;
     }
@@ -552,22 +571,27 @@ async function handleJoin(ws, connectionId, message) {
     
     connections.set(connectionId, conn);
 
-    console.log(`✅ Agent joined conversation: ${conversationId} (${employeeName})`);
-    ws.send(JSON.stringify({ type: 'joined', conversationId, role: 'agent' }));
+    console.log(`✅ Agent joined conversation: ${conversationId} (${conn.user?.email || employeeName || 'agent'})`);
+    ws.send(JSON.stringify({ 
+      type: 'joined', 
+      conversationId, 
+      role: 'agent',
+      agentName: conn.user?.name || employeeName
+    }));
     
     // Notify customer that agent joined
     sendToConversation(conversationId, {
       type: 'agent_joined',
       conversationId,
-      agentName: employeeName,
+      agentName: conn.user?.name || employeeName || 'Support Agent',
       timestamp: new Date().toISOString()
     });
     
     return;
   }
 
-  console.error(`❌ Join failed: Invalid role: ${role}`);
-  ws.send(JSON.stringify({ type: 'error', message: 'Invalid role' }));
+  console.error(`❌ Join failed: Invalid role: ${effectiveRole}`);
+  ws.send(JSON.stringify({ type: 'error', message: `Invalid role: ${effectiveRole}` }));
 }
 
 async function handleTyping(connectionId, message) {
