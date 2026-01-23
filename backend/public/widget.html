@@ -794,6 +794,16 @@
       const message = chatInput.value.trim();
       if (!message) return;
 
+        try {
+    console.log('🔄 Getting fresh token...');
+    const tokenResponse = await fetch(`${API_URL}/api/widget/session?store=${STORE_ID}`);
+    if (tokenResponse.ok) {
+      const tokenData = await tokenResponse.json();
+      wsToken = tokenData.token;
+      console.log('✅ Fresh token obtained');
+    }
+  } catch (e) { console.error('⚠️ Token refresh failed:', e); }
+
       // Stop typing indicator immediately
       if (ws && ws.readyState === WebSocket.OPEN && conversationId) {
         ws.send(JSON.stringify({
