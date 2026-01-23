@@ -9,7 +9,7 @@ import { useWebSocket } from './useWebSocket';
 
 export function useConversations(employeeId) {
   const [conversations, setConversations] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true); // Only for initial load
   const [error, setError] = useState(null);
   const [filters, setFilters] = useState({
     status: 'open',
@@ -21,9 +21,11 @@ export function useConversations(employeeId) {
   const ws = useWebSocket(employeeId);
 
   // Load conversations
-  const loadConversations = useCallback(async () => {
+  const loadConversations = useCallback(async (showLoading = true) => {
     try {
-      setLoading(true);
+      if (showLoading) {
+        setLoading(true);
+      }
       setError(null);
 
       const data = await api.getConversations(filters);
@@ -32,71 +34,101 @@ export function useConversations(employeeId) {
       console.error('Failed to load conversations:', err);
       setError(err.message);
     } finally {
-      setLoading(false);
+      if (showLoading) {
+        setLoading(false);
+      }
     }
   }, [filters]);
 
   // Initial load
   useEffect(() => {
-    loadConversations();
+    loadConversations(true); // Show loading on initial load
   }, [loadConversations]);
 
-  // Listen for new messages
+  // Listen for new messages via WebSocket
   useEffect(() => {
-    if (!ws) return; // ← ADD THIS NULL CHECK
+    if (!ws) return;
 
     const unsubscribe = ws.on('new_message', (data) => {
-      console.log('New message notification:', data);
+      console.log('📨 New message notification:', data);
       
-      // Update conversation in list
-      setConversations(prev => {
-        const index = prev.findIndex(c => c.id === data.conversationId);
-        
-        if (index > -1) {
-          // Update existing conversation
-          const updated = [...prev];
-          updated[index] = {
-            ...updated[index],
-            lastMessage: data.message?.content || '', // ← ADD SAFE ACCESS
-            lastMessageAt: data.message?.createdAt || new Date().toISOString(),
-            totalMessageCount: (updated[index].totalMessageCount || 0) + 1,
-          };
-          
-          // Move to top
-          const conversation = updated.splice(index, 1)[0];
-          return [conversation, ...updated];
-        } else {
-          // New conversation - reload
-          loadConversations();
-          return prev;
-        }
-      });
+      // Update conversation locally (no loading state)
+      updateConversationFromMessage(data);
 
       // Play notification sound
       playNotificationSound();
     });
 
     return unsubscribe;
-  }, [ws, loadConversations]);
+  }, [ws]);
+
+  // Update conversation from WebSocket message
+  const updateConversationFromMessage = useCallback((data) => {
+    setConversations(prev => {
+      const conversationId = data.conversationId || data.conversation_id;
+      const messageContent = data.message?.content || data.content || '';
+      const messageTime = data.message?.createdAt || data.createdAt || new Date().toISOString();
+      
+      const index = prev.findIndex(c => c.id === conversationId);
+      
+      if (index > -1) {
+        // Update existing conversation
+        const updated = [...prev];
+        updated[index] = {
+          ...updated[index],
+          lastMessage: messageContent,
+          lastMessageAt: messageTime,
+          totalMessageCount: (updated[index].totalMessageCount || 0) + 1,
+        };
+        
+        // Move to top and sort by most recent
+        return updated.sort((a, b) => 
+          new Date(b.lastMessageAt || 0) - new Date(a.lastMessageAt || 0)
+        );
+      } else {
+        // New conversation detected - silently refresh in background
+        console.log('🆕 New conversation detected, refreshing...');
+        loadConversations(false); // false = don't show loading spinner
+        return prev;
+      }
+    });
+  }, [loadConversations]);
 
   // Update filters
   const updateFilters = useCallback((newFilters) => {
     setFilters(prev => ({ ...prev, ...newFilters }));
   }, []);
 
-  // Refresh conversations
+  // Manual refresh (shows loading)
   const refresh = useCallback(() => {
-    loadConversations();
+    loadConversations(true); // true = show loading spinner
   }, [loadConversations]);
 
-  // Update conversation locally
+  // Update conversation locally (without API call)
   const updateConversation = useCallback((id, updates) => {
-    setConversations(prev =>
-      prev.map(conv =>
+    setConversations(prev => {
+      const updated = prev.map(conv =>
         conv.id === id ? { ...conv, ...updates } : conv
-      )
-    );
+      );
+      
+      // Re-sort if lastMessageAt was updated
+      if (updates.lastMessageAt) {
+        return updated.sort((a, b) => 
+          new Date(b.lastMessageAt || 0) - new Date(a.lastMessageAt || 0)
+        );
+      }
+      
+      return updated;
+    });
   }, []);
+
+  // Optimistically update conversation when sending a message
+  const optimisticUpdate = useCallback((conversationId, message) => {
+    updateConversation(conversationId, {
+      lastMessage: message,
+      lastMessageAt: new Date().toISOString(),
+    });
+  }, [updateConversation]);
 
   return {
     conversations,
@@ -106,6 +138,7 @@ export function useConversations(employeeId) {
     updateFilters,
     refresh,
     updateConversation,
+    optimisticUpdate,
   };
 }
 
