@@ -1,13 +1,13 @@
 /**
  * Employee Management Component
- * Admin panel for managing employees
+ * Admin panel for managing employees - Mobile Optimized
  */
 
 import React, { useState, useEffect } from 'react';
 import api from '../services/api';
 import '../styles/EmployeeManagement.css';
 
-function EmployeeManagement({ currentUser }) {
+function EmployeeManagement({ currentUser, onBack }) {
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -183,13 +183,40 @@ function EmployeeManagement({ currentUser }) {
     return role === 'admin' ? 'role-badge-admin' : 'role-badge-agent';
   };
 
+  // Navigate back to dashboard
+  const handleBack = () => {
+    // Use custom onBack prop if provided (for React Router or custom navigation)
+    if (onBack && typeof onBack === 'function') {
+      onBack();
+      return;
+    }
+    
+    // Try browser history
+    if (window.history.length > 1) {
+      window.history.back();
+    } else {
+      // Fallback - navigate to root/dashboard
+      window.location.href = '/';
+    }
+  };
+
   return (
     <div className="employee-management">
       {/* Header */}
       <div className="em-header">
         <div className="em-header-left">
-          <h1>👥 Employee Management</h1>
-          <p className="em-subtitle">{employees.length} total employees</p>
+          <button 
+            className="btn-back-icon" 
+            onClick={handleBack}
+            aria-label="Back to dashboard"
+            title="Back to dashboard"
+          >
+            ←
+          </button>
+          <div className="em-title-group">
+            <h1>👥 Employee Management</h1>
+            <p className="em-subtitle">{employees.length} total employees</p>
+          </div>
         </div>
         <div className="em-header-right">
           <button className="btn-primary" onClick={handleAddNew}>
@@ -282,29 +309,30 @@ function EmployeeManagement({ currentUser }) {
                       </div>
                     </div>
                   </td>
-                  <td>{employee.email}</td>
-                  <td>
+                  <td data-label="Email">{employee.email}</td>
+                  <td data-label="Role">
                     <span className={`role-badge ${getRoleBadgeClass(employee.role)}`}>
                       {employee.role}
                     </span>
                   </td>
-                  <td>
+                  <td data-label="Status">
                     <span className={`status-badge ${employee.isActive ? 'status-active' : 'status-inactive'}`}>
                       {employee.isActive ? '🟢 Active' : '🔴 Inactive'}
                     </span>
                   </td>
-                  <td>
+                  <td data-label="Last Login">
                     {employee.lastLogin ? new Date(employee.lastLogin).toLocaleDateString() : 'Never'}
                   </td>
-                  <td className="text-center">
+                  <td data-label="Conversations" className="text-center">
                     {employee.totalConversationsHandled || 0}
                   </td>
-                  <td>
+                  <td data-label="Actions">
                     <div className="action-buttons">
                       <button
                         className="btn-action btn-edit"
                         onClick={() => handleEdit(employee)}
                         title="Edit"
+                        aria-label="Edit employee"
                       >
                         ✏️
                       </button>
@@ -312,6 +340,7 @@ function EmployeeManagement({ currentUser }) {
                         className={`btn-action ${employee.isActive ? 'btn-deactivate' : 'btn-activate'}`}
                         onClick={() => handleToggleStatus(employee)}
                         title={employee.isActive ? 'Deactivate' : 'Activate'}
+                        aria-label={employee.isActive ? 'Deactivate employee' : 'Activate employee'}
                         disabled={employee.id === currentUser.id}
                       >
                         {employee.isActive ? '🔒' : '🔓'}
@@ -320,6 +349,7 @@ function EmployeeManagement({ currentUser }) {
                         className="btn-action btn-delete"
                         onClick={() => handleDelete(employee)}
                         title="Delete"
+                        aria-label="Delete employee"
                         disabled={employee.id === currentUser.id}
                       >
                         🗑️
@@ -339,7 +369,11 @@ function EmployeeManagement({ currentUser }) {
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>{editingEmployee ? 'Edit Employee' : 'Add New Employee'}</h2>
-              <button className="modal-close" onClick={() => setShowModal(false)}>
+              <button 
+                className="modal-close" 
+                onClick={() => setShowModal(false)}
+                aria-label="Close modal"
+              >
                 ×
               </button>
             </div>

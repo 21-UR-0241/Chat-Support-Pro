@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import api from './services/api';
 import { useConversations } from './hooks/useConversations';
@@ -8,6 +7,7 @@ import ChatWindow from './components/ChatWindow';
 import Login from './components/Login';
 import EmployeeManagement from './components/EmployeeManagement';
 import ErrorBoundary from './components/ErrorBoundary';
+import MobileMenu from './components/MobileMenu';
 
 function App() {
   const [employee, setEmployee] = useState(null);
@@ -25,7 +25,6 @@ function App() {
 
     if (storedEmployee && token) {
       try {
-        // IMPORTANT: Verify token with server, don't just trust localStorage
         console.log('🔍 Verifying stored session...');
         const { employee: verifiedEmployee } = await api.verifyToken();
         
@@ -34,7 +33,6 @@ function App() {
         setIsAuthenticated(true);
       } catch (error) {
         console.error('❌ Session verification failed:', error.message);
-        // Clear invalid session data
         localStorage.removeItem('employee');
         localStorage.removeItem('token');
         setEmployee(null);
@@ -63,7 +61,6 @@ function App() {
     setIsAuthenticated(false);
   };
 
-  // Show loading spinner while checking auth
   if (loading) {
     return (
       <div className="loading-container">
@@ -72,12 +69,10 @@ function App() {
     );
   }
 
-  // Show login page if not authenticated
   if (!isAuthenticated) {
     return <Login onLogin={handleLogin} />;
   }
 
-  // Show dashboard if authenticated
   return <DashboardContent employee={employee} onLogout={handleLogout} />;
 }
 
@@ -88,8 +83,8 @@ function DashboardContent({ employee, onLogout }) {
   const [stats, setStats] = useState(null);
   const [loadingStores, setLoadingStores] = useState(true);
   const [error, setError] = useState(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Use conversations hook
   const {
     conversations,
     loading: conversationsLoading,
@@ -98,28 +93,21 @@ function DashboardContent({ employee, onLogout }) {
     refresh: refreshConversations,
   } = useConversations(employee.id);
 
-  // Use WebSocket hook
   const ws = useWebSocket(employee.id);
 
-  // Load stores and stats on mount
   useEffect(() => {
     loadStores();
     loadStats();
     requestNotificationPermission();
   }, []);
 
-  // Listen for WebSocket events
   useEffect(() => {
     if (!ws) return;
 
-    // New message
     const unsubscribe1 = ws.on('new_message', (data) => {
       console.log('New message received:', data);
-      
-      // Refresh conversations when new message arrives
       refreshConversations();
       
-      // Play notification if not active conversation
       if (activeConversation?.id !== data.conversationId) {
         showNotification('New Message', {
           body: `New message from ${data.storeId}`,
@@ -128,29 +116,24 @@ function DashboardContent({ employee, onLogout }) {
       }
     });
 
-    // Message
     const unsubscribe2 = ws.on('message', (data) => {
       console.log('WebSocket message:', data.type);
     });
 
-    // Connected
     const unsubscribe3 = ws.on('connected', () => {
       console.log('✅ Connected to WebSocket');
       setError(null);
     });
 
-    // Disconnected
     const unsubscribe4 = ws.on('disconnected', () => {
       console.log('❌ Disconnected from WebSocket');
     });
 
-    // Error
     const unsubscribe5 = ws.on('error', (error) => {
       console.error('WebSocket error:', error);
       setError('WebSocket connection error. Retrying...');
     });
 
-    // Max reconnect reached
     const unsubscribe6 = ws.on('max_reconnect_reached', () => {
       setError('Unable to connect to server. Please refresh the page.');
     });
@@ -165,7 +148,6 @@ function DashboardContent({ employee, onLogout }) {
     };
   }, [ws, activeConversation, refreshConversations]);
 
-  // Join conversation room when selected
   useEffect(() => {
     if (activeConversation && ws) {
       ws.joinConversation(activeConversation.id);
@@ -176,7 +158,6 @@ function DashboardContent({ employee, onLogout }) {
     }
   }, [activeConversation, ws]);
 
-  // Load stores
   const loadStores = async () => {
     try {
       setLoadingStores(true);
@@ -190,18 +171,15 @@ function DashboardContent({ employee, onLogout }) {
     }
   };
 
-  // Load stats
   const loadStats = async () => {
     try {
       const data = await api.getDashboardStats();
       setStats(data);
     } catch (error) {
       console.error('Failed to load stats:', error);
-      // Don't show error for stats, just log it
     }
   };
 
-  // Handle send message
   const handleSendMessage = async (conversation, message) => {
     console.log('📤 handleSendMessage called with:', {
       conversationId: conversation.id,
@@ -210,7 +188,6 @@ function DashboardContent({ employee, onLogout }) {
     });
 
     try {
-      // Get storeId from conversation - handle both camelCase and snake_case
       const storeId = conversation.shopId || conversation.shop_id || conversation.storeId || null;
       
       console.log('🏪 Store ID:', storeId);
@@ -234,7 +211,6 @@ function DashboardContent({ employee, onLogout }) {
       
       console.log('✅ Message sent successfully:', sentMessage);
 
-      // Refresh conversations to update last message
       refreshConversations();
 
       return sentMessage;
@@ -249,20 +225,18 @@ function DashboardContent({ employee, onLogout }) {
     }
   };
 
-  // Handle typing
   const handleTyping = (isTyping) => {
     if (activeConversation && ws) {
       ws.sendTyping(activeConversation.id, isTyping, employee.name);
     }
   };
 
-  // Handle close conversation
   const handleCloseConversation = () => {
+    console.log('⬅️ Closing conversation (back to list)');
     setActiveConversation(null);
     refreshConversations();
   };
 
-  // Show notification
   const showNotification = (title, options) => {
     if ('Notification' in window && Notification.permission === 'granted') {
       try {
@@ -273,7 +247,6 @@ function DashboardContent({ employee, onLogout }) {
     }
   };
 
-  // Request notification permission
   const requestNotificationPermission = () => {
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission().then((permission) => {
@@ -282,7 +255,6 @@ function DashboardContent({ employee, onLogout }) {
     }
   };
 
-  // Check WebSocket connection status
   const getConnectionStatus = () => {
     if (!ws) return false;
     try {
@@ -292,7 +264,6 @@ function DashboardContent({ employee, onLogout }) {
     }
   };
 
-  // Get initials from name
   const getInitials = (name) => {
     if (!name) return 'U';
     return name
@@ -303,11 +274,25 @@ function DashboardContent({ employee, onLogout }) {
       .slice(0, 2);
   };
 
+  const handleMobileMenuToggle = () => {
+    setMobileMenuOpen(!mobileMenuOpen);
+  };
+
+  const closeMobileMenu = () => {
+    setMobileMenuOpen(false);
+  };
+
+  // Handle navigation back to dashboard from Employee Management
+  const handleBackToDashboard = () => {
+    console.log('⬅️ Navigating back to dashboard');
+    setActivePage('dashboard');
+  };
+
   const isConnected = getConnectionStatus();
 
   return (
     <div className="app">
-      {/* Header */}
+      {/* Desktop Header - Hidden on mobile */}
       <header className="app-header">
         <div className="header-left">
           <h1>💬 Chat Support Pro</h1>
@@ -326,7 +311,6 @@ function DashboardContent({ employee, onLogout }) {
         </div>
 
         <div className="header-right">
-          {/* Navigation */}
           <div className="header-nav">
             <button
               className={`nav-btn ${activePage === 'dashboard' ? 'nav-active' : ''}`}
@@ -369,6 +353,25 @@ function DashboardContent({ employee, onLogout }) {
         </div>
       </header>
 
+      {/* Mobile Menu */}
+      <MobileMenu
+        isOpen={mobileMenuOpen}
+        onClose={closeMobileMenu}
+        employee={employee}
+        activePage={activePage}
+        onPageChange={(page) => {
+          setActivePage(page);
+          closeMobileMenu();
+        }}
+        onRefresh={() => {
+          refreshConversations();
+          closeMobileMenu();
+        }}
+        onLogout={onLogout}
+        stats={stats}
+        isConnected={isConnected}
+      />
+
       {/* Error Banner */}
       {error && (
         <div className="error-banner">
@@ -377,10 +380,26 @@ function DashboardContent({ employee, onLogout }) {
         </div>
       )}
 
-        {/* Main Content - Dashboard */}
-        {activePage === 'dashboard' && (
-          <div className="app-content">
-            {/* Conversation List */}
+      {/* Main Content - Dashboard */}
+      {activePage === 'dashboard' && (
+        <div className="app-content">
+          <div className={`conversations-sidebar ${activeConversation ? 'hidden-mobile' : ''}`}>
+            {/* Mobile hamburger in conversation list */}
+            <div className="conversation-list-header mobile-header">
+              <button
+                className="mobile-menu-btn"
+                onClick={handleMobileMenuToggle}
+                aria-label="Menu"
+                type="button"
+              >
+                <span></span>
+                <span></span>
+                <span></span>
+              </button>
+              <h2>Conversations</h2>
+              <span className="conversation-count">{conversations.length}</span>
+            </div>
+
             <ConversationList
               conversations={conversations}
               activeConversation={activeConversation}
@@ -390,8 +409,9 @@ function DashboardContent({ employee, onLogout }) {
               stores={stores}
               loading={conversationsLoading || loadingStores}
             />
+          </div>
 
-            {/* Chat Window - Wrapped in ErrorBoundary */}
+          <div className={`chat-window ${!activeConversation ? 'hidden' : ''}`}>
             <ErrorBoundary>
               <ChatWindow
                 conversation={activeConversation}
@@ -399,14 +419,19 @@ function DashboardContent({ employee, onLogout }) {
                 onClose={handleCloseConversation}
                 onTyping={handleTyping}
                 employeeName={employee.name}
+                onMenuToggle={handleMobileMenuToggle}
               />
             </ErrorBoundary>
           </div>
-        )}
+        </div>
+      )}
 
       {/* Main Content - Employee Management */}
       {activePage === 'employees' && (
-        <EmployeeManagement currentUser={employee} />
+        <EmployeeManagement 
+          currentUser={employee}
+          onBack={handleBackToDashboard}
+        />
       )}
     </div>
   );

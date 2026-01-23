@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!-- <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -126,6 +126,353 @@
     }
     .info-box strong {
       color: #047857;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>💬 Chat Support Pro</h1>
+    <p class="subtitle">Professional Live Chat for Shopify Stores</p>
+
+    <div class="links">
+      <a href="/admin.html" class="link-card">
+        <div class="link-icon">🎯</div>
+        <div class="link-content">
+          <h2 class="link-title">Admin Dashboard</h2>
+          <p class="link-desc">Manage customer conversations with powerful tools</p>
+        </div>
+        <div class="arrow">→</div>
+      </a>
+    </div>
+
+    <div class="stats">
+      <div class="stat-grid">
+        <div class="stat">
+          <p class="stat-value">∞</p>
+          <p class="stat-label">Stores</p>
+        </div>
+        <div class="stat">
+          <p class="stat-value">1</p>
+          <p class="stat-label">Dashboard</p>
+        </div>
+        <div class="stat">
+          <p class="stat-value">24/7</p>
+          <p class="stat-label">Support</p>
+        </div>
+      </div>
+
+      <div class="info-box">
+        <p>
+          <strong>💡 Quick Start:</strong> Make sure your backend is running 
+          (<code>npm run dev</code>) before using the admin dashboard or widget.
+        </p>
+      </div>
+    </div>
+  </div>
+</body>
+</html> -->
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#667eea">
+  <title>Chat Support Pro - Professional Live Chat for Shopify</title>
+  <meta name="description" content="Transform customer support with real-time chat, multi-store management, and advanced analytics">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <style>
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+        'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+        sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      overscroll-behavior-y: contain;
+    }
+
+    /* Safe Area Insets for iPhone Notch */
+    @supports (padding: max(0px)) {
+      body {
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
+      }
+    }
+
+    .container {
+      background: white;
+      border-radius: 16px;
+      padding: 48px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      max-width: 600px;
+      width: 100%;
+    }
+    h1 {
+      font-size: 36px;
+      color: #333;
+      margin: 0 0 12px 0;
+      text-align: center;
+    }
+    .subtitle {
+      color: #666;
+      text-align: center;
+      font-size: 16px;
+      margin: 0 0 40px 0;
+    }
+    .links {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .link-card {
+      display: flex;
+      align-items: center;
+      padding: 24px;
+      background: #f9fafb;
+      border: 2px solid #e5e7eb;
+      border-radius: 12px;
+      text-decoration: none;
+      transition: all 0.2s;
+    }
+    .link-card:hover {
+      border-color: #667eea;
+      background: #f0f4ff;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+    }
+    
+    /* Touch feedback for mobile */
+    @media (max-width: 768px) {
+      .link-card:active {
+        opacity: 0.7;
+        transform: scale(0.98);
+      }
+    }
+    
+    /* Remove on desktop to avoid double-click effect */
+    @media (hover: hover) {
+      .link-card:active {
+        opacity: 1;
+        transform: translateY(-2px);
+      }
+    }
+    
+    .link-icon {
+      font-size: 32px;
+      margin-right: 20px;
+    }
+    .link-content {
+      flex: 1;
+    }
+    .link-title {
+      font-size: 20px;
+      font-weight: 600;
+      color: #333;
+      margin: 0 0 4px 0;
+    }
+    .link-desc {
+      font-size: 14px;
+      color: #666;
+      margin: 0;
+    }
+    .arrow {
+      font-size: 24px;
+      color: #667eea;
+    }
+    .stats {
+      margin-top: 40px;
+      padding-top: 32px;
+      border-top: 1px solid #e5e7eb;
+    }
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+    .stat {
+      text-align: center;
+    }
+    .stat-value {
+      font-size: 32px;
+      font-weight: 700;
+      color: #667eea;
+      margin: 0 0 4px 0;
+    }
+    .stat-label {
+      font-size: 12px;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin: 0;
+    }
+    .info-box {
+      background: #ecfdf5;
+      border: 1px solid #a7f3d0;
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 16px;
+    }
+    .info-box p {
+      margin: 0;
+      color: #065f46;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .info-box strong {
+      color: #047857;
+    }
+
+    /* Mobile Optimizations */
+    @media (max-width: 768px) {
+      body {
+        padding: 12px;
+      }
+      
+      .container {
+        padding: 32px 24px;
+        border-radius: 12px;
+      }
+      
+      h1 {
+        font-size: 28px;
+      }
+      
+      .subtitle {
+        font-size: 14px;
+        margin-bottom: 32px;
+      }
+      
+      .link-card {
+        padding: 20px;
+      }
+      
+      .link-icon {
+        font-size: 28px;
+        margin-right: 16px;
+      }
+      
+      .link-title {
+        font-size: 18px;
+      }
+      
+      .link-desc {
+        font-size: 13px;
+      }
+      
+      .arrow {
+        font-size: 20px;
+      }
+      
+      .stat-grid {
+        gap: 16px;
+      }
+      
+      .stat-value {
+        font-size: 28px;
+      }
+      
+      .stat-label {
+        font-size: 11px;
+      }
+      
+      .info-box {
+        padding: 12px;
+      }
+      
+      .info-box p {
+        font-size: 12px;
+      }
+    }
+
+    /* Landscape mode adjustments */
+    @media (max-width: 896px) and (orientation: landscape) {
+      body {
+        padding: 10px;
+      }
+      
+      .container {
+        padding: 24px 20px;
+        max-height: 90vh;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+      
+      h1 {
+        font-size: 24px;
+        margin-bottom: 8px;
+      }
+      
+      .subtitle {
+        font-size: 13px;
+        margin-bottom: 24px;
+      }
+      
+      .link-card {
+        padding: 16px;
+      }
+      
+      .stats {
+        margin-top: 24px;
+        padding-top: 24px;
+      }
+      
+      .stat-grid {
+        gap: 12px;
+      }
+      
+      .stat-value {
+        font-size: 24px;
+      }
+    }
+
+    /* Small mobile devices */
+    @media (max-width: 480px) {
+      .container {
+        padding: 24px 20px;
+      }
+      
+      .stat-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+      
+      .stat {
+        padding: 12px;
+        background: #f9fafb;
+        border-radius: 8px;
+      }
+    }
+
+    /* Smooth scrolling */
+    .container {
+      scroll-behavior: smooth;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    /* Hide scrollbar on mobile */
+    @media (max-width: 768px) {
+      .container::-webkit-scrollbar {
+        display: none;
+        width: 0;
+      }
+      
+      .container {
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+      }
     }
   </style>
 </head>
