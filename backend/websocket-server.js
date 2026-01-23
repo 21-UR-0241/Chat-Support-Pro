@@ -318,6 +318,8 @@ function initWebSocketServer(server) {
 async function handleWebSocketMessage(ws, connectionId, message) {
   const { type } = message;
 
+  console.log(`📨 Received message:`, JSON.stringify(message)); // Debug full message
+
   switch (type) {
     case 'auth':
       await handleAuth(ws, connectionId, message);
@@ -326,6 +328,11 @@ async function handleWebSocketMessage(ws, connectionId, message) {
     case 'join':
     case 'join_conversation':
       await handleJoin(ws, connectionId, message);
+      break;
+      
+    case 'leave':
+    case 'leave_conversation':
+      await handleLeave(ws, connectionId, message);
       break;
       
     case 'typing':
@@ -344,6 +351,41 @@ async function handleWebSocketMessage(ws, connectionId, message) {
       }));
   }
 }
+
+// Add leave handler
+async function handleLeave(ws, connectionId, message) {
+  const conn = connections.get(connectionId);
+  if (!conn) {
+    console.warn(`⚠️ Leave from unknown connection: ${connectionId}`);
+    return;
+  }
+
+  const oldConversationId = conn.conversationId;
+  
+  console.log(`🚪 Leave request: ${connectionId} from conversation ${oldConversationId}`);
+
+  // Remove conversation ID but keep connection
+  if (conn.conversationId) {
+    delete conn.conversationId;
+    connections.set(connectionId, conn);
+    
+    // Notify others in the conversation
+    if (oldConversationId) {
+      sendToConversation(oldConversationId, {
+        type: conn.role === 'agent' ? 'agent_left' : 'customer_left',
+        conversationId: oldConversationId,
+        name: conn.employeeName || conn.customerName,
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+
+  ws.send(JSON.stringify({ 
+    type: 'left', 
+    conversationId: oldConversationId 
+  }));
+}
+
 
 async function handleAuth(ws, connectionId, message) {
   const { token, clientType } = message;
