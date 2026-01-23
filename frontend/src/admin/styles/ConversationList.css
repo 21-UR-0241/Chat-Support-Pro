@@ -396,91 +396,89 @@
   }
 }
 
-/* Dark Mode Support */
-@media (prefers-color-scheme: dark) {
-  .conversation-list {
-    background: #000000;
-    border-right-color: #38383a;
-  }
+/* Dark Mode Support - Optional (add .dark-mode class to enable) */
+.dark-mode.conversation-list {
+  background: #000000;
+  border-right-color: #38383a;
+}
 
-  .conversation-list-header,
-  .search-container,
-  .compact-filters,
-  .filter-pills {
-    background: #000000;
-    border-bottom-color: #38383a;
-  }
+.dark-mode .conversation-list-header,
+.dark-mode .search-container,
+.dark-mode .compact-filters,
+.dark-mode .filter-pills {
+  background: #000000;
+  border-bottom-color: #38383a;
+}
 
-  .header-title,
-  .customer-name {
-    color: #ffffff;
-  }
+.dark-mode .header-title,
+.dark-mode .customer-name {
+  color: #ffffff;
+}
 
-  .search-bar {
-    background: #1c1c1e;
-  }
+.dark-mode .search-bar {
+  background: #1c1c1e;
+}
 
-  .search-bar:focus-within {
-    background: #2c2c2e;
-  }
+.dark-mode .search-bar:focus-within {
+  background: #2c2c2e;
+}
 
-  .search-input {
-    color: #ffffff;
-  }
+.dark-mode .search-input {
+  color: #ffffff;
+}
 
-  .search-input::placeholder {
-    color: #8e8e93;
-  }
+.dark-mode .search-input::placeholder {
+  color: #8e8e93;
+}
 
-  .compact-select {
-    background: #1c1c1e;
-    border-color: #38383a;
-    color: #ffffff;
-  }
+.dark-mode .compact-select {
+  background: #1c1c1e;
+  border-color: #38383a;
+  color: #ffffff;
+}
 
-  .compact-select:hover {
-    background: #2c2c2e;
-  }
+.dark-mode .compact-select:hover {
+  background: #2c2c2e;
+}
 
-  .conversation-items {
-    background: #000000;
-  }
+.dark-mode .conversation-items {
+  background: #000000;
+}
 
-  .conversation-item {
-    background: #000000;
-    border-bottom-color: #38383a;
-  }
+.dark-mode .conversation-item {
+  background: #000000;
+  border-bottom-color: #38383a;
+}
 
-  .conversation-item:hover {
-    background: #1c1c1e;
-  }
+.dark-mode .conversation-item:hover {
+  background: #1c1c1e;
+}
 
-  .conversation-item:active,
-  .conversation-item.active {
-    background: #1c1c1e;
-  }
+.dark-mode .conversation-item:active,
+.dark-mode .conversation-item.active {
+  background: #1c1c1e;
+}
 
-  .last-message {
-    color: #8e8e93;
-  }
+.dark-mode .last-message {
+  color: #8e8e93;
+}
 
-  .conversation-item.unread .last-message {
-    color: #ffffff;
-  }
+.dark-mode .conversation-item.unread .last-message {
+  color: #ffffff;
+}
 
-  .badge-store {
-    background: #1c1c1e;
-    color: #8e8e93;
-  }
+.dark-mode .badge-store {
+  background: #1c1c1e;
+  color: #8e8e93;
+}
 
-  .empty-state h3 {
-    color: #ffffff;
-  }
+.dark-mode .empty-state h3 {
+  color: #ffffff;
+}
 
-  .spinner {
-    border-color: #38383a;
-    border-top-color: #0a84ff;
-  }
+.dark-mode .spinner {
+  border-color: #38383a;
+  border-top-color: #0a84ff;
 }
 
 /* Responsive */

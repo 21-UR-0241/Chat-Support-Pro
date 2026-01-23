@@ -1,9 +1,3 @@
-//frontend/src/admin/components/ChatWindow.jsx
-/**
- * ChatWindow Component
- * Modern chat interface with WhatsApp-inspired design with WebSocket support
- */
-
 import React, { useState, useEffect, useRef } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import api from '../services/api';
@@ -43,42 +37,48 @@ function ChatWindow({
       return;
     }
 
-    console.log('🔌 Setting up WebSocket for conversation:', conversation.id);
+    console.log('🔌 [ChatWindow] Setting up WebSocket for conversation:', conversation.id);
     connectWebSocket();
 
     return () => {
-      console.log('🧹 Cleaning up WebSocket');
+      console.log('🧹 [ChatWindow] Cleaning up WebSocket');
       disconnectWebSocket();
     };
-  }, [conversation?.id]);
+  }, [conversation?.id, employeeName]); // Added employeeName to dependencies
 
   // Connect to WebSocket
   const connectWebSocket = () => {
-    if (!conversation) return;
+    if (!conversation) {
+      console.log('❌ [connectWebSocket] No conversation, aborting');
+      return;
+    }
 
     try {
+      // Close existing connection
       if (wsRef.current) {
+        console.log('🔌 [connectWebSocket] Closing existing connection');
         wsRef.current.close();
         wsRef.current = null;
       }
 
+      // Reset flags
       hasAuthenticated.current = false;
       hasJoined.current = false;
 
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${protocol}//${window.location.host}`;
       
-      console.log('🔌 Connecting to WebSocket:', wsUrl);
+      console.log('🔌 [connectWebSocket] Connecting to:', wsUrl);
       
       const ws = new WebSocket(wsUrl);
       
       ws.onopen = () => {
-        console.log('✅ WebSocket connection opened');
+        console.log('✅ [WebSocket] Connection opened');
         
         // Get auth token
         const token = localStorage.getItem('token');
         if (!token) {
-          console.error('❌ No auth token found in localStorage');
+          console.error('❌ [WebSocket] No auth token found in localStorage');
           ws.close();
           return;
         }
@@ -90,38 +90,54 @@ function ChatWindow({
           clientType: 'agent'
         };
         
-        console.log('📤 Sending auth message');
+        console.log('📤 [WebSocket] Sending auth message:', authMessage);
         ws.send(JSON.stringify(authMessage));
       };
       
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          console.log('📨 WebSocket message received:', data.type, data);
+          console.log('📨 [WebSocket] Message received:', data);
           
           // Handle authentication response
-          if (data.type === 'auth_ok' && !hasAuthenticated.current) {
-            console.log('✅ Authentication successful, now joining conversation');
+          if (data.type === 'auth_ok') {
+            if (hasAuthenticated.current) {
+              console.log('⚠️ [WebSocket] Already authenticated, ignoring duplicate auth_ok');
+              return;
+            }
+            
+            console.log('✅ [WebSocket] Authentication successful');
             hasAuthenticated.current = true;
             setWsConnected(true);
             reconnectAttempts.current = 0;
             
-            // Join the conversation
-            const joinMessage = {
-              type: 'join_conversation',
-              conversationId: parseInt(conversation.id),
-              role: 'agent',
-              employeeName: employeeName || 'Agent'
-            };
-            
-            console.log('📤 Sending join message:', joinMessage);
-            ws.send(JSON.stringify(joinMessage));
+            // Wait a bit then join conversation
+            setTimeout(() => {
+              if (!hasJoined.current && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                const joinMessage = {
+                  type: 'join_conversation',
+                  conversationId: parseInt(conversation.id),
+                  role: 'agent',
+                  employeeName: employeeName || 'Agent'
+                };
+                
+                console.log('📤 [WebSocket] Sending join_conversation message:', JSON.stringify(joinMessage));
+                wsRef.current.send(JSON.stringify(joinMessage));
+              } else {
+                console.log('⚠️ [WebSocket] Cannot join - hasJoined:', hasJoined.current, 'wsState:', wsRef.current?.readyState);
+              }
+            }, 200);
             return;
           }
           
           // Handle join confirmation
-          if ((data.type === 'joined' || data.type === 'join_ok') && !hasJoined.current) {
-            console.log('✅ Successfully joined conversation:', conversation.id);
+          if (data.type === 'joined' || data.type === 'join_ok') {
+            if (hasJoined.current) {
+              console.log('⚠️ [WebSocket] Already joined, ignoring duplicate join confirmation');
+              return;
+            }
+            
+            console.log('✅ [WebSocket] Successfully joined conversation:', conversation.id);
             hasJoined.current = true;
             return;
           }
@@ -130,17 +146,17 @@ function ChatWindow({
           handleWebSocketMessage(data);
           
         } catch (error) {
-          console.error('❌ Failed to parse WebSocket message:', error, event.data);
+          console.error('❌ [WebSocket] Failed to parse message:', error, event.data);
         }
       };
       
       ws.onerror = (error) => {
-        console.error('❌ WebSocket error:', error);
+        console.error('❌ [WebSocket] Error:', error);
         setWsConnected(false);
       };
       
       ws.onclose = (event) => {
-        console.log('🔌 WebSocket disconnected', event.code, event.reason);
+        console.log('🔌 [WebSocket] Disconnected - Code:', event.code, 'Reason:', event.reason);
         setWsConnected(false);
         wsRef.current = null;
         hasAuthenticated.current = false;
@@ -151,46 +167,60 @@ function ChatWindow({
           reconnectAttempts.current++;
           const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 10000);
           
-          console.log(`🔄 Reconnecting in ${delay}ms (attempt ${reconnectAttempts.current}/${maxReconnectAttempts})`);
+          console.log(`🔄 [WebSocket] Reconnecting in ${delay}ms (attempt ${reconnectAttempts.current}/${maxReconnectAttempts})`);
           
           reconnectTimeoutRef.current = setTimeout(() => {
             connectWebSocket();
           }, delay);
+        } else if (reconnectAttempts.current >= maxReconnectAttempts) {
+          console.error('❌ [WebSocket] Max reconnection attempts reached');
         }
       };
       
       wsRef.current = ws;
+      console.log('✅ [connectWebSocket] WebSocket reference stored');
       
     } catch (error) {
-      console.error('❌ Failed to create WebSocket connection:', error);
+      console.error('❌ [connectWebSocket] Failed to create connection:', error);
       setWsConnected(false);
     }
   };
 
   // Disconnect WebSocket
   const disconnectWebSocket = () => {
+    console.log('🔌 [disconnectWebSocket] Called');
+    
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
     }
     
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      console.log('🔌 Sending leave message before disconnect');
-      try {
-        wsRef.current.send(JSON.stringify({
-          type: 'leave_conversation',
-          conversationId: conversation?.id
-        }));
-      } catch (error) {
-        console.error('❌ Error sending leave message:', error);
-      }
+    if (wsRef.current) {
+      const currentState = wsRef.current.readyState;
+      console.log('🔌 [disconnectWebSocket] Current WebSocket state:', currentState);
       
-      setTimeout(() => {
-        if (wsRef.current) {
-          wsRef.current.close();
-          wsRef.current = null;
+      if (currentState === WebSocket.OPEN) {
+        console.log('📤 [disconnectWebSocket] Sending leave message');
+        try {
+          wsRef.current.send(JSON.stringify({
+            type: 'leave_conversation',
+            conversationId: conversation?.id
+          }));
+        } catch (error) {
+          console.error('❌ [disconnectWebSocket] Error sending leave message:', error);
         }
-      }, 100);
+        
+        setTimeout(() => {
+          if (wsRef.current) {
+            console.log('🔌 [disconnectWebSocket] Closing WebSocket');
+            wsRef.current.close();
+            wsRef.current = null;
+          }
+        }, 100);
+      } else {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
     }
     
     setWsConnected(false);
@@ -201,88 +231,69 @@ function ChatWindow({
 
   // Handle WebSocket messages
   const handleWebSocketMessage = (data) => {
-    console.log('🔍 Processing WebSocket message type:', data.type);
-    
     switch (data.type) {
       case 'connected':
-      case 'authenticated':
-        console.log('✅ WebSocket ready');
+        console.log('✅ [handleWebSocketMessage] Connected');
         break;
         
       case 'new_message':
         if (data.message) {
-          console.log('💬 New message from WebSocket:', data.message);
+          console.log('💬 [handleWebSocketMessage] New message:', data.message);
           handleIncomingMessage(data.message);
         }
         break;
         
       case 'typing':
-      case 'customer_typing':
         handleTypingIndicator(data);
         break;
         
       case 'error':
-        console.error('❌ WebSocket error:', data.message);
+        console.error('❌ [handleWebSocketMessage] Error:', data.message);
         break;
         
       default:
-        console.log('📨 Unhandled WebSocket message type:', data.type);
+        console.log('📨 [handleWebSocketMessage] Unhandled type:', data.type);
     }
   };
 
-  // Handle incoming message from WebSocket
+  // Handle incoming message
   const handleIncomingMessage = (message) => {
-    console.log('💬 Handling incoming message:', message);
-    
-    // Normalize message format
     const normalizedMessage = {
       id: message.id,
       conversationId: message.conversationId || message.conversation_id,
       senderType: message.senderType || message.sender_type,
       senderName: message.senderName || message.sender_name,
-      senderId: message.senderId || message.sender_id,
       content: message.content,
       createdAt: message.createdAt || message.created_at || message.sentAt || message.sent_at,
-      messageType: message.messageType || message.message_type || 'text'
     };
     
-    // Verify message belongs to current conversation
     if (normalizedMessage.conversationId && 
         normalizedMessage.conversationId !== conversation.id) {
-      console.log('⏭️ Message is for different conversation, skipping');
+      console.log('⏭️ [handleIncomingMessage] Wrong conversation');
       return;
     }
     
-    // Check if already displayed
     if (displayedMessageIds.current.has(normalizedMessage.id)) {
-      console.log('⏭️ Message already displayed, skipping duplicate');
+      console.log('⏭️ [handleIncomingMessage] Duplicate message');
       return;
     }
     
-    // Don't add own messages (already shown optimistically)
     if (normalizedMessage.senderType === 'agent' && 
         normalizedMessage.senderName === employeeName) {
-      console.log('⏭️ Skipping own message (already displayed optimistically)');
+      console.log('⏭️ [handleIncomingMessage] Own message');
       displayedMessageIds.current.add(normalizedMessage.id);
       return;
     }
     
-    console.log('✅ Adding new message to state');
-    
-    // Mark as displayed
+    console.log('✅ [handleIncomingMessage] Adding message to state');
     displayedMessageIds.current.add(normalizedMessage.id);
     
-    // Add to messages
     setMessages(prev => {
       const exists = prev.some(m => m.id === normalizedMessage.id);
-      if (exists) {
-        console.log('⏭️ Message already in state');
-        return prev;
-      }
+      if (exists) return prev;
       return [...prev, normalizedMessage];
     });
     
-    // Hide typing indicator if customer sent message
     if (normalizedMessage.senderType === 'customer') {
       setTypingUsers(new Set());
     }
@@ -290,10 +301,10 @@ function ChatWindow({
 
   // Handle typing indicator
   const handleTypingIndicator = (data) => {
-    const isTyping = data.isTyping !== undefined ? data.isTyping : data.typing;
+    const isTyping = data.isTyping;
     const senderName = data.senderName || data.sender_name || 'Customer';
     
-    console.log('⌨️ Typing indicator:', { senderName, isTyping });
+    console.log('⌨️ [handleTypingIndicator]:', { senderName, isTyping });
     
     setTypingUsers(prev => {
       const newSet = new Set(prev);
@@ -304,41 +315,31 @@ function ChatWindow({
       }
       return newSet;
     });
-    
-    // Auto-hide after 5 seconds
-    if (isTyping) {
-      setTimeout(() => {
-        setTypingUsers(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(senderName);
-          return newSet;
-        });
-      }, 5000);
-    }
   };
 
   // Send typing indicator
   const sendTypingIndicator = (isTyping) => {
-    if (wsRef.current && 
-        wsRef.current.readyState === WebSocket.OPEN && 
-        hasJoined.current) {
-      const typingMessage = {
-        type: 'typing',
-        conversationId: conversation.id,
-        senderType: 'agent',
-        senderName: employeeName || 'Agent',
-        isTyping
-      };
-      
-      console.log('📤 Sending typing indicator:', typingMessage);
-      wsRef.current.send(JSON.stringify(typingMessage));
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !hasJoined.current) {
+      console.log('⚠️ [sendTypingIndicator] Cannot send - wsState:', wsRef.current?.readyState, 'hasJoined:', hasJoined.current);
+      return;
     }
+    
+    const typingMessage = {
+      type: 'typing',
+      conversationId: conversation.id,
+      senderType: 'agent',
+      senderName: employeeName || 'Agent',
+      isTyping
+    };
+    
+    console.log('📤 [sendTypingIndicator]:', typingMessage);
+    wsRef.current.send(JSON.stringify(typingMessage));
   };
 
-  // Load messages when conversation changes
+  // Load messages
   useEffect(() => {
     if (conversation) {
-      console.log('🔄 Loading messages for conversation:', conversation.id);
+      console.log('🔄 [useEffect] Loading messages for:', conversation.id);
       displayedMessageIds.current.clear();
       loadMessages();
     } else {
@@ -347,12 +348,10 @@ function ChatWindow({
     }
   }, [conversation?.id]);
 
-  // Auto-scroll to bottom
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
 
-  // Auto-resize textarea
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
@@ -361,20 +360,14 @@ function ChatWindow({
     }
   }, [messageText]);
 
-  // Load messages
   const loadMessages = async () => {
     try {
       setLoading(true);
       const data = await api.getMessages(conversation.id);
       const messageArray = Array.isArray(data) ? data : [];
       
-      console.log(`✅ Loaded ${messageArray.length} messages`);
-      
-      // Track all loaded message IDs
       messageArray.forEach(msg => {
-        if (msg.id) {
-          displayedMessageIds.current.add(msg.id);
-        }
+        if (msg.id) displayedMessageIds.current.add(msg.id);
       });
       
       setMessages(messageArray);
@@ -386,38 +379,28 @@ function ChatWindow({
     }
   };
 
-  // Scroll to bottom
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  // Handle send message
   const handleSend = async (e) => {
     if (e) {
       e.preventDefault();
       e.stopPropagation();
     }
 
-    console.log('🚀 Sending message...');
-
-    if (!messageText.trim() || sending) {
-      console.log('❌ Message empty or already sending');
-      return;
-    }
+    if (!messageText.trim() || sending) return;
 
     const text = messageText.trim();
     setMessageText('');
     setSending(true);
 
-    // Reset textarea height
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
 
-    // Stop typing indicator
     sendTypingIndicator(false);
 
-    // Optimistic UI update
     const optimisticMessage = {
       id: `temp-${Date.now()}`,
       conversationId: conversation.id,
@@ -428,22 +411,15 @@ function ChatWindow({
       _optimistic: true,
     };
 
-    console.log('📝 Adding optimistic message');
     setMessages(prev => [...prev, optimisticMessage]);
 
     try {
-      console.log('📤 Calling onSendMessage...');
-      
       const sentMessage = await onSendMessage(conversation, text);
       
-      console.log('✅ Message sent successfully:', sentMessage);
-      
-      // Mark as displayed
       if (sentMessage.id) {
         displayedMessageIds.current.add(sentMessage.id);
       }
       
-      // Replace optimistic message
       setMessages(prev =>
         prev.map(msg =>
           msg._optimistic && msg.content === text ? sentMessage : msg
@@ -451,55 +427,34 @@ function ChatWindow({
       );
     } catch (error) {
       console.error('❌ Failed to send message:', error);
-      
-      // Remove optimistic message
       setMessages(prev => prev.filter(msg => !msg._optimistic));
-      
-      // Restore text
       setMessageText(text);
-      
-      const errorMessage = error.response?.data?.error || error.message || 'Unknown error';
-      alert(`Failed to send message: ${errorMessage}`);
+      alert(`Failed to send message: ${error.message}`);
     } finally {
       setSending(false);
     }
   };
 
-  // Handle typing
   const handleTyping = (e) => {
     setMessageText(e.target.value);
-
-    // Send typing indicator
     sendTypingIndicator(true);
 
-    if (onTyping) {
-      onTyping(true);
-    }
-
-    // Clear previous timeout
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
     }
 
-    // Set timeout for stopped typing
     typingTimeoutRef.current = setTimeout(() => {
       sendTypingIndicator(false);
-      if (onTyping) {
-        onTyping(false);
-      }
     }, 2000);
   };
 
-  // Handle key press
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      e.stopPropagation();
       handleSend(e);
     }
   };
 
-  // Handle close conversation
   const handleCloseConversation = async () => {
     if (window.confirm('Are you sure you want to close this conversation?')) {
       try {
@@ -512,7 +467,6 @@ function ChatWindow({
     }
   };
 
-  // Get initials
   const getInitials = (name) => {
     if (!name) return 'G';
     return name
@@ -523,7 +477,6 @@ function ChatWindow({
       .slice(0, 2);
   };
 
-  // Empty state
   if (!conversation) {
     return (
       <div className="chat-window">
@@ -538,7 +491,6 @@ function ChatWindow({
 
   return (
     <div className="chat-window">
-      {/* Header */}
       <div className="chat-header">
         <div className="chat-header-left">
           <div className="chat-header-avatar">
@@ -548,16 +500,12 @@ function ChatWindow({
             <h3>{conversation.customerName || 'Guest'}</h3>
             <div className="chat-header-subtitle">
               {conversation.storeIdentifier} • {conversation.customerEmail || 'No email'}
-              {wsConnected && (
-                <span style={{ color: '#48bb78', marginLeft: '8px' }} title="Connected">
-                  ●
-                </span>
-              )}
-              {!wsConnected && conversation && (
-                <span style={{ color: '#fc8181', marginLeft: '8px' }} title="Disconnected">
-                  ●
-                </span>
-              )}
+              <span style={{ 
+                color: wsConnected ? '#48bb78' : '#fc8181', 
+                marginLeft: '8px' 
+              }} title={wsConnected ? 'Connected' : 'Disconnected'}>
+                ●
+              </span>
             </div>
           </div>
         </div>
@@ -584,7 +532,6 @@ function ChatWindow({
         </div>
       </div>
 
-      {/* Main Content */}
       <div className="chat-content">
         <div className="chat-messages" style={{ flex: showCustomerInfo ? '1' : 'auto' }}>
           {loading ? (
@@ -613,7 +560,6 @@ function ChatWindow({
                 );
               })}
               
-              {/* Typing Indicator */}
               {typingUsers.size > 0 && (
                 <div className="message-bubble customer">
                   <div className="message-avatar">C</div>
@@ -643,7 +589,6 @@ function ChatWindow({
         )}
       </div>
 
-      {/* Input Area */}
       <div className="chat-input-container">
         <div className="chat-input-wrapper">
           <textarea
@@ -673,5 +618,4 @@ function ChatWindow({
     </div>
   );
 }
-
 export default ChatWindow;
