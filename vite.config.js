@@ -7,16 +7,16 @@ module.exports = defineConfig({
   root: './',
   server: {
     port: 8080,
-    strictPort: false, // ← AUTO-INCREMENT if port is busy
+    strictPort: false,
     open: false,
     cors: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:3000',
+        target: process.env.VITE_API_URL || 'http://localhost:3000',
         changeOrigin: true,
       },
       '/ws': {
-        target: 'ws://localhost:3000',
+        target: process.env.VITE_WS_URL || 'ws://localhost:3000',
         ws: true,
       },
     },
@@ -30,7 +30,7 @@ module.exports = defineConfig({
     outDir: 'dist',
     rollupOptions: {
       input: {
-        main: path.resolve(__dirname, 'index.html'),    // ← ADDED
+        main: path.resolve(__dirname, 'index.html'),
         admin: path.resolve(__dirname, 'admin.html'),
         widget: path.resolve(__dirname, 'widget.html'),
       },

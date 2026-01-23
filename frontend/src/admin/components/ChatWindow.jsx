@@ -46,145 +46,146 @@ function ChatWindow({
     };
   }, [conversation?.id, employeeName]); // Added employeeName to dependencies
 
-  // Connect to WebSocket
-  const connectWebSocket = () => {
-    if (!conversation) {
-      console.log('❌ [connectWebSocket] No conversation, aborting');
-      return;
+// Connect to WebSocket
+const connectWebSocket = () => {
+  if (!conversation) {
+    console.log('❌ [connectWebSocket] No conversation, aborting');
+    return;
+  }
+
+  try {
+    // Close existing connection
+    if (wsRef.current) {
+      console.log('🔌 [connectWebSocket] Closing existing connection');
+      wsRef.current.close();
+      wsRef.current = null;
     }
 
-    try {
-      // Close existing connection
-      if (wsRef.current) {
-        console.log('🔌 [connectWebSocket] Closing existing connection');
-        wsRef.current.close();
-        wsRef.current = null;
+    // Reset flags
+    hasAuthenticated.current = false;
+    hasJoined.current = false;
+
+    // Get WebSocket URL from environment variable
+    const WS_URL = import.meta.env.VITE_WS_URL || 
+                   (import.meta.env.PROD 
+                     ? 'wss://chat-support-pro.onrender.com'
+                     : 'ws://localhost:3000');
+    
+    console.log('🔌 [connectWebSocket] Connecting to:', WS_URL);
+    
+    const ws = new WebSocket(WS_URL);
+    
+    ws.onopen = () => {
+      console.log('✅ [WebSocket] Connection opened');
+      
+      // Get auth token
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.error('❌ [WebSocket] No auth token found in localStorage');
+        ws.close();
+        return;
       }
-
-      // Reset flags
-      hasAuthenticated.current = false;
-      hasJoined.current = false;
-
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}`;
       
-      console.log('🔌 [connectWebSocket] Connecting to:', wsUrl);
+      // Send authentication
+      const authMessage = {
+        type: 'auth',
+        token: token,
+        clientType: 'agent'
+      };
       
-      const ws = new WebSocket(wsUrl);
-      
-      ws.onopen = () => {
-        console.log('✅ [WebSocket] Connection opened');
+      console.log('📤 [WebSocket] Sending auth message');
+      ws.send(JSON.stringify(authMessage));
+    };
+    
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('📨 [WebSocket] Message received:', data);
         
-        // Get auth token
-        const token = localStorage.getItem('token');
-        if (!token) {
-          console.error('❌ [WebSocket] No auth token found in localStorage');
-          ws.close();
+        // Handle authentication response
+        if (data.type === 'auth_ok') {
+          if (hasAuthenticated.current) {
+            console.log('⚠️ [WebSocket] Already authenticated, ignoring duplicate auth_ok');
+            return;
+          }
+          
+          console.log('✅ [WebSocket] Authentication successful');
+          hasAuthenticated.current = true;
+          setWsConnected(true);
+          reconnectAttempts.current = 0;
+          
+          // Wait a bit then join conversation
+          setTimeout(() => {
+            if (!hasJoined.current && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+              const joinMessage = {
+                type: 'join_conversation',
+                conversationId: parseInt(conversation.id),
+                role: 'agent',
+                employeeName: employeeName || 'Agent'
+              };
+              
+              console.log('📤 [WebSocket] Sending join_conversation message:', JSON.stringify(joinMessage));
+              wsRef.current.send(JSON.stringify(joinMessage));
+            }
+          }, 200);
           return;
         }
         
-        // Send authentication
-        const authMessage = {
-          type: 'auth',
-          token: token,
-          clientType: 'agent'
-        };
-        
-        console.log('📤 [WebSocket] Sending auth message:', authMessage);
-        ws.send(JSON.stringify(authMessage));
-      };
-      
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          console.log('📨 [WebSocket] Message received:', data);
-          
-          // Handle authentication response
-          if (data.type === 'auth_ok') {
-            if (hasAuthenticated.current) {
-              console.log('⚠️ [WebSocket] Already authenticated, ignoring duplicate auth_ok');
-              return;
-            }
-            
-            console.log('✅ [WebSocket] Authentication successful');
-            hasAuthenticated.current = true;
-            setWsConnected(true);
-            reconnectAttempts.current = 0;
-            
-            // Wait a bit then join conversation
-            setTimeout(() => {
-              if (!hasJoined.current && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-                const joinMessage = {
-                  type: 'join_conversation',
-                  conversationId: parseInt(conversation.id),
-                  role: 'agent',
-                  employeeName: employeeName || 'Agent'
-                };
-                
-                console.log('📤 [WebSocket] Sending join_conversation message:', JSON.stringify(joinMessage));
-                wsRef.current.send(JSON.stringify(joinMessage));
-              } else {
-                console.log('⚠️ [WebSocket] Cannot join - hasJoined:', hasJoined.current, 'wsState:', wsRef.current?.readyState);
-              }
-            }, 200);
+        // Handle join confirmation
+        if (data.type === 'joined' || data.type === 'join_ok') {
+          if (hasJoined.current) {
+            console.log('⚠️ [WebSocket] Already joined, ignoring duplicate join confirmation');
             return;
           }
           
-          // Handle join confirmation
-          if (data.type === 'joined' || data.type === 'join_ok') {
-            if (hasJoined.current) {
-              console.log('⚠️ [WebSocket] Already joined, ignoring duplicate join confirmation');
-              return;
-            }
-            
-            console.log('✅ [WebSocket] Successfully joined conversation:', conversation.id);
-            hasJoined.current = true;
-            return;
-          }
-          
-          // Handle other messages
-          handleWebSocketMessage(data);
-          
-        } catch (error) {
-          console.error('❌ [WebSocket] Failed to parse message:', error, event.data);
+          console.log('✅ [WebSocket] Successfully joined conversation:', conversation.id);
+          hasJoined.current = true;
+          return;
         }
-      };
-      
-      ws.onerror = (error) => {
-        console.error('❌ [WebSocket] Error:', error);
-        setWsConnected(false);
-      };
-      
-      ws.onclose = (event) => {
-        console.log('🔌 [WebSocket] Disconnected - Code:', event.code, 'Reason:', event.reason);
-        setWsConnected(false);
-        wsRef.current = null;
-        hasAuthenticated.current = false;
-        hasJoined.current = false;
         
-        // Attempt to reconnect
-        if (conversation && reconnectAttempts.current < maxReconnectAttempts) {
-          reconnectAttempts.current++;
-          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 10000);
-          
-          console.log(`🔄 [WebSocket] Reconnecting in ${delay}ms (attempt ${reconnectAttempts.current}/${maxReconnectAttempts})`);
-          
-          reconnectTimeoutRef.current = setTimeout(() => {
-            connectWebSocket();
-          }, delay);
-        } else if (reconnectAttempts.current >= maxReconnectAttempts) {
-          console.error('❌ [WebSocket] Max reconnection attempts reached');
-        }
-      };
-      
-      wsRef.current = ws;
-      console.log('✅ [connectWebSocket] WebSocket reference stored');
-      
-    } catch (error) {
-      console.error('❌ [connectWebSocket] Failed to create connection:', error);
+        // Handle other messages
+        handleWebSocketMessage(data);
+        
+      } catch (error) {
+        console.error('❌ [WebSocket] Failed to parse message:', error, event.data);
+      }
+    };
+    
+    ws.onerror = (error) => {
+      console.error('❌ [WebSocket] Error:', error);
       setWsConnected(false);
-    }
-  };
+    };
+    
+    ws.onclose = (event) => {
+      console.log('🔌 [WebSocket] Disconnected - Code:', event.code, 'Reason:', event.reason);
+      setWsConnected(false);
+      wsRef.current = null;
+      hasAuthenticated.current = false;
+      hasJoined.current = false;
+      
+      // Attempt to reconnect
+      if (conversation && reconnectAttempts.current < maxReconnectAttempts) {
+        reconnectAttempts.current++;
+        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 10000);
+        
+        console.log(`🔄 [WebSocket] Reconnecting in ${delay}ms (attempt ${reconnectAttempts.current}/${maxReconnectAttempts})`);
+        
+        reconnectTimeoutRef.current = setTimeout(() => {
+          connectWebSocket();
+        }, delay);
+      } else if (reconnectAttempts.current >= maxReconnectAttempts) {
+        console.error('❌ [WebSocket] Max reconnection attempts reached');
+      }
+    };
+    
+    wsRef.current = ws;
+    console.log('✅ [connectWebSocket] WebSocket reference stored');
+    
+  } catch (error) {
+    console.error('❌ [connectWebSocket] Failed to create connection:', error);
+    setWsConnected(false);
+  }
+};
 
   // Disconnect WebSocket
   const disconnectWebSocket = () => {

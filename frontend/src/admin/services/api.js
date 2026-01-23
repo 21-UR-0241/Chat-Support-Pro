@@ -5,8 +5,8 @@
 
 // Use Vite proxy in development, full URL in production
 const API_URL = import.meta.env.PROD 
-  ? import.meta.env.VITE_API_URL || 'https://your-app.herokuapp.com'
-  : ''; // Empty string uses Vite proxy (/api routes to backend)
+  ? import.meta.env.VITE_API_URL || 'https://chat-support-pro.onrender.com'
+  : '';
 
 class ApiService {
   constructor() {
