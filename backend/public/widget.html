@@ -984,15 +984,75 @@
           if (!msgResponse.ok) {
             const errorData = await msgResponse.json().catch(() => ({}));
             debugLog('ERROR', 'Message send failed', { status: msgResponse.status, error: errorData });
-            throw new Error(errorData.error || 'Failed to send message');
-          }
+            
+            // If conversation no longer exists, clear it and create a new one
+            if (errorData.error && errorData.error.includes('conversation')) {
+              debugLog('ERROR', 'Conversation no longer exists - creating new one');
+              
+              // Clear old conversation data
+              localStorage.removeItem(`chat_conv_${STORE_ID}`);
+              conversationId = null;
+              
+              // Close WebSocket
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.close();
+                ws = null;
+              }
+              
+              // Create new conversation with this message
+              debugLog('MESSAGE', 'Creating fresh conversation');
+              
+              const convResponse = await fetch(`${API_URL}/api/conversations`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  storeIdentifier: STORE_ID,
+                  customerEmail: customerEmail,
+                  customerName: customerName,
+                  initialMessage: message
+                })
+              });
 
-          const sentMessage = await msgResponse.json();
-          debugLog('MESSAGE', 'Message sent successfully', sentMessage);
-          
-          // Mark as displayed
-          if (sentMessage.id) {
-            displayedMessageIds.add(sentMessage.id);
+              if (!convResponse.ok) {
+                throw new Error('Failed to create new conversation');
+              }
+
+              const conv = await convResponse.json();
+              conversationId = conv.id;
+              
+              // Save new conversation ID
+              localStorage.setItem(`chat_conv_${STORE_ID}`, conversationId);
+              
+              debugLog('MESSAGE', 'New conversation created', { conversationId });
+              
+              // Get fresh WebSocket token
+              const sessionResponse = await fetch(`${API_URL}/api/widget/session?store=${STORE_ID}&conversationId=${conversationId}`);
+              if (sessionResponse.ok) {
+                const sessionData = await sessionResponse.json();
+                wsToken = sessionData.token;
+              }
+              
+              // Reconnect WebSocket
+              if (wsToken) {
+                await connectWebSocket();
+              }
+              
+              // Show auto-reply
+              setTimeout(() => {
+                addMessage('agent', 'Thanks for reaching out! An agent will be with you shortly.', 'Support Team');
+              }, 800);
+              
+            } else {
+              throw new Error(errorData.error || 'Failed to send message');
+            }
+          } else {
+            const sentMessage = await msgResponse.json();
+            debugLog('MESSAGE', 'Message sent successfully', sentMessage);
+            
+            // Mark as displayed
+            if (sentMessage.id) {
+              displayedMessageIds.add(sentMessage.id);
+            }
           }
         }
 

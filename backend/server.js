@@ -1706,7 +1706,8 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
   }
 });
 
-// Replace the /api/widget/messages endpoint in server.js with this:
+// Enhanced /api/widget/messages endpoint with better error handling
+// Replace in server.js around line 733
 
 app.post('/api/widget/messages', async (req, res) => {
   try {
@@ -1724,7 +1725,10 @@ app.post('/api/widget/messages', async (req, res) => {
     // Validate required fields
     if (!conversationId || !content) {
       console.log('❌ Missing required fields');
-      return res.status(400).json({ error: 'Missing required fields: conversationId and content' });
+      return res.status(400).json({ 
+        error: 'Missing required fields',
+        message: 'conversationId and content are required'
+      });
     }
     
     // Get store
@@ -1733,12 +1737,30 @@ app.post('/api/widget/messages', async (req, res) => {
     
     if (!store) {
       console.log('❌ Store not found:', storeIdentifier);
-      return res.status(404).json({ error: 'Store not found' });
+      return res.status(404).json({ 
+        error: 'Store not found',
+        message: 'The store identifier is invalid'
+      });
     }
     
     console.log('✅ Store found:', store.id);
     
-    // Save message to database - ONLY use fields that exist in DB
+    // IMPORTANT: Verify conversation exists before trying to save message
+    console.log('🔍 Verifying conversation exists...');
+    const conversation = await db.getConversation(conversationId);
+    
+    if (!conversation) {
+      console.log('❌ Conversation not found:', conversationId);
+      return res.status(404).json({ 
+        error: 'conversation_not_found',
+        message: `Conversation ${conversationId} no longer exists. Please start a new conversation.`,
+        conversationId: conversationId
+      });
+    }
+    
+    console.log('✅ Conversation found:', conversationId);
+    
+    // Save message to database
     console.log('💾 Saving message to database...');
     const message = await db.saveMessage({
       conversation_id: conversationId,
@@ -1746,7 +1768,6 @@ app.post('/api/widget/messages', async (req, res) => {
       sender_type: 'customer',
       sender_name: customerName || customerEmail,
       content
-      // Removed: sender_id and message_type - these might not exist in your DB
     });
     
     console.log('✅ Message saved to database:', message.id);
@@ -1782,9 +1803,21 @@ app.post('/api/widget/messages', async (req, res) => {
     console.error('❌ WIDGET MESSAGE ERROR');
     console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.error('Error message:', error.message);
+    console.error('Error code:', error.code);
     console.error('Error stack:', error.stack);
     console.error('Request body:', req.body);
     console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    
+    // Handle specific database errors
+    if (error.code === '23503') { // Foreign key violation
+      if (error.detail && error.detail.includes('conversation_id')) {
+        return res.status(404).json({ 
+          error: 'conversation_not_found',
+          message: 'Conversation no longer exists. Please start a new conversation.',
+          detail: error.detail
+        });
+      }
+    }
     
     res.status(500).json({ 
       error: error.message,
@@ -1792,7 +1825,6 @@ app.post('/api/widget/messages', async (req, res) => {
     });
   }
 });
-
 // ============ EMPLOYEE ENDPOINTS ============
 
 app.get('/api/employees', authenticateToken, async (req, res) => {
