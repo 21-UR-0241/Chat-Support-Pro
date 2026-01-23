@@ -772,6 +772,11 @@
           // addMessage('system', `${data.agentName || 'An agent'} has joined the conversation`, 'System');
           break;
           
+        case 'customer_joined':
+          debugLog('WS', 'Customer joined conversation (self)', data);
+          // This is the customer's own join notification - ignore
+          break;
+          
         case 'customer_left':
         case 'agent_left':
           debugLog('WS', 'Participant left', data);
