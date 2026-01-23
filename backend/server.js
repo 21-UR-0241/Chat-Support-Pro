@@ -1706,7 +1706,8 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
   }
 });
 
-// Customer sends message (from widget)
+// Replace the /api/widget/messages endpoint in server.js with this:
+
 app.post('/api/widget/messages', async (req, res) => {
   try {
     const { conversationId, customerEmail, customerName, content, storeIdentifier } = req.body;
@@ -1717,26 +1718,35 @@ app.post('/api/widget/messages', async (req, res) => {
     console.log('Conversation ID:', conversationId);
     console.log('Customer:', customerName || customerEmail);
     console.log('Content:', content.substring(0, 50) + '...');
+    console.log('Store Identifier:', storeIdentifier);
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     
+    // Validate required fields
     if (!conversationId || !content) {
-      return res.status(400).json({ error: 'Missing required fields' });
+      console.log('❌ Missing required fields');
+      return res.status(400).json({ error: 'Missing required fields: conversationId and content' });
     }
     
+    // Get store
+    console.log('🔍 Looking up store:', storeIdentifier);
     const store = await db.getStoreByIdentifier(storeIdentifier);
+    
     if (!store) {
+      console.log('❌ Store not found:', storeIdentifier);
       return res.status(404).json({ error: 'Store not found' });
     }
     
-    // Save message to database
+    console.log('✅ Store found:', store.id);
+    
+    // Save message to database - ONLY use fields that exist in DB
+    console.log('💾 Saving message to database...');
     const message = await db.saveMessage({
       conversation_id: conversationId,
       store_id: store.id,
       sender_type: 'customer',
       sender_name: customerName || customerEmail,
-      sender_id: customerEmail,
-      content,
-      message_type: 'text'
+      content
+      // Removed: sender_id and message_type - these might not exist in your DB
     });
     
     console.log('✅ Message saved to database:', message.id);
@@ -1768,8 +1778,18 @@ app.post('/api/widget/messages', async (req, res) => {
     
     res.json(camelMessage);
   } catch (error) {
-    console.error('❌ Widget message error:', error);
-    res.status(500).json({ error: error.message });
+    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.error('❌ WIDGET MESSAGE ERROR');
+    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    console.error('Request body:', req.body);
+    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    
+    res.status(500).json({ 
+      error: error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 });
 
