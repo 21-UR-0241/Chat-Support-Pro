@@ -1,868 +1,9 @@
-<!-- <!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chat Widget</title>
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
-    :root {
-      --primary-color: #667eea;
-      --primary-dark: #5a67d8;
-      --success-color: #48bb78;
-      --bg-color: #f7f8fa;
-      --text-color: #2d3748;
-      --text-secondary: #718096;
-      --border-color: #e2e8f0;
-    }
-
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-      background: var(--bg-color);
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-
-    /* Header */
-    #chat-header {
-      background: linear-gradient(135deg, var(--primary-color) 0%, #764ba2 100%);
-      color: white;
-      padding: 16px 20px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-      flex-shrink: 0;
-    }
-
-    #chat-header .avatar {
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      background: rgba(255,255,255,0.2);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 20px;
-      backdrop-filter: blur(10px);
-    }
-
-    #chat-header .info {
-      flex: 1;
-    }
-
-    #chat-header .info h3 {
-      font-size: 16px;
-      font-weight: 600;
-      margin-bottom: 2px;
-    }
-
-    #chat-header .info p {
-      font-size: 12px;
-      opacity: 0.9;
-    }
-
-    .status-indicator {
-      display: inline-block;
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #48bb78;
-      margin-right: 6px;
-      animation: pulse 2s infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
-    }
-
-    /* Messages Container */
-    #chat-messages {
-      flex: 1;
-      overflow-y: auto;
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      background: var(--bg-color);
-    }
-
-    #chat-messages::-webkit-scrollbar {
-      width: 6px;
-    }
-
-    #chat-messages::-webkit-scrollbar-track {
-      background: transparent;
-    }
-
-    #chat-messages::-webkit-scrollbar-thumb {
-      background: #cbd5e0;
-      border-radius: 3px;
-    }
-
-    /* Welcome Message */
-    #welcome-message {
-      text-align: center;
-      padding: 40px 20px;
-      color: var(--text-secondary);
-    }
-
-    #welcome-message .welcome-icon {
-      font-size: 48px;
-      margin-bottom: 16px;
-    }
-
-    #welcome-message h2 {
-      font-size: 18px;
-      margin-bottom: 8px;
-      color: var(--text-color);
-    }
-
-    #welcome-message p {
-      font-size: 14px;
-      line-height: 1.5;
-    }
-
-    /* Message Bubble */
-    .message {
-      display: flex;
-      gap: 8px;
-      max-width: 85%;
-      animation: slideIn 0.3s ease;
-    }
-
-    @keyframes slideIn {
-      from {
-        opacity: 0;
-        transform: translateY(10px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-
-    .message.customer {
-      align-self: flex-end;
-      flex-direction: row-reverse;
-    }
-
-    .message .avatar {
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      background: var(--primary-color);
-      color: white;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 14px;
-      flex-shrink: 0;
-    }
-
-    .message.customer .avatar {
-      background: var(--success-color);
-    }
-
-    .message .bubble {
-      background: white;
-      padding: 10px 14px;
-      border-radius: 16px;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.08);
-      max-width: 100%;
-    }
-
-    .message.customer .bubble {
-      background: var(--primary-color);
-      color: white;
-      border-bottom-right-radius: 4px;
-    }
-
-    .message.agent .bubble {
-      border-bottom-left-radius: 4px;
-    }
-
-    .message .sender-name {
-      font-size: 12px;
-      font-weight: 600;
-      margin-bottom: 4px;
-      opacity: 0.9;
-    }
-
-    .message .text {
-      font-size: 14px;
-      line-height: 1.5;
-      word-wrap: break-word;
-      white-space: pre-wrap;
-    }
-
-    .message .time {
-      font-size: 11px;
-      color: var(--text-secondary);
-      margin-top: 4px;
-      opacity: 0.7;
-    }
-
-    .message.customer .time {
-      color: rgba(255,255,255,0.9);
-      text-align: right;
-    }
-
-    /* System Message */
-    .message.system {
-      align-self: center;
-      max-width: 100%;
-    }
-
-    .message.system .bubble {
-      background: #fff5f5;
-      color: #c53030;
-      font-size: 13px;
-      padding: 8px 12px;
-    }
-
-    /* Typing Indicator */
-    .typing-indicator {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 14px;
-      background: white;
-      border-radius: 16px;
-      width: fit-content;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.08);
-    }
-
-    .typing-indicator .dots {
-      display: flex;
-      gap: 4px;
-    }
-
-    .typing-indicator .dots span {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #cbd5e0;
-      animation: typing 1.4s infinite;
-    }
-
-    .typing-indicator .dots span:nth-child(2) {
-      animation-delay: 0.2s;
-    }
-
-    .typing-indicator .dots span:nth-child(3) {
-      animation-delay: 0.4s;
-    }
-
-    @keyframes typing {
-      0%, 60%, 100% {
-        transform: translateY(0);
-        opacity: 0.5;
-      }
-      30% {
-        transform: translateY(-8px);
-        opacity: 1;
-      }
-    }
-
-    /* Input Container */
-    #chat-input-container {
-      padding: 16px 20px;
-      background: white;
-      border-top: 1px solid var(--border-color);
-      display: flex;
-      gap: 10px;
-      flex-shrink: 0;
-    }
-
-    #chat-input {
-      flex: 1;
-      padding: 12px 16px;
-      border: 1px solid var(--border-color);
-      border-radius: 24px;
-      font-size: 14px;
-      font-family: inherit;
-      outline: none;
-      transition: all 0.2s;
-      resize: none;
-      max-height: 120px;
-      line-height: 1.4;
-    }
-
-    #chat-input:focus {
-      border-color: var(--primary-color);
-      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-    }
-
-    #chat-input::placeholder {
-      color: #a0aec0;
-    }
-
-    #send-button {
-      width: 44px;
-      height: 44px;
-      border-radius: 50%;
-      background: var(--primary-color);
-      border: none;
-      color: white;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.2s;
-      flex-shrink: 0;
-    }
-
-    #send-button:hover:not(:disabled) {
-      background: var(--primary-dark);
-      transform: scale(1.05);
-    }
-
-    #send-button:active:not(:disabled) {
-      transform: scale(0.95);
-    }
-
-    #send-button:disabled {
-      background: #cbd5e0;
-      cursor: not-allowed;
-      opacity: 0.6;
-    }
-
-    /* Loading State */
-    .loading {
-      text-align: center;
-      padding: 40px;
-      color: var(--text-secondary);
-    }
-
-    .spinner {
-      border: 3px solid #f3f3f3;
-      border-top: 3px solid var(--primary-color);
-      border-radius: 50%;
-      width: 40px;
-      height: 40px;
-      animation: spin 1s linear infinite;
-      margin: 0 auto 16px;
-    }
-
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
-
-    /* Error State */
-    .error-message {
-      background: #fff5f5;
-      color: #c53030;
-      padding: 12px 16px;
-      border-radius: 8px;
-      margin: 20px;
-      font-size: 14px;
-      border-left: 4px solid #fc8181;
-    }
-
-    /* Mobile Responsive */
-    @media (max-width: 480px) {
-      #chat-header {
-        padding: 12px 16px;
-      }
-      
-      #chat-messages {
-        padding: 16px;
-      }
-      
-      #chat-input-container {
-        padding: 12px 16px;
-      }
-    }
-  </style>
-</head>
-<body>
-  <div id="chat-header">
-    <div class="avatar">💬</div>
-    <div class="info">
-      <h3 id="brand-name">Chat Support Pro</h3>
-      <p id="status">
-        <span class="status-indicator"></span>
-        <span id="status-text">We're online</span>
-      </p>
-    </div>
-  </div>
-
-  <div id="chat-messages">
-    <div id="welcome-message">
-      <div class="welcome-icon">👋</div>
-      <h2>Welcome to Chat Support!</h2>
-      <p>How can we help you today?<br>Send us a message and we'll get back to you right away.</p>
-    </div>
-  </div>
-
-  <div id="chat-input-container">
-    <textarea 
-      id="chat-input" 
-      placeholder="Type your message..."
-      rows="1"
-      autocomplete="off"
-    ></textarea>
-    <button id="send-button" disabled aria-label="Send message">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <line x1="22" y1="2" x2="11" y2="13"></line>
-        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-      </svg>
-    </button>
-  </div>
-
-  <script>
-    // Configuration
-    const urlParams = new URLSearchParams(window.location.search);
-    const STORE_ID = urlParams.get('store');
-    const API_URL = window.location.origin;
-    const WS_URL = window.location.origin.replace('http', 'ws');
-
-    // State
-    let conversationId = null;
-    let ws = null;
-    let wsToken = null;
-    let customerEmail = null;
-    let customerName = null;
-    let storeSettings = null;
-
-    // DOM Elements
-    const chatMessages = document.getElementById('chat-messages');
-    const chatInput = document.getElementById('chat-input');
-    const sendButton = document.getElementById('send-button');
-    const welcomeMessage = document.getElementById('welcome-message');
-    const brandName = document.getElementById('brand-name');
-    const statusText = document.getElementById('status-text');
-
-    // Check if store ID exists
-    if (!STORE_ID) {
-      showError('Widget configuration error. Please contact support.');
-      console.error('No store ID provided');
-    }
-
-    // Initialize
-    async function init() {
-      try {
-        await loadSettings();
-        setupEventListeners();
-        
-        // Get customer info from localStorage if exists
-        customerEmail = localStorage.getItem(`chat_email_${STORE_ID}`);
-        customerName = localStorage.getItem(`chat_name_${STORE_ID}`);
-        conversationId = localStorage.getItem(`chat_conv_${STORE_ID}`);
-        
-        // Load existing messages if conversation exists
-        if (conversationId) {
-          await loadExistingMessages();
-          await connectWebSocket();
-        }
-        
-        console.log('✅ Chat widget initialized');
-      } catch (error) {
-        console.error('Failed to initialize widget:', error);
-        showError('Failed to load chat. Please refresh the page.');
-      }
-    }
-
-    // Load widget settings
-    async function loadSettings() {
-      try {
-        const response = await fetch(`${API_URL}/api/widget/settings?store=${STORE_ID}`);
-        
-        if (!response.ok) {
-          throw new Error('Failed to load settings');
-        }
-        
-        storeSettings = await response.json();
-        
-        // Apply settings
-        brandName.textContent = storeSettings.brandName || 'Chat Support Pro';
-        
-        if (storeSettings.primaryColor) {
-          document.documentElement.style.setProperty('--primary-color', storeSettings.primaryColor);
-        }
-        
-        if (storeSettings.widgetSettings?.greeting) {
-          welcomeMessage.querySelector('p').textContent = storeSettings.widgetSettings.greeting;
-        }
-        
-        if (storeSettings.widgetSettings?.placeholder) {
-          chatInput.placeholder = storeSettings.widgetSettings.placeholder;
-        }
-        
-        // Get WebSocket token
-        const sessionResponse = await fetch(`${API_URL}/api/widget/session?store=${STORE_ID}`);
-        if (sessionResponse.ok) {
-          const sessionData = await sessionResponse.json();
-          wsToken = sessionData.token;
-        }
-        
-      } catch (error) {
-        console.error('Failed to load settings:', error);
-        // Continue with defaults
-      }
-    }
-
-    // Load existing messages
-    async function loadExistingMessages() {
-      try {
-        // For now, just hide welcome message if conversation exists
-        if (welcomeMessage) {
-          welcomeMessage.style.display = 'none';
-        }
-      } catch (error) {
-        console.error('Failed to load existing messages:', error);
-      }
-    }
-
-    // Connect to WebSocket
-    async function connectWebSocket() {
-      if (!wsToken || !conversationId) {
-        console.log('⏭️ Skipping WebSocket - no token or conversation');
-        return;
-      }
-
-      try {
-        ws = new WebSocket(`${WS_URL}/ws`);
-        
-        ws.onopen = () => {
-          console.log('🔌 WebSocket connected');
-          
-          // Authenticate
-          ws.send(JSON.stringify({
-            type: 'auth',
-            token: wsToken,
-            clientType: 'customer'
-          }));
-          
-          // Join conversation
-          ws.send(JSON.stringify({
-            type: 'join',
-            conversationId: conversationId,
-            role: 'customer',
-            token: wsToken,
-            storeId: storeSettings?.storeId
-          }));
-        };
-        
-        ws.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            handleWebSocketMessage(data);
-          } catch (error) {
-            console.error('Failed to parse WebSocket message:', error);
-          }
-        };
-        
-        ws.onerror = (error) => {
-          console.error('WebSocket error:', error);
-        };
-        
-        ws.onclose = () => {
-          console.log('🔌 WebSocket disconnected');
-          // Attempt to reconnect after 3 seconds
-          setTimeout(() => {
-            if (conversationId) {
-              connectWebSocket();
-            }
-          }, 3000);
-        };
-        
-      } catch (error) {
-        console.error('Failed to connect WebSocket:', error);
-      }
-    }
-
-    // Handle WebSocket messages
-    function handleWebSocketMessage(data) {
-      console.log('📨 WebSocket message:', data);
-      
-      switch (data.type) {
-        case 'connected':
-          console.log('✅ WebSocket connection established');
-          break;
-          
-        case 'auth_ok':
-          console.log('✅ WebSocket authenticated');
-          break;
-          
-        case 'joined':
-          console.log('✅ Joined conversation:', data.conversationId);
-          break;
-          
-        case 'new_message':
-          if (data.message) {
-            displayMessage(data.message);
-          }
-          break;
-          
-        case 'agent_typing':
-          if (data.isTyping) {
-            showTypingIndicator();
-          } else {
-            hideTypingIndicator();
-          }
-          break;
-          
-        case 'error':
-          console.error('WebSocket error:', data.message);
-          break;
-      }
-    }
-
-    // Display message from WebSocket
-    function displayMessage(message) {
-      // Don't display if it's from the customer (already displayed)
-      if (message.sender_type === 'customer') {
-        return;
-      }
-      
-      hideTypingIndicator();
-      
-      addMessage(
-        message.sender_type,
-        message.content,
-        message.sender_name || 'Support'
-      );
-    }
-
-    // Setup event listeners
-    function setupEventListeners() {
-      // Enable/disable send button based on input
-      chatInput.addEventListener('input', () => {
-        sendButton.disabled = !chatInput.value.trim();
-        autoResizeTextarea();
-      });
-
-      // Send on Enter (without Shift)
-      chatInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault();
-          if (chatInput.value.trim()) {
-            sendMessage();
-          }
-        }
-      });
-
-      // Send on button click
-      sendButton.addEventListener('click', sendMessage);
-
-      // Focus input on load
-      chatInput.focus();
-    }
-
-    // Auto-resize textarea
-    function autoResizeTextarea() {
-      chatInput.style.height = 'auto';
-      chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px';
-    }
-
-    // Send message
-    async function sendMessage() {
-      const message = chatInput.value.trim();
-      if (!message) return;
-
-      // Disable input while sending
-      chatInput.disabled = true;
-      sendButton.disabled = true;
-
-      // Add message to UI immediately
-      addMessage('customer', message, customerName || 'You');
-      
-      // Clear input
-      chatInput.value = '';
-      chatInput.style.height = 'auto';
-
-      // Hide welcome message
-      if (welcomeMessage) {
-        welcomeMessage.style.display = 'none';
-      }
-
-      try {
-        // Prompt for email if not set (first message)
-        if (!customerEmail) {
-          customerEmail = prompt('Please enter your email:') || 'anonymous@example.com';
-          customerName = prompt('Please enter your name:') || 'Customer';
-          
-          // Save to localStorage
-          localStorage.setItem(`chat_email_${STORE_ID}`, customerEmail);
-          localStorage.setItem(`chat_name_${STORE_ID}`, customerName);
-        }
-
-        // Create conversation if needed
-        if (!conversationId) {
-          const convResponse = await fetch(`${API_URL}/api/conversations`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              storeIdentifier: STORE_ID,
-              customerEmail: customerEmail,
-              customerName: customerName,
-              initialMessage: message
-            })
-          });
-
-          if (!convResponse.ok) {
-            const errorText = await convResponse.text();
-            console.error('Conversation creation failed:', errorText);
-            throw new Error('Failed to create conversation');
-          }
-
-          const conv = await convResponse.json();
-          conversationId = conv.id;
-          
-          // Save conversation ID
-          localStorage.setItem(`chat_conv_${STORE_ID}`, conversationId);
-          
-          console.log('✅ Conversation created:', conversationId);
-          
-          // Connect to WebSocket now that we have a conversation
-          await connectWebSocket();
-          
-          // Show auto-reply
-          setTimeout(() => {
-            addMessage('agent', 'Thanks for reaching out! An agent will be with you shortly.', 'Support Team');
-          }, 800);
-          
-        } else {
-          // Send message to existing conversation
-          const msgResponse = await fetch(`${API_URL}/api/widget/messages`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              conversationId: conversationId,
-              customerEmail: customerEmail,
-              customerName: customerName,
-              content: message,
-              storeIdentifier: STORE_ID
-            })
-          });
-
-          if (!msgResponse.ok) {
-            throw new Error('Failed to send message');
-          }
-
-          console.log('✅ Message sent');
-        }
-
-        // Re-enable input
-        chatInput.disabled = false;
-        sendButton.disabled = false;
-        chatInput.focus();
-        
-      } catch (error) {
-        console.error('Failed to send message:', error);
-        addMessage('system', 'Failed to send message. Please try again.', 'System');
-        
-        // Re-enable input
-        chatInput.disabled = false;
-        sendButton.disabled = false;
-        chatInput.focus();
-      }
-    }
-
-    // Add message to UI
-    function addMessage(type, text, sender) {
-      const messageDiv = document.createElement('div');
-      messageDiv.className = `message ${type}`;
-      
-      const time = new Date().toLocaleTimeString('en-US', { 
-        hour: 'numeric', 
-        minute: '2-digit' 
-      });
-      
-      const avatarIcon = type === 'customer' ? '👤' : 
-                         type === 'agent' ? '👨‍💼' : 
-                         '⚠️';
-      
-      const senderName = type !== 'system' ? `<div class="sender-name">${escapeHtml(sender)}</div>` : '';
-      
-      messageDiv.innerHTML = `
-        <div class="avatar">${avatarIcon}</div>
-        <div class="bubble">
-          ${senderName}
-          <div class="text">${escapeHtml(text)}</div>
-          <div class="time">${time}</div>
-        </div>
-      `;
-      
-      chatMessages.appendChild(messageDiv);
-      scrollToBottom();
-    }
-
-    // Show typing indicator
-    function showTypingIndicator() {
-      // Remove existing indicator first
-      hideTypingIndicator();
-      
-      const indicator = document.createElement('div');
-      indicator.className = 'message agent';
-      indicator.id = 'typing-indicator';
-      indicator.innerHTML = `
-        <div class="avatar">👨‍💼</div>
-        <div class="typing-indicator">
-          <div class="dots">
-            <span></span>
-            <span></span>
-            <span></span>
-          </div>
-        </div>
-      `;
-      chatMessages.appendChild(indicator);
-      scrollToBottom();
-    }
-
-    // Hide typing indicator
-    function hideTypingIndicator() {
-      const indicator = document.getElementById('typing-indicator');
-      if (indicator) {
-        indicator.remove();
-      }
-    }
-
-    // Scroll to bottom
-    function scrollToBottom() {
-      chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
-
-    // Show error
-    function showError(message) {
-      const errorDiv = document.createElement('div');
-      errorDiv.className = 'error-message';
-      errorDiv.textContent = message;
-      chatMessages.innerHTML = '';
-      chatMessages.appendChild(errorDiv);
-    }
-
-    // Escape HTML to prevent XSS
-    function escapeHtml(text) {
-      const div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
-    }
-
-    // Initialize on load
-    init();
-  </script>
-</body>
-</html> -->
-
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chat Widget</title>
+  <title>Chat Widget - Fixed</title>
   <style>
     * {
       margin: 0;
@@ -943,9 +84,59 @@
       animation: none;
     }
 
+    .status-indicator.connecting {
+      background: #f6ad55;
+      animation: pulse 1s infinite;
+    }
+
     @keyframes pulse {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.5; }
+    }
+
+    /* Debug Panel */
+    #debug-panel {
+      position: fixed;
+      bottom: 80px;
+      right: 20px;
+      background: white;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 11px;
+      font-family: monospace;
+      max-width: 300px;
+      max-height: 200px;
+      overflow-y: auto;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      z-index: 1000;
+      display: none;
+    }
+
+    #debug-panel.show {
+      display: block;
+    }
+
+    #debug-panel .debug-item {
+      margin: 4px 0;
+      padding: 4px;
+      background: #f7fafc;
+      border-radius: 4px;
+    }
+
+    #debug-toggle {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: var(--primary-color);
+      color: white;
+      border: none;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      cursor: pointer;
+      font-size: 18px;
+      z-index: 1001;
     }
 
     /* Messages Container */
@@ -1200,28 +391,6 @@
       opacity: 0.6;
     }
 
-    /* Loading State */
-    .loading {
-      text-align: center;
-      padding: 40px;
-      color: var(--text-secondary);
-    }
-
-    .spinner {
-      border: 3px solid #f3f3f3;
-      border-top: 3px solid var(--primary-color);
-      border-radius: 50%;
-      width: 40px;
-      height: 40px;
-      animation: spin 1s linear infinite;
-      margin: 0 auto 16px;
-    }
-
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
-
     /* Error State */
     .error-message {
       background: #fff5f5;
@@ -1231,38 +400,6 @@
       margin: 20px;
       font-size: 14px;
       border-left: 4px solid #fc8181;
-    }
-
-    /* Connection Status Badge */
-    .connection-badge {
-      position: absolute;
-      top: 10px;
-      right: 10px;
-      background: rgba(0,0,0,0.6);
-      color: white;
-      padding: 4px 12px;
-      border-radius: 12px;
-      font-size: 11px;
-      display: none;
-    }
-
-    .connection-badge.show {
-      display: block;
-    }
-
-    /* Mobile Responsive */
-    @media (max-width: 480px) {
-      #chat-header {
-        padding: 12px 16px;
-      }
-      
-      #chat-messages {
-        padding: 16px;
-      }
-      
-      #chat-input-container {
-        padding: 12px 16px;
-      }
     }
   </style>
 </head>
@@ -1301,12 +438,20 @@
     </button>
   </div>
 
+  <!-- Debug Panel -->
+  <button id="debug-toggle" title="Toggle Debug">🐛</button>
+  <div id="debug-panel">
+    <div id="debug-content"></div>
+  </div>
+
   <script>
+    console.log('🚀 [Widget] Initializing...');
+
     // Configuration
     const urlParams = new URLSearchParams(window.location.search);
     const STORE_ID = urlParams.get('store');
     const API_URL = window.location.origin;
-    const WS_URL = window.location.origin.replace(/^http/, 'ws');
+    const WS_URL = window.location.origin.replace(/^http/, 'ws') + '/ws';
 
     // State
     let conversationId = null;
@@ -1318,7 +463,9 @@
     let reconnectAttempts = 0;
     let maxReconnectAttempts = 5;
     let reconnectDelay = 2000;
-    let displayedMessageIds = new Set(); // Track displayed messages to prevent duplicates
+    let displayedMessageIds = new Set();
+    let isTyping = false;
+    let debugLogs = [];
 
     // DOM Elements
     const chatMessages = document.getElementById('chat-messages');
@@ -1328,22 +475,63 @@
     const brandName = document.getElementById('brand-name');
     const statusText = document.getElementById('status-text');
     const statusIndicator = document.getElementById('status-indicator');
+    const debugPanel = document.getElementById('debug-panel');
+    const debugContent = document.getElementById('debug-content');
+    const debugToggle = document.getElementById('debug-toggle');
 
-    console.log('🚀 Widget initializing...');
-    console.log('Store ID:', STORE_ID);
-    console.log('API URL:', API_URL);
-    console.log('WS URL:', WS_URL);
+    // Debug logging
+    function debugLog(category, message, data = null) {
+      const timestamp = new Date().toLocaleTimeString();
+      const logEntry = {
+        time: timestamp,
+        category,
+        message,
+        data
+      };
+      
+      debugLogs.push(logEntry);
+      if (debugLogs.length > 50) debugLogs.shift();
+      
+      updateDebugPanel();
+      
+      // Also log to console
+      if (data) {
+        console.log(`[${category}] ${message}`, data);
+      } else {
+        console.log(`[${category}] ${message}`);
+      }
+    }
+
+    function updateDebugPanel() {
+      debugContent.innerHTML = debugLogs
+        .slice(-20)
+        .reverse()
+        .map(log => `
+          <div class="debug-item">
+            <strong>${log.time} [${log.category}]</strong><br>
+            ${log.message}
+            ${log.data ? `<br><pre>${JSON.stringify(log.data, null, 2).substring(0, 200)}</pre>` : ''}
+          </div>
+        `)
+        .join('');
+    }
+
+    debugToggle.addEventListener('click', () => {
+      debugPanel.classList.toggle('show');
+    });
 
     // Check if store ID exists
     if (!STORE_ID) {
       showError('Widget configuration error. Please contact support.');
-      console.error('❌ No store ID provided');
+      debugLog('ERROR', 'No store ID provided');
+    } else {
+      debugLog('INIT', 'Store ID found', { STORE_ID });
     }
 
     // Initialize
     async function init() {
       try {
-        console.log('🔄 Starting initialization...');
+        debugLog('INIT', 'Starting initialization');
         
         await loadSettings();
         setupEventListeners();
@@ -1353,28 +541,36 @@
         customerName = localStorage.getItem(`chat_name_${STORE_ID}`);
         conversationId = localStorage.getItem(`chat_conv_${STORE_ID}`);
         
-        console.log('📦 Loaded from localStorage:', {
-          customerEmail,
-          customerName,
-          conversationId
+        debugLog('STORAGE', 'Loaded from localStorage', { 
+          customerEmail, 
+          customerName, 
+          conversationId 
         });
         
-        // Load existing messages if conversation exists
-        if (conversationId) {
-          console.log('📖 Loading existing conversation:', conversationId);
-          await loadExistingMessages();
-        }
+        // Log WebSocket connection state
+        debugLog('WS', 'WebSocket connection check', {
+          hasToken: !!wsToken,
+          hasConversation: !!conversationId,
+          wsUrl: WS_URL,
+          willConnect: !!(conversationId && wsToken)
+        });
         
         // Connect WebSocket if we have a conversation
         if (conversationId && wsToken) {
+          debugLog('WS', 'Attempting WebSocket connection');
           await connectWebSocket();
         } else {
-          updateStatus('online', "We're online");
+          debugLog('WS', 'Skipping WebSocket - missing requirements', {
+            hasToken: !!wsToken,
+            hasConversation: !!conversationId
+          });
+          updateStatus('online', "We're online (HTTP only)");
         }
         
-        console.log('✅ Chat widget initialized');
+        debugLog('INIT', 'Initialization complete');
       } catch (error) {
-        console.error('❌ Failed to initialize widget:', error);
+        debugLog('ERROR', 'Initialization failed', { error: error.message });
+        console.error('❌ [Widget] Initialization failed:', error);
         showError('Failed to load chat. Please refresh the page.');
         updateStatus('offline', 'Offline');
       }
@@ -1383,26 +579,32 @@
     // Update connection status
     function updateStatus(status, text) {
       statusText.textContent = text;
+      statusIndicator.classList.remove('offline', 'connecting');
+      
       if (status === 'online') {
-        statusIndicator.classList.remove('offline');
+        // indicator has pulse animation by default
+      } else if (status === 'connecting') {
+        statusIndicator.classList.add('connecting');
       } else {
         statusIndicator.classList.add('offline');
       }
+      
+      debugLog('STATUS', `Status changed: ${status}`, { text });
     }
 
     // Load widget settings
     async function loadSettings() {
       try {
-        console.log('⚙️ Loading settings...');
+        debugLog('SETTINGS', 'Loading settings');
         
         const response = await fetch(`${API_URL}/api/widget/settings?store=${STORE_ID}`);
         
         if (!response.ok) {
-          throw new Error('Failed to load settings');
+          throw new Error(`Failed to load settings: ${response.status}`);
         }
         
         storeSettings = await response.json();
-        console.log('✅ Settings loaded:', storeSettings);
+        debugLog('SETTINGS', 'Settings loaded', storeSettings);
         
         // Apply settings
         brandName.textContent = storeSettings.brandName || 'Chat Support Pro';
@@ -1420,53 +622,40 @@
         }
         
         // Get WebSocket token
-        console.log('🔑 Getting WebSocket token...');
+        debugLog('WS', 'Requesting WebSocket token');
         const sessionResponse = await fetch(`${API_URL}/api/widget/session?store=${STORE_ID}`);
+        
         if (sessionResponse.ok) {
           const sessionData = await sessionResponse.json();
           wsToken = sessionData.token;
-          console.log('✅ WebSocket token obtained');
+          debugLog('WS', 'WebSocket token obtained', { tokenLength: wsToken?.length });
         } else {
-          console.warn('⚠️ Failed to get WebSocket token');
+          debugLog('WS', 'Failed to get WebSocket token', { status: sessionResponse.status });
         }
         
       } catch (error) {
-        console.error('❌ Failed to load settings:', error);
-        // Continue with defaults
-      }
-    }
-
-    // Load existing messages
-    async function loadExistingMessages() {
-      try {
-        console.log('📖 Loading messages for conversation:', conversationId);
-        
-        // Hide welcome message if conversation exists
-        if (welcomeMessage) {
-          welcomeMessage.style.display = 'none';
-        }
-        
-        // TODO: Implement actual message loading from API
-        // For now, just hide welcome message
-        
-      } catch (error) {
-        console.error('❌ Failed to load existing messages:', error);
+        debugLog('ERROR', 'Failed to load settings', { error: error.message });
+        console.error('❌ [Widget] Failed to load settings:', error);
       }
     }
 
     // Connect to WebSocket
     async function connectWebSocket() {
       if (!wsToken || !conversationId) {
-        console.log('⏭️ Skipping WebSocket - missing token or conversation');
+        debugLog('WS', 'Cannot connect - missing requirements', {
+          hasToken: !!wsToken,
+          hasConversation: !!conversationId
+        });
         return;
       }
 
       try {
-        console.log('🔌 Connecting to WebSocket...');
+        debugLog('WS', 'Connecting to WebSocket', { url: WS_URL });
         updateStatus('connecting', 'Connecting...');
         
-        // Close existing connection if any
+        // Close existing connection
         if (ws) {
+          debugLog('WS', 'Closing existing connection');
           ws.close();
           ws = null;
         }
@@ -1474,159 +663,170 @@
         ws = new WebSocket(WS_URL);
         
         ws.onopen = () => {
-          console.log('✅ WebSocket connected');
+          debugLog('WS', 'Connection opened');
           reconnectAttempts = 0;
-          updateStatus('online', "We're online");
           
           // Authenticate
-          console.log('🔐 Authenticating WebSocket...');
-          ws.send(JSON.stringify({
+          const authMessage = {
             type: 'auth',
             token: wsToken,
             clientType: 'customer'
-          }));
+          };
           
-          // Join conversation
-          console.log('🚪 Joining conversation:', conversationId);
-          ws.send(JSON.stringify({
-            type: 'join_conversation',
-            conversationId: parseInt(conversationId),
-            role: 'customer',
-            customerEmail: customerEmail,
-            customerName: customerName
-          }));
+          debugLog('WS', 'Sending auth message', authMessage);
+          ws.send(JSON.stringify(authMessage));
         };
         
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
-            console.log('📨 WebSocket message received:', data);
+            debugLog('WS', `Received: ${data.type}`, data);
             handleWebSocketMessage(data);
           } catch (error) {
-            console.error('❌ Failed to parse WebSocket message:', error, event.data);
+            debugLog('ERROR', 'Failed to parse WebSocket message', { error: error.message });
           }
         };
         
         ws.onerror = (error) => {
-          console.error('❌ WebSocket error:', error);
+          debugLog('ERROR', 'WebSocket error', { error: error.message || 'Unknown error' });
           updateStatus('offline', 'Connection error');
         };
         
         ws.onclose = (event) => {
-          console.log('🔌 WebSocket disconnected', event.code, event.reason);
+          debugLog('WS', 'Connection closed', { code: event.code, reason: event.reason });
           updateStatus('offline', 'Disconnected');
+          ws = null;
           
           // Attempt to reconnect
           if (reconnectAttempts < maxReconnectAttempts && conversationId) {
             reconnectAttempts++;
             const delay = reconnectDelay * reconnectAttempts;
-            console.log(`🔄 Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
+            debugLog('WS', `Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
             updateStatus('connecting', 'Reconnecting...');
             
             setTimeout(() => {
               connectWebSocket();
             }, delay);
           } else if (reconnectAttempts >= maxReconnectAttempts) {
-            console.error('❌ Max reconnection attempts reached');
+            debugLog('ERROR', 'Max reconnection attempts reached');
             updateStatus('offline', 'Offline');
           }
         };
         
       } catch (error) {
-        console.error('❌ Failed to connect WebSocket:', error);
+        debugLog('ERROR', 'WebSocket connection failed', { error: error.message });
         updateStatus('offline', 'Connection failed');
       }
     }
 
     // Handle WebSocket messages
     function handleWebSocketMessage(data) {
-      console.log('🔍 Processing WebSocket message:', data.type);
-      
       switch (data.type) {
         case 'connected':
-          console.log('✅ WebSocket connection established');
+          debugLog('WS', 'Connection established');
           break;
           
         case 'auth_ok':
-        case 'authenticated':
-          console.log('✅ WebSocket authenticated');
+          debugLog('WS', 'Authentication successful');
+          updateStatus('online', "We're online (Real-time)");
+          
+          // Join conversation
+          const joinMessage = {
+            type: 'join_conversation',
+            conversationId: parseInt(conversationId),
+            role: 'customer',
+            token: wsToken,
+            customerEmail: customerEmail,
+            customerName: customerName,
+            storeId: storeSettings?.storeId
+          };
+          
+          debugLog('WS', 'Joining conversation', joinMessage);
+          ws.send(JSON.stringify(joinMessage));
           break;
           
         case 'joined':
-        case 'join_ok':
-          console.log('✅ Joined conversation:', data.conversationId || conversationId);
+          debugLog('WS', 'Successfully joined conversation');
+          updateStatus('online', "We're online (Real-time)");
           break;
           
         case 'new_message':
           if (data.message) {
-            console.log('💬 New message from WebSocket:', data.message);
+            debugLog('MESSAGE', 'New message received', data.message);
             displayMessageFromWebSocket(data.message);
           }
           break;
           
-        case 'agent_typing':
-          if (data.isTyping) {
+        case 'typing':
+          debugLog('UI', 'Typing indicator received', { isTyping: data.isTyping, sender: data.senderName });
+          if (data.isTyping && data.senderType === 'agent') {
             showTypingIndicator();
           } else {
             hideTypingIndicator();
           }
           break;
           
-        case 'typing':
-          // Handle typing indicator
-          if (data.senderType === 'agent') {
-            showTypingIndicator();
-            // Auto-hide after 3 seconds
-            setTimeout(hideTypingIndicator, 3000);
-          }
+        case 'agent_joined':
+          debugLog('WS', 'Agent joined conversation', data);
+          // Optionally show a system message
+          // addMessage('system', `${data.agentName || 'An agent'} has joined the conversation`, 'System');
+          break;
+          
+        case 'customer_left':
+        case 'agent_left':
+          debugLog('WS', 'Participant left', data);
           break;
           
         case 'error':
-          console.error('❌ WebSocket error:', data.message);
+          debugLog('ERROR', 'WebSocket error message', data);
+          if (data.message) {
+            console.error('WebSocket error:', data.message);
+          }
+          break;
+          
+        case 'pong':
+          debugLog('WS', 'Pong received');
           break;
           
         default:
-          console.log('📨 Unhandled message type:', data.type);
+          debugLog('WS', `Unhandled message type: ${data.type}`, data);
       }
     }
 
     // Display message from WebSocket
     function displayMessageFromWebSocket(message) {
-      console.log('🔍 Displaying message from WebSocket:', message);
-      
-      // Normalize message format (handle both camelCase and snake_case)
+      // Normalize message format
       const normalizedMessage = {
         id: message.id,
         senderType: message.senderType || message.sender_type,
         senderName: message.senderName || message.sender_name,
         content: message.content,
-        createdAt: message.createdAt || message.created_at || message.sentAt || message.sent_at,
         conversationId: message.conversationId || message.conversation_id
       };
       
-      console.log('📝 Normalized message:', normalizedMessage);
+      debugLog('MESSAGE', 'Processing message', normalizedMessage);
       
-      // Check if this message belongs to current conversation
+      // Check conversation ID
       if (normalizedMessage.conversationId && 
           normalizedMessage.conversationId !== parseInt(conversationId)) {
-        console.log('⏭️ Message is for different conversation, skipping');
+        debugLog('MESSAGE', 'Message for different conversation - skipping');
         return;
       }
       
       // Prevent duplicate messages
       if (displayedMessageIds.has(normalizedMessage.id)) {
-        console.log('⏭️ Message already displayed, skipping duplicate');
+        debugLog('MESSAGE', 'Duplicate message - skipping');
         return;
       }
       
       // Don't display customer's own messages (already shown optimistically)
       if (normalizedMessage.senderType === 'customer') {
-        console.log('⏭️ Skipping customer message (already displayed)');
+        debugLog('MESSAGE', 'Customer message - skipping (already displayed)');
         displayedMessageIds.add(normalizedMessage.id);
         return;
       }
       
-      console.log('✅ Displaying agent message');
+      debugLog('MESSAGE', 'Displaying agent message');
       
       hideTypingIndicator();
       
@@ -1677,7 +877,7 @@
       const message = chatInput.value.trim();
       if (!message) return;
 
-      console.log('📤 Sending message:', message);
+      debugLog('MESSAGE', 'Sending message', { message: message.substring(0, 50) + '...' });
 
       // Disable input while sending
       chatInput.disabled = true;
@@ -1705,12 +905,12 @@
           localStorage.setItem(`chat_email_${STORE_ID}`, customerEmail);
           localStorage.setItem(`chat_name_${STORE_ID}`, customerName);
           
-          console.log('👤 Customer info collected:', { customerEmail, customerName });
+          debugLog('USER', 'Customer info saved', { customerEmail, customerName });
         }
 
         // Create conversation if needed
         if (!conversationId) {
-          console.log('🆕 Creating new conversation...');
+          debugLog('CONVERSATION', 'Creating new conversation');
           
           const convResponse = await fetch(`${API_URL}/api/conversations`, {
             method: 'POST',
@@ -1725,7 +925,7 @@
 
           if (!convResponse.ok) {
             const errorText = await convResponse.text();
-            console.error('❌ Conversation creation failed:', errorText);
+            debugLog('ERROR', 'Conversation creation failed', { status: convResponse.status, error: errorText });
             throw new Error('Failed to create conversation');
           }
 
@@ -1735,11 +935,24 @@
           // Save conversation ID
           localStorage.setItem(`chat_conv_${STORE_ID}`, conversationId);
           
-          console.log('✅ Conversation created:', conversationId);
+          debugLog('CONVERSATION', 'Conversation created', { conversationId });
           
-          // Connect to WebSocket now that we have a conversation
+          // Get a fresh WebSocket token for this conversation
+          debugLog('WS', 'Getting fresh WebSocket token for new conversation');
+          const sessionResponse = await fetch(`${API_URL}/api/widget/session?store=${STORE_ID}&conversationId=${conversationId}`);
+          
+          if (sessionResponse.ok) {
+            const sessionData = await sessionResponse.json();
+            wsToken = sessionData.token;
+            debugLog('WS', 'Fresh token obtained', { tokenLength: wsToken?.length });
+          }
+          
+          // Connect to WebSocket now
           if (wsToken) {
+            debugLog('WS', 'Connecting WebSocket after conversation creation');
             await connectWebSocket();
+          } else {
+            debugLog('ERROR', 'Cannot connect WebSocket - no token');
           }
           
           // Show auto-reply
@@ -1749,7 +962,7 @@
           
         } else {
           // Send message to existing conversation
-          console.log('📤 Sending message to existing conversation:', conversationId);
+          debugLog('MESSAGE', 'Sending to existing conversation', { conversationId });
           
           const msgResponse = await fetch(`${API_URL}/api/widget/messages`, {
             method: 'POST',
@@ -1765,12 +978,17 @@
 
           if (!msgResponse.ok) {
             const errorData = await msgResponse.json().catch(() => ({}));
-            console.error('❌ Message send failed:', errorData);
+            debugLog('ERROR', 'Message send failed', { status: msgResponse.status, error: errorData });
             throw new Error(errorData.error || 'Failed to send message');
           }
 
           const sentMessage = await msgResponse.json();
-          console.log('✅ Message sent:', sentMessage);
+          debugLog('MESSAGE', 'Message sent successfully', sentMessage);
+          
+          // Mark as displayed
+          if (sentMessage.id) {
+            displayedMessageIds.add(sentMessage.id);
+          }
         }
 
         // Re-enable input
@@ -1779,7 +997,8 @@
         chatInput.focus();
         
       } catch (error) {
-        console.error('❌ Failed to send message:', error);
+        debugLog('ERROR', 'Failed to send message', { error: error.message });
+        console.error('❌ [Widget] Failed to send message:', error);
         addMessage('system', 'Failed to send message. Please try again.', 'System');
         
         // Re-enable input
@@ -1791,8 +1010,6 @@
 
     // Add message to UI
     function addMessage(type, text, sender) {
-      console.log('➕ Adding message to UI:', { type, sender, text: text.substring(0, 50) + '...' });
-      
       const messageDiv = document.createElement('div');
       messageDiv.className = `message ${type}`;
       
@@ -1805,7 +1022,8 @@
                          type === 'agent' ? '👨‍💼' : 
                          '⚠️';
       
-      const senderName = type !== 'system' ? `<div class="sender-name">${escapeHtml(sender)}</div>` : '';
+      const senderName = type !== 'system' && sender ? 
+        `<div class="sender-name">${escapeHtml(sender)}</div>` : '';
       
       messageDiv.innerHTML = `
         <div class="avatar">${avatarIcon}</div>
@@ -1822,10 +1040,9 @@
 
     // Show typing indicator
     function showTypingIndicator() {
-      // Remove existing indicator first
       hideTypingIndicator();
       
-      console.log('⌨️ Showing typing indicator');
+      debugLog('UI', 'Showing typing indicator');
       
       const indicator = document.createElement('div');
       indicator.className = 'message agent';
@@ -1848,7 +1065,7 @@
     function hideTypingIndicator() {
       const indicator = document.getElementById('typing-indicator');
       if (indicator) {
-        console.log('⌨️ Hiding typing indicator');
+        debugLog('UI', 'Hiding typing indicator');
         indicator.remove();
       }
     }
@@ -1876,8 +1093,8 @@
 
     // Cleanup on page unload
     window.addEventListener('beforeunload', () => {
-      if (ws) {
-        console.log('🔌 Closing WebSocket connection');
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        debugLog('WS', 'Closing WebSocket on page unload');
         ws.close();
       }
     });

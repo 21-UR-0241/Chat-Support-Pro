@@ -102,7 +102,6 @@ const connectWebSocket = () => {
         const data = JSON.parse(event.data);
         console.log('📨 [WebSocket] Message received:', data);
         
-        // Handle authentication response
         if (data.type === 'auth_ok') {
           if (hasAuthenticated.current) {
             console.log('⚠️ [WebSocket] Already authenticated, ignoring duplicate auth_ok');
@@ -114,20 +113,19 @@ const connectWebSocket = () => {
           setWsConnected(true);
           reconnectAttempts.current = 0;
           
-          // Wait a bit then join conversation
-          setTimeout(() => {
-            if (!hasJoined.current && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-              const joinMessage = {
-                type: 'join_conversation',
-                conversationId: parseInt(conversation.id),
-                role: 'agent',
-                employeeName: employeeName || 'Agent'
-              };
-              
-              console.log('📤 [WebSocket] Sending join_conversation message:', JSON.stringify(joinMessage));
-              wsRef.current.send(JSON.stringify(joinMessage));
-            }
-          }, 200);
+          // Send join message IMMEDIATELY (no timeout)
+          if (!hasJoined.current && conversation) {
+            const joinMessage = {
+              type: 'join_conversation',
+              conversationId: parseInt(conversation.id),
+              role: 'agent',
+              employeeName: employeeName || 'Agent'
+            };
+            
+            console.log('📤 [WebSocket] Sending join_conversation message:', JSON.stringify(joinMessage));
+            ws.send(JSON.stringify(joinMessage)); // Use 'ws' instead of wsRef.current
+          }
+          
           return;
         }
         
