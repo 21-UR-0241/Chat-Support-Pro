@@ -1,6 +1,7 @@
 /**
  * Shopify API - Complete Multi-Store Implementation
  * Enhanced with rate limiting, caching, and error handling
+ * FIXED: priority parameter issue
  */
 const rateLimiter = require('./shopify-rate-limiter');
 const redisManager = require('./redis-manager');
@@ -19,13 +20,18 @@ function getShopClient(store) {
 
     /**
      * Make rate-limited request to Shopify API
+     * FIXED: Extract priority and retryCount before passing to fetch
      */
     async request(endpoint, options = {}) {
       const url = `https://${store.shop_domain}/admin/api/${API_VERSION}${endpoint}`;
 
       const attempt = async () => {
+        // Extract custom options that shouldn't be passed to fetch
+        // FIX: priority and retryCount are custom options, not fetch options
+        const { priority, retryCount, ...fetchOptions } = options;
+
         const response = await fetch(url, {
-          ...options,
+          ...fetchOptions,  // FIXED: Now only passes valid fetch options
           headers: {
             'Content-Type': 'application/json',
             'X-Shopify-Access-Token': store.access_token,
@@ -98,6 +104,7 @@ async function getCustomerContext(store, customerEmail) {
     const client = getShopClient(store);
 
     // Search for customer by email (rate-limited)
+    // Note: priority is custom option for internal use, not passed to fetch
     const searchResult = await client.request(
       `/customers/search.json?query=email:${encodeURIComponent(customerEmail)}`,
       { priority: 7 }
