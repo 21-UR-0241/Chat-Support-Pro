@@ -14,7 +14,7 @@ const APP_URL = process.env.SHOPIFY_APP_URL;
  * STEP 1: Install Route - Starts OAuth flow
  * URL: https://your-app.com/shopify/install?shop=store-name.myshopify.com
  */
-router.get('/shopify/install', (req, res) => {
+router.get('/install', (req, res) => {
   const shop = req.query.shop;
   
   if (!shop) {
@@ -46,7 +46,7 @@ router.get('/shopify/install', (req, res) => {
  * STEP 2: Callback Route - Handles OAuth callback
  * Shopify redirects here after user approves
  */
-router.get('/shopify/callback', async (req, res) => {
+router.get('/callback', async (req, res) => {
   const { code, hmac, shop, state } = req.query;
   
   // Verify state matches (security check)
@@ -96,7 +96,7 @@ router.get('/shopify/callback', async (req, res) => {
     await injectWidgetIntoTheme(shop, accessToken);
     
     // Redirect to success page
-    res.redirect(`/shopify/success?shop=${shop}`);
+    res.redirect(`/success?shop=${shop}`);
     
   } catch (error) {
     console.error('❌ [Shopify App] OAuth error:', error.message);
@@ -279,7 +279,7 @@ async function injectWidgetIntoTheme(shop, accessToken) {
 /**
  * Success Page
  */
-router.get('/shopify/success', (req, res) => {
+router.get('/success', (req, res) => {
   const shop = req.query.shop;
   
   res.send(`
@@ -349,7 +349,7 @@ router.get('/shopify/success', (req, res) => {
  * Uninstall Webhook Handler
  * Removes widget when app is uninstalled
  */
-router.post('/shopify/webhooks/app/uninstalled', async (req, res) => {
+router.post('/webhooks/app/uninstalled', async (req, res) => {
   const shop = req.get('X-Shopify-Shop-Domain');
   
   console.log('🗑️ [Shopify App] App uninstalled from:', shop);
