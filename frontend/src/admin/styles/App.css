@@ -333,8 +333,8 @@ body {
 .conversations-sidebar,
 .conversation-list {
   width: 100%;
-  min-width: 350px;
-  max-width: 650px;
+  min-width: 320px;  /* Reduced from 350px */
+  max-width: 400px;  /* Reduced from 650px */
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border);
   display: flex;
@@ -384,13 +384,16 @@ body {
   background: var(--bg-sidebar);
   border-bottom: 1px solid var(--border);
   display: flex;
-  flex-direction: column;
+  flex-direction: row;  /* Changed from column to row */
   gap: 10px;
+  align-items: center;  /* Added for vertical alignment */
+  flex-wrap: nowrap;    /* Prevent wrapping */
 }
 
 .filter-row {
   display: flex;
   gap: 8px;
+  width: 100%;
 }
 
 .search-input,
@@ -417,7 +420,34 @@ body {
 .search-input::placeholder {
   color: var(--text-muted);
 }
+.filter-clear {
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  background: white;
+  color: var(--primary);
+  cursor: pointer;
+  transition: all var(--transition-base);
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
 
+.filter-clear:hover {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+.message-sender-indicator {
+  font-weight: 600;
+  color: #54656f;
+  margin-right: 4px;
+}
+
+.conversation-item.unread .message-sender-indicator {
+  color: #00a884;
+}
 /* ========================================
    Conversation Items
    ======================================== */
@@ -1572,17 +1602,17 @@ body {
 @media (max-width: 1440px) {
   .conversations-sidebar,
   .conversation-list {
-    width: 32%;
-    max-width: 380px;
+    width: 30%;        /* Reduced from 32% */
+    max-width: 360px;  /* Reduced from 380px */
   }
 }
 
 @media (max-width: 1024px) {
   .conversations-sidebar,
   .conversation-list {
-    width: 35%;
+    width: 32%;        /* Reduced from 35% */
     min-width: 280px;
-    max-width: 340px;
+    max-width: 320px;  /* Reduced from 340px */
   }
 
   .header-stats {

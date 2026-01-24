@@ -421,6 +421,9 @@ function ConversationList({
 
                   <div className="conversation-bottom">
                     <p className="conversation-preview">
+                      {conversation.lastMessageFrom === 'agent' && (
+                        <span className="message-sender-indicator">You: </span>
+                      )}
                       {conversation.lastMessage || 'No messages yet'}
                     </p>
                     {hasUnread && (
