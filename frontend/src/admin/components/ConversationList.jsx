@@ -234,6 +234,11 @@
  * WhatsApp-inspired conversation list with notifications
  */
 
+/**
+ * ConversationList Component
+ * WhatsApp-inspired conversation list with notifications
+ */
+
 import React, { useMemo, useEffect, useRef, useState } from 'react';
 
 function ConversationList({
@@ -514,7 +519,7 @@ function ConversationList({
           {notificationPermission === 'denied' && (
             <div className="permission-help">
               <small>
-                Notifications are blocked. Please enable them in your browser settings.
+                Notifications are blocked. Click the lock icon 🔒 in your browser's address bar, then change Notifications to "Allow" and reload.
               </small>
             </div>
           )}
