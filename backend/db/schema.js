@@ -38,6 +38,8 @@ const conversations = pgTable('conversations', {
   customerName: varchar('customer_name', { length: 255 }),
   customerId: varchar('customer_id', { length: 255 }),
   status: varchar('status', { length: 50 }),
+  cartSubtotal: decimal('cart_subtotal', { precision: 10, scale: 2 }).default('0'), // ADD THIS
+  source: varchar('source', { length: 100 }), // ADD THIS
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
 });

@@ -425,6 +425,7 @@ body {
   flex: 1;
   overflow-y: auto;
   background: var(--bg-sidebar);
+  min-height: 0;
 }
 
 .conversation-item {

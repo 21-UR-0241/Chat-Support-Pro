@@ -1639,6 +1639,8 @@ async function runMigrations() {
   try {
     // Run each migration in order
     await migration_001_add_message_columns();
+    await migration_002_add_conversation_metadata();
+
     
     // Add future migrations here:
     // await migration_002_add_new_feature();
@@ -1707,6 +1709,61 @@ async function migration_001_add_message_columns() {
     }
   } catch (error) {
     console.error('❌ [Migration 001] Failed:', error);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function migration_002_add_conversation_metadata() {
+  const client = await pool.connect();
+  
+  try {
+    console.log('📝 [Migration 002] Adding cart_subtotal and source columns...');
+    
+    // Check if columns exist
+    const currentColumns = await client.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'conversations'
+    `);
+    
+    const existingColumns = currentColumns.rows.map(row => row.column_name);
+    const columnsAdded = [];
+    
+    // Add cart_subtotal column
+    if (!existingColumns.includes('cart_subtotal')) {
+      console.log('   Adding column: cart_subtotal...');
+      await client.query(`
+        ALTER TABLE conversations 
+        ADD COLUMN cart_subtotal DECIMAL(10, 2) DEFAULT 0;
+      `);
+      columnsAdded.push('cart_subtotal');
+    }
+    
+    // Add source column
+    if (!existingColumns.includes('source')) {
+      console.log('   Adding column: source...');
+      await client.query(`
+        ALTER TABLE conversations 
+        ADD COLUMN source VARCHAR(100);
+      `);
+      columnsAdded.push('source');
+    }
+    
+    // Add indexes
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_conversations_source ON conversations(source);
+      CREATE INDEX IF NOT EXISTS idx_conversations_cart_subtotal ON conversations(cart_subtotal);
+    `);
+    
+    if (columnsAdded.length > 0) {
+      console.log(`✅ [Migration 002] Added ${columnsAdded.length} columns: ${columnsAdded.join(', ')}`);
+    } else {
+      console.log('⏭️  [Migration 002] All columns already exist, skipping');
+    }
+  } catch (error) {
+    console.error('❌ [Migration 002] Failed:', error);
     throw error;
   } finally {
     client.release();
@@ -1901,20 +1958,23 @@ async function saveConversation(data) {
     customer_phone,
     status = 'open',
     priority = 'normal',
-    tags = []
+    tags = [],
+    cart_subtotal = 0,      // ADD THIS
+    source = 'website'      // ADD THIS
   } = data;
   
   try {
     const result = await pool.query(`
       INSERT INTO conversations (
         shop_id, shop_domain, customer_email, customer_name, customer_id,
-        customer_phone, status, priority, tags, created_at, updated_at
+        customer_phone, status, priority, tags, cart_subtotal, source, 
+        created_at, updated_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
       RETURNING *
     `, [
       store_id, store_identifier, customer_email, customer_name, customer_id,
-      customer_phone, status, priority, tags
+      customer_phone, status, priority, tags, cart_subtotal, source  // ADD THESE
     ]);
     
     return result.rows[0];
