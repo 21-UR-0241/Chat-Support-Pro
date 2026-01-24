@@ -234,11 +234,6 @@
  * WhatsApp-inspired conversation list with notifications
  */
 
-/**
- * ConversationList Component
- * WhatsApp-inspired conversation list with notifications
- */
-
 import React, { useMemo, useEffect, useRef, useState } from 'react';
 
 function ConversationList({
@@ -599,12 +594,21 @@ function ConversationList({
             const hasUnread = conversation.unreadCount > 0;
             const isUrgent = conversation.priority === 'urgent';
 
+            // Get store name from stores array
+            const storeName = stores?.find(s => 
+              s.storeIdentifier === conversation.storeIdentifier || 
+              s.id === conversation.shopId
+            )?.brandName || conversation.storeName || 'Unknown Store';
+
             return (
               <div
                 key={conversation.id}
                 className={`conversation-item ${isActive ? 'active' : ''} ${hasUnread ? 'unread' : ''}`}
                 onClick={() => onSelectConversation(conversation)}
               >
+                {/* Unread Indicator */}
+                {hasUnread && <div className="unread-indicator"></div>}
+                
                 {/* Avatar */}
                 <div className="conversation-avatar">
                   {getInitials(conversation.customerName)}
@@ -627,6 +631,18 @@ function ConversationList({
                     </span>
                   </div>
                   
+                  {/* Store and Email */}
+                  <div className="conversation-meta">
+                    <span className="store-badge"> {storeName}</span>
+                    {conversation.customerEmail && (
+                      <>
+                        <span className="meta-separator">•</span>
+                        <span className="customer-email">{conversation.customerEmail}</span>
+                      </>
+                    )}
+                  </div>
+                  
+                  {/* Latest Message */}
                   <div className="conversation-bottom">
                     <p className="conversation-preview">
                       {conversation.lastMessage || 'No messages yet'}

@@ -915,14 +915,37 @@
 .conversation-item {
   display: flex;
   gap: 12px;
-  padding: 12px 16px;
+  padding: 14px 16px;
   cursor: pointer;
   border-bottom: 1px solid #f0f2f5;
-  transition: background 0.15s ease;
+  transition: all 0.15s ease;
   position: relative;
   width: 100%;
   box-sizing: border-box;
   margin: 0;
+}
+
+/* Unread Visual Indicator - Left border */
+.conversation-item.unread::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: #00a884;
+  animation: pulseGlow 2s ease-in-out infinite;
+}
+
+@keyframes pulseGlow {
+  0%, 100% { 
+    opacity: 1;
+    box-shadow: 0 0 8px rgba(0, 168, 132, 0.4);
+  }
+  50% { 
+    opacity: 0.7;
+    box-shadow: 0 0 12px rgba(0, 168, 132, 0.6);
+  }
 }
 
 .conversation-item:hover {
@@ -940,11 +963,16 @@
   top: 0;
   bottom: 0;
   width: 3px;
-  background: #00a884;
+  background: #0088cc;
 }
 
 .conversation-item.unread {
-  background: #f7f8fa;
+  background: #f0fdf4;
+  border-left: 4px solid transparent;
+}
+
+.conversation-item.unread:hover {
+  background: #e6fcef;
 }
 
 /* Avatar */
@@ -967,18 +995,28 @@
 
 .avatar-badge {
   position: absolute;
-  top: -2px;
-  right: -2px;
+  top: -4px;
+  right: -4px;
   background: #ff3b30;
   color: white;
   font-size: 10px;
   font-weight: 700;
-  padding: 2px 5px;
-  border-radius: 10px;
-  min-width: 18px;
+  padding: 3px 6px;
+  border-radius: 12px;
+  min-width: 20px;
   text-align: center;
   border: 2px solid white;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 2px 6px rgba(255, 59, 48, 0.4);
+  animation: badgePulse 2s ease-in-out infinite;
+}
+
+@keyframes badgePulse {
+  0%, 100% { 
+    transform: scale(1);
+  }
+  50% { 
+    transform: scale(1.1);
+  }
 }
 
 /* Content */
@@ -987,7 +1025,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 }
 
 .conversation-top {
@@ -995,6 +1033,49 @@
   justify-content: space-between;
   align-items: flex-start;
   gap: 8px;
+}
+
+/* Store and Email Meta Row */
+.conversation-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #667781;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.store-badge {
+  background: #e7f8f4;
+  color: #00a884;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.customer-email {
+  color: #667781;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+.conversation-item.unread .customer-email {
+  color: #54656f;
+  font-weight: 500;
+}
+
+.meta-separator {
+  color: #d1d7db;
+  flex-shrink: 0;
 }
 
 .conversation-name-wrapper {
@@ -1310,6 +1391,23 @@
 
   .dark-mode .conversation-item.unread .conversation-preview {
     color: #e9edef;
+  }
+
+  .dark-mode .store-badge {
+    background: #1a2c38;
+    color: #00a884;
+  }
+
+  .dark-mode .customer-email {
+    color: #8696a0;
+  }
+
+  .dark-mode .conversation-item.unread .customer-email {
+    color: #adbac1;
+  }
+
+  .dark-mode .meta-separator {
+    color: #2a3942;
   }
 }
 
