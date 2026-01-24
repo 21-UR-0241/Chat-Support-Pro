@@ -1,4 +1,4 @@
-// backend/routes/shopify-app.js
+// backend/routes/shopify-app-routes.js
 const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
@@ -31,14 +31,35 @@ router.get('/install', (req, res) => {
   req.session.state = state;
   req.session.shop = shop;
   
+  // 🔍 DEBUG LOGGING
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('🔍 SHOPIFY OAUTH DEBUG - INSTALL ROUTE');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('Shop:', shop);
+  console.log('State:', state);
+  console.log('');
+  console.log('Environment Variables:');
+  console.log('  SHOPIFY_API_KEY:', SHOPIFY_API_KEY ? `${SHOPIFY_API_KEY.substring(0, 10)}...` : 'MISSING ❌');
+  console.log('  SHOPIFY_API_SECRET:', SHOPIFY_API_SECRET ? 'SET ✅' : 'MISSING ❌');
+  console.log('  SHOPIFY_SCOPES:', SHOPIFY_SCOPES);
+  console.log('  SHOPIFY_APP_URL:', APP_URL || 'MISSING ❌');
+  console.log('');
+  
+  const redirectUri = `${APP_URL}/shopify/callback`;
+  console.log('Constructed Redirect URI:', redirectUri);
+  console.log('');
+  
   // Build authorization URL
   const authUrl = `https://${shop}/admin/oauth/authorize?` + 
     `client_id=${SHOPIFY_API_KEY}&` +
     `scope=${SHOPIFY_SCOPES}&` +
-    `redirect_uri=${APP_URL}/shopify/callback&` +
+    `redirect_uri=${redirectUri}&` +
     `state=${state}`;
   
-  console.log('🔄 [Shopify App] Starting OAuth for shop:', shop);
+  console.log('Full Authorization URL:');
+  console.log(authUrl);
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  
   res.redirect(authUrl);
 });
 
@@ -49,8 +70,19 @@ router.get('/install', (req, res) => {
 router.get('/callback', async (req, res) => {
   const { code, hmac, shop, state } = req.query;
   
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('🔄 SHOPIFY CALLBACK RECEIVED');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('Shop:', shop);
+  console.log('Code:', code ? 'RECEIVED ✅' : 'MISSING ❌');
+  console.log('HMAC:', hmac ? 'RECEIVED ✅' : 'MISSING ❌');
+  console.log('State:', state);
+  console.log('Session State:', req.session.state);
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  
   // Verify state matches (security check)
   if (state !== req.session.state) {
+    console.error('❌ State validation failed!');
     return res.status(403).send('Invalid state parameter');
   }
   
@@ -70,11 +102,17 @@ router.get('/callback', async (req, res) => {
     .digest('hex');
   
   if (generatedHash !== hmac) {
+    console.error('❌ HMAC validation failed!');
+    console.error('Expected:', generatedHash);
+    console.error('Received:', hmac);
     return res.status(403).send('HMAC validation failed');
   }
   
+  console.log('✅ State and HMAC validation passed');
+  
   try {
     // Exchange code for permanent access token
+    console.log('🔄 Exchanging code for access token...');
     const tokenResponse = await axios.post(
       `https://${shop}/admin/oauth/access_token`,
       {
@@ -96,10 +134,11 @@ router.get('/callback', async (req, res) => {
     await injectWidgetIntoTheme(shop, accessToken);
     
     // Redirect to success page
-    res.redirect(`/success?shop=${shop}`);
+    res.redirect(`/shopify/success?shop=${shop}`);
     
   } catch (error) {
     console.error('❌ [Shopify App] OAuth error:', error.message);
+    console.error('Error details:', error.response?.data || error);
     res.status(500).send('Installation failed. Please try again.');
   }
 });
@@ -113,32 +152,39 @@ async function saveStoreCredentials(shop, accessToken, scope) {
   const shopDomain = shop;
   const storeIdentifier = shop.replace('.myshopify.com', '');
   
-  // Get shop info from Shopify
-  const shopInfo = await axios.get(
-    `https://${shop}/admin/api/2024-01/shop.json`,
-    {
-      headers: {
-        'X-Shopify-Access-Token': accessToken
+  console.log('💾 Saving store credentials for:', storeIdentifier);
+  
+  try {
+    // Get shop info from Shopify
+    const shopInfo = await axios.get(
+      `https://${shop}/admin/api/2024-01/shop.json`,
+      {
+        headers: {
+          'X-Shopify-Access-Token': accessToken
+        }
       }
-    }
-  );
-  
-  const shopData = shopInfo.data.shop;
-  
-  // Save to database
-  await db.registerStore({
-    store_identifier: storeIdentifier,
-    shop_domain: shopDomain,
-    brand_name: shopData.name,
-    access_token: accessToken,
-    scope: scope,
-    timezone: shopData.timezone || 'UTC',
-    currency: shopData.currency || 'USD',
-    contact_email: shopData.email,
-    logo_url: shopData.logo?.src || null
-  });
-  
-  console.log('✅ [Shopify App] Store registered:', storeIdentifier);
+    );
+    
+    const shopData = shopInfo.data.shop;
+    
+    // Save to database
+    await db.registerStore({
+      store_identifier: storeIdentifier,
+      shop_domain: shopDomain,
+      brand_name: shopData.name,
+      access_token: accessToken,
+      scope: scope,
+      timezone: shopData.timezone || 'UTC',
+      currency: shopData.currency || 'USD',
+      contact_email: shopData.email,
+      logo_url: shopData.logo?.src || null
+    });
+    
+    console.log('✅ [Shopify App] Store registered:', storeIdentifier);
+  } catch (error) {
+    console.error('❌ Failed to save store credentials:', error.message);
+    throw error;
+  }
 }
 
 /**
@@ -148,6 +194,8 @@ async function saveStoreCredentials(shop, accessToken, scope) {
 async function injectWidgetIntoTheme(shop, accessToken) {
   try {
     const storeIdentifier = shop.replace('.myshopify.com', '');
+    
+    console.log('📝 Injecting widget for:', storeIdentifier);
     
     // Get active theme
     const themesResponse = await axios.get(
@@ -281,6 +329,8 @@ async function injectWidgetIntoTheme(shop, accessToken) {
  */
 router.get('/success', (req, res) => {
   const shop = req.query.shop;
+  
+  console.log('✅ Showing success page for:', shop);
   
   res.send(`
     <!DOCTYPE html>
