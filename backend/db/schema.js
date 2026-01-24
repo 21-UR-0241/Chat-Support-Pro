@@ -38,11 +38,17 @@ const conversations = pgTable('conversations', {
   customerName: varchar('customer_name', { length: 255 }),
   customerId: varchar('customer_id', { length: 255 }),
   status: varchar('status', { length: 50 }),
-  cartSubtotal: decimal('cart_subtotal', { precision: 10, scale: 2 }).default('0'), // ADD THIS
-  source: varchar('source', { length: 100 }), // ADD THIS
+  cartSubtotal: decimal('cart_subtotal', { precision: 10, scale: 2 }).default('0'),
+  source: varchar('source', { length: 100 }),
+
+  // ✅ add these:
+  unreadCount: integer('unread_count').default(0),
+  lastReadAt: timestamp('last_read_at'),
+
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
 });
+
 
 const messages = pgTable('messages', {
   id: serial('id').primaryKey(),

@@ -535,6 +535,14 @@ function DashboardContent({ employee, onLogout }) {
     optimisticUpdate,
   } = useConversations(employee.id);
 
+  useEffect(() => {
+  if (conversations && conversations.length > 0) {
+    console.log('🔥 CONVERSATIONS DEBUG:', conversations);
+    console.log('🔥 FIRST CONVERSATION:', conversations[0]);
+    console.log('🔥 KEYS:', Object.keys(conversations[0]));
+  }
+}, [conversations]);
+
   const ws = useWebSocket(employee.id);
 
   useEffect(() => {
@@ -544,54 +552,51 @@ function DashboardContent({ employee, onLogout }) {
   }, []);
 
   // WebSocket event listeners
-  useEffect(() => {
-    if (!ws) return;
+useEffect(() => {
+  if (!ws) return;
 
-    const unsubscribe1 = ws.on('new_message', (data) => {
-      console.log('📨 New message received:', data);
+  // ✅ Only handle UI notifications here - let useConversations handle data
+  const unsubscribe1 = ws.on('new_message', (data) => {
+    console.log('📨 [App] New message for notification:', data.conversationId);
+    
+    // Only show browser notification if not viewing this conversation
+    if (activeConversation?.id !== data.conversationId) {
+      const conv = data.conversation || { customerName: 'Guest' };
+      const messagePreview = data.message?.content?.substring(0, 50) || 'New message';
       
-      // ✅ No refresh needed - handled by useConversations hook
-      
-      // Show notification only if not viewing this conversation
-      if (activeConversation?.id !== data.conversationId) {
-        showNotification('New Message', {
-          body: `New message from ${data.storeId}`,
-          icon: '/favicon.ico',
-        });
-      }
-    });
+      showNotification('New Message', {
+        body: `${conv.customerName || conv.customer_name}: ${messagePreview}`,
+        icon: '/favicon.ico',
+      });
+    }
+  });
 
-    const unsubscribe2 = ws.on('message', (data) => {
-      console.log('WebSocket message:', data.type);
-    });
+  const unsubscribe2 = ws.on('connected', () => {
+    console.log('✅ [App] Connected to WebSocket');
+    setError(null);
+  });
 
-    const unsubscribe3 = ws.on('connected', () => {
-      console.log('✅ Connected to WebSocket');
-      setError(null);
-    });
+  const unsubscribe3 = ws.on('disconnected', () => {
+    console.log('❌ [App] Disconnected from WebSocket');
+  });
 
-    const unsubscribe4 = ws.on('disconnected', () => {
-      console.log('❌ Disconnected from WebSocket');
-    });
+  const unsubscribe4 = ws.on('error', (error) => {
+    console.error('[App] WebSocket error:', error);
+    setError('WebSocket connection error. Retrying...');
+  });
 
-    const unsubscribe5 = ws.on('error', (error) => {
-      console.error('WebSocket error:', error);
-      setError('WebSocket connection error. Retrying...');
-    });
+  const unsubscribe5 = ws.on('max_reconnect_reached', () => {
+    setError('Unable to connect to server. Please refresh the page.');
+  });
 
-    const unsubscribe6 = ws.on('max_reconnect_reached', () => {
-      setError('Unable to connect to server. Please refresh the page.');
-    });
-
-    return () => {
-      unsubscribe1();
-      unsubscribe2();
-      unsubscribe3();
-      unsubscribe4();
-      unsubscribe5();
-      unsubscribe6();
-    };
-  }, [ws, activeConversation]); // ✅ Removed refreshConversations dependency
+  return () => {
+    unsubscribe1();
+    unsubscribe2();
+    unsubscribe3();
+    unsubscribe4();
+    unsubscribe5();
+  };
+}, [ws, activeConversation]);// ✅ Removed refreshConversations dependency
 
   useEffect(() => {
     if (activeConversation && ws) {

@@ -3001,14 +3001,18 @@ app.get('/api/conversations', authenticateToken, async (req, res) => {
 app.get('/api/conversations/:id', authenticateToken, async (req, res) => {
   try {
     console.log('📖 Fetching conversation:', req.params.id);
-    
-    const conversation = await db.getConversation(parseInt(req.params.id));
-    
+
+    const conversationId = parseInt(req.params.id);
+    const conversation = await db.getConversation(conversationId);
+
     if (!conversation) {
       console.log('❌ Conversation not found:', req.params.id);
       return res.status(404).json({ error: 'Conversation not found' });
     }
-    
+
+    // ✅ mark as read when agent opens conversation
+    // await db.markConversationRead(conversationId);
+
     console.log('✅ Conversation found:', conversation.id);
     res.json(snakeToCamel(conversation));
   } catch (error) {
@@ -3105,6 +3109,31 @@ app.put('/api/conversations/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// ✅ NEW endpoint: mark read manually
+app.put('/api/conversations/:id/read', authenticateToken, async (req, res) => {
+  try {
+    const conversationId = parseInt(req.params.id);
+    
+    // ✅ Mark as read
+    await db.markConversationRead(conversationId);
+    console.log('✅ Manually marked conversation as read');
+    
+    // ✅ Broadcast to all agents
+    const updatedConversation = await db.getConversation(conversationId);
+    broadcastToAgents({
+      type: 'conversation_read',
+      conversationId,
+      conversation: snakeToCamel(updatedConversation)
+    });
+    
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error marking conversation as read:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
 app.put('/api/conversations/:id/close', authenticateToken, async (req, res) => {
   try {
     const conversation = await db.closeConversation(parseInt(req.params.id));
@@ -3119,9 +3148,22 @@ app.put('/api/conversations/:id/close', authenticateToken, async (req, res) => {
 app.get('/api/conversations/:id/messages', authenticateToken, async (req, res) => {
   try {
     console.log('📖 Fetching messages for conversation:', req.params.id);
+
+    const conversationId = parseInt(req.params.id);
+    const messages = await db.getMessages(conversationId);
+
+    // ✅ UNCOMMENT THIS - Mark as read when agent loads messages
+    await db.markConversationRead(conversationId);
+    console.log('✅ Conversation marked as read');
     
-    const messages = await db.getMessages(parseInt(req.params.id));
-    
+    // ✅ Broadcast updated conversation to all agents
+    const updatedConversation = await db.getConversation(conversationId);
+    broadcastToAgents({
+      type: 'conversation_read',
+      conversationId,
+      conversation: snakeToCamel(updatedConversation)
+    });
+
     console.log(`✅ Found ${messages.length} messages`);
     res.json(messages.map(snakeToCamel));
   } catch (error) {
@@ -3129,6 +3171,7 @@ app.get('/api/conversations/:id/messages', authenticateToken, async (req, res) =
     res.status(500).json({ error: error.message });
   }
 });
+
 
 // Agent sends message (optimized)
 app.post('/api/messages', authenticateToken, async (req, res) => {
@@ -3221,7 +3264,6 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
   }
 });
 
-// Widget sends message (optimized with conversation check)
 app.post('/api/widget/messages', async (req, res) => {
   try {
     const { conversationId, customerEmail, customerName, content, storeIdentifier } = req.body;
@@ -3275,14 +3317,9 @@ app.post('/api/widget/messages', async (req, res) => {
       message: snakeToCamel(tempMessage)
     });
     
-    broadcastToAgents({
-      type: 'new_message',
-      message: snakeToCamel(tempMessage),
-      conversationId,
-      storeId: store.id
-    });
+    // ✅ CRITICAL FIX: Don't broadcast to agents yet - wait for save
     
-    console.log('✅ Message broadcast INSTANTLY');
+    console.log('✅ Message broadcast to customer');
     
     // Return immediate response
     res.json(snakeToCamel(tempMessage));
@@ -3290,6 +3327,7 @@ app.post('/api/widget/messages', async (req, res) => {
     // Save to database in background
     setImmediate(async () => {
       try {
+        // ✅ Save message (this increments unread_count via saveMessage)
         const savedMessage = await db.saveMessage({
           conversation_id: conversationId,
           store_id: store.id,
@@ -3300,21 +3338,32 @@ app.post('/api/widget/messages', async (req, res) => {
         
         console.log('✅ Message saved to database:', savedMessage.id);
         
+        // ✅ GET UPDATED CONVERSATION (with incremented unread_count)
+        const updatedConversation = await db.getConversation(conversationId);
+        console.log('📊 Updated conversation state:', {
+          id: updatedConversation.id,
+          unread_count: updatedConversation.unread_count
+        });
+        
         const confirmedMessage = snakeToCamel(savedMessage);
         
+        // Send confirmation to customer
         sendToConversation(conversationId, {
           type: 'message_confirmed',
           tempId: tempId,
           message: confirmedMessage
         });
         
+        // ✅ CRITICAL FIX: Broadcast to agents WITH updated conversation
         broadcastToAgents({
-          type: 'message_confirmed',
-          tempId: tempId,
+          type: 'new_message',
           message: confirmedMessage,
           conversationId,
-          storeId: store.id
+          storeId: store.id,
+          conversation: snakeToCamel(updatedConversation) // ✅ THIS IS CRITICAL!
         });
+        
+        console.log('✅ Broadcast to agents with unread_count:', updatedConversation.unread_count);
         
       } catch (error) {
         console.error('❌ Failed to save message:', error);
@@ -3336,6 +3385,30 @@ app.post('/api/widget/messages', async (req, res) => {
   }
 });
 
+// ✅ ADD THIS DEBUG ENDPOINT HERE:
+app.get('/debug/conversation-state/:id', async (req, res) => {
+  try {
+    const conversationId = parseInt(req.params.id);
+    
+    // Raw database query
+    const result = await db.pool.query(
+      'SELECT id, customer_name, customer_email, unread_count, last_read_at, updated_at FROM conversations WHERE id = $1',
+      [conversationId]
+    );
+    
+    const dbRow = result.rows[0];
+    const conversationObj = await db.getConversation(conversationId);
+    
+    res.json({
+      success: true,
+      database_raw: dbRow,
+      database_function: conversationObj,
+      database_camelCase: snakeToCamel(conversationObj)
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 // ============ EMPLOYEE ENDPOINTS ============
 
 app.get('/api/employees', authenticateToken, async (req, res) => {

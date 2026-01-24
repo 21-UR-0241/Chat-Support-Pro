@@ -1405,6 +1405,8 @@ async function initDatabase() {
         customer_message_count INTEGER DEFAULT 0,
         agent_message_count INTEGER DEFAULT 0,
         total_message_count INTEGER DEFAULT 0,
+        unread_count INTEGER DEFAULT 0,
+        last_read_at TIMESTAMP,
         
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -1640,6 +1642,7 @@ async function runMigrations() {
     // Run each migration in order
     await migration_001_add_message_columns();
     await migration_002_add_conversation_metadata();
+    await migration_003_add_unread_fields();
 
     
     // Add future migrations here:
@@ -1770,6 +1773,29 @@ async function migration_002_add_conversation_metadata() {
   }
 }
 
+async function migration_003_add_unread_fields() {
+  const client = await pool.connect();
+  try {
+    console.log('📝 [Migration 003] Adding unread fields...'); // ✅ ADD THIS
+    
+    await client.query(`
+      ALTER TABLE conversations
+      ADD COLUMN IF NOT EXISTS unread_count INTEGER DEFAULT 0;
+    `);
+    
+    await client.query(`
+      ALTER TABLE conversations
+      ADD COLUMN IF NOT EXISTS last_read_at TIMESTAMP;
+    `);
+    
+    console.log('✅ [Migration 003] Completed'); // ✅ ADD THIS
+  } catch (error) {
+    console.error('❌ [Migration 003] Failed:', error); // ✅ ADD THIS
+    throw error;
+  } finally {
+    client.release();
+  }
+}
 // ============================================
 // STORE FUNCTIONS
 // ============================================
@@ -2181,6 +2207,19 @@ async function assignConversation(conversationId, employeeEmail) {
     throw error;
   }
 }
+// ============================================
+// CONVERSATION FUNCTIONS
+// ============================================
+
+async function markConversationRead(conversationId) {
+  await pool.query(`
+    UPDATE conversations
+    SET unread_count = 0,
+        last_read_at = NOW(),
+        updated_at = NOW()
+    WHERE id = $1
+  `, [conversationId]);
+}
 
 // ============================================
 // MESSAGE FUNCTIONS
@@ -2202,6 +2241,13 @@ async function saveMessage(data) {
     attachment_type
   } = data;
   
+  console.log('💾 [saveMessage] Called with:', {
+    conversation_id,
+    sender_type,
+    sender_name,
+    content: content?.substring(0, 30)
+  });
+  
   const client = await pool.connect();
   
   try {
@@ -2222,6 +2268,7 @@ async function saveMessage(data) {
     ]);
     
     const message = messageResult.rows[0];
+    console.log('✅ [saveMessage] Message inserted, id:', message.id);
     
     // Update conversation counters and timestamps
     const updateFields = [
@@ -2230,10 +2277,15 @@ async function saveMessage(data) {
       'updated_at = NOW()'
     ];
     
+    console.log('🔍 [saveMessage] Sender type:', sender_type);
+    
     if (sender_type === 'customer') {
+      console.log('✅ [saveMessage] CUSTOMER MESSAGE - Adding unread increment');
       updateFields.push('customer_message_count = customer_message_count + 1');
       updateFields.push('last_customer_message_at = NOW()');
+      updateFields.push('unread_count = unread_count + 1');
     } else if (sender_type === 'agent') {
+      console.log('📝 [saveMessage] Agent message - no unread increment');
       updateFields.push('agent_message_count = agent_message_count + 1');
       updateFields.push('last_agent_message_at = NOW()');
       
@@ -2245,6 +2297,8 @@ async function saveMessage(data) {
           ELSE response_time_seconds
         END
       `);
+    } else {
+      console.log('⚠️ [saveMessage] UNKNOWN sender_type:', sender_type);
     }
     
     // Set first_message_at if not set
@@ -2252,18 +2306,22 @@ async function saveMessage(data) {
       first_message_at = COALESCE(first_message_at, NOW())
     `);
     
+    console.log('🔍 [saveMessage] Update SQL will include:', updateFields);
+    
     await client.query(`
       UPDATE conversations 
       SET ${updateFields.join(', ')}
       WHERE id = $1
     `, [conversation_id]);
     
+    console.log('✅ [saveMessage] Conversation updated successfully');
+    
     await client.query('COMMIT');
     
     return message;
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('Error saving message:', error);
+    console.error('❌ [saveMessage] Error:', error);
     throw error;
   } finally {
     client.release();
@@ -2704,6 +2762,7 @@ module.exports = {
   updateConversation,
   closeConversation,
   assignConversation,
+  markConversationRead, // ✅ add here
   
   // Message functions
   saveMessage,

@@ -216,6 +216,10 @@ return this.fetch(`/api/conversations/${id}/close`, {
       body: JSON.stringify({ status }),
     });
   }
+  
+  async markConversationRead(id) {
+  return this.fetch(`/api/conversations/${id}/read`, { method: 'PUT' });
+}
 
   // ============ Health Check ============
 
