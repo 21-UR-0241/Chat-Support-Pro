@@ -328,6 +328,15 @@
   border-color: #00a884;
 }
 
+.you-indicator {
+  color: #667781;
+  font-weight: 600;
+  margin-right: 2px;
+}
+
+.conversation-item.unread .you-indicator {
+  color: #00a884;
+}
 /* Conversation Items Container */
 .conversation-items {
   flex: 1;

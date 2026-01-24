@@ -1643,6 +1643,7 @@ async function runMigrations() {
     await migration_001_add_message_columns();
     await migration_002_add_conversation_metadata();
     await migration_003_add_unread_fields();
+    await migration_004_add_last_message_fields();
 
     
     // Add future migrations here:
@@ -1791,6 +1792,86 @@ async function migration_003_add_unread_fields() {
     console.log('✅ [Migration 003] Completed'); // ✅ ADD THIS
   } catch (error) {
     console.error('❌ [Migration 003] Failed:', error); // ✅ ADD THIS
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+async function migration_004_add_last_message_fields() {
+  const client = await pool.connect();
+  
+  try {
+    console.log('📝 [Migration 004] Adding last message tracking fields...');
+    
+    // Check if columns exist
+    const currentColumns = await client.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'conversations'
+    `);
+    
+    const existingColumns = currentColumns.rows.map(row => row.column_name);
+    const columnsAdded = [];
+    
+    // Add last_message column
+    if (!existingColumns.includes('last_message')) {
+      console.log('   Adding column: last_message...');
+      await client.query(`
+        ALTER TABLE conversations 
+        ADD COLUMN last_message TEXT;
+      `);
+      columnsAdded.push('last_message');
+    }
+    
+    // Add last_message_sender_type column
+    if (!existingColumns.includes('last_message_sender_type')) {
+      console.log('   Adding column: last_message_sender_type...');
+      await client.query(`
+        ALTER TABLE conversations 
+        ADD COLUMN last_message_sender_type VARCHAR(50);
+      `);
+      columnsAdded.push('last_message_sender_type');
+    }
+    
+    // Add last_message_at column (if not already added by previous migration)
+    if (!existingColumns.includes('last_message_at')) {
+      console.log('   Adding column: last_message_at...');
+      await client.query(`
+        ALTER TABLE conversations 
+        ADD COLUMN last_message_at TIMESTAMP;
+      `);
+      columnsAdded.push('last_message_at');
+    }
+    
+    // Populate existing conversations with their last message
+    console.log('   Populating existing conversations with last messages...');
+    await client.query(`
+      UPDATE conversations c
+      SET 
+        last_message = m.content,
+        last_message_sender_type = m.sender_type,
+        last_message_at = m.timestamp
+      FROM (
+        SELECT DISTINCT ON (conversation_id)
+          conversation_id,
+          content,
+          sender_type,
+          timestamp
+        FROM messages
+        ORDER BY conversation_id, timestamp DESC
+      ) m
+      WHERE c.id = m.conversation_id;
+    `);
+    
+    if (columnsAdded.length > 0) {
+      console.log(`✅ [Migration 004] Added ${columnsAdded.length} columns: ${columnsAdded.join(', ')}`);
+    } else {
+      console.log('⏭️  [Migration 004] All columns already exist, skipping');
+    }
+    
+    console.log('✅ [Migration 004] Completed');
+  } catch (error) {
+    console.error('❌ [Migration 004] Failed:', error);
     throw error;
   } finally {
     client.release();
@@ -2274,7 +2355,9 @@ async function saveMessage(data) {
     const updateFields = [
       'total_message_count = total_message_count + 1',
       'last_message_at = NOW()',
-      'updated_at = NOW()'
+      'updated_at = NOW()',
+      'last_message = $2',  // ✅ NEW: Track last message content
+      'last_message_sender_type = $3'  // ✅ NEW: Track who sent last message
     ];
     
     console.log('🔍 [saveMessage] Sender type:', sender_type);
@@ -2308,11 +2391,12 @@ async function saveMessage(data) {
     
     console.log('🔍 [saveMessage] Update SQL will include:', updateFields);
     
+    // ✅ CHANGED: Now passing content and sender_type as parameters $2 and $3
     await client.query(`
       UPDATE conversations 
       SET ${updateFields.join(', ')}
       WHERE id = $1
-    `, [conversation_id]);
+    `, [conversation_id, content, sender_type]);
     
     console.log('✅ [saveMessage] Conversation updated successfully');
     

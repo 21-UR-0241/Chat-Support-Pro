@@ -421,10 +421,26 @@ function ConversationList({
 
                   <div className="conversation-bottom">
                     <p className="conversation-preview">
-                      {conversation.lastMessageFrom === 'agent' && (
-                        <span className="message-sender-indicator">You: </span>
-                      )}
-                      {conversation.lastMessage || 'No messages yet'}
+                      {(() => {
+                        // If there's a last message
+                        if (conversation.lastMessage) {
+                          // Check if it was from an agent (you sent it)
+                          const isAgentMessage = 
+                            conversation.lastSenderType === 'agent' || 
+                            conversation.lastMessageSenderType === 'agent';
+                          
+                          return (
+                            <>
+                              {isAgentMessage && (
+                                <span className="you-label">You: </span>
+                              )}
+                              {conversation.lastMessage}
+                            </>
+                          );
+                        }
+                        
+                        return 'No messages yet';
+                      })()}
                     </p>
                     {hasUnread && (
                       <span className="unread-badge">
