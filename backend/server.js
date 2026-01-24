@@ -2330,6 +2330,8 @@ const { rawBodyMiddleware, handleWebhook } = require('./webhooks');
 const { getAuthUrl, handleCallback } = require('./shopify-auth');
 const { initWebSocketServer, sendToConversation, broadcastToAgents, getWebSocketStats } = require('./websocket-server');
 const { hashPassword, verifyPassword, generateToken, authenticateToken } = require('./auth');
+const session = require('express-session');
+const shopifyAppRoutes = require('./routes/shopify-app-routes');
 
 const app = express();
 const server = http.createServer(app);
@@ -2400,6 +2402,15 @@ app.post('/webhooks/:shop/:topic', rawBodyMiddleware, handleWebhook);
 // JSON middleware for other routes
 app.use(express.json());
 
+app.use(session({
+  secret: process.env.JWT_SECRET, // ✅ Reuse existing JWT_SECRET
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
+}));
 // ============ WIDGET STATIC FILES ============
 
 app.get('/widget-init.js', (req, res) => {
@@ -2791,6 +2802,9 @@ app.get('/auth', async (req, res) => {
 });
 
 app.get('/auth/callback', handleCallback);
+
+// ============ SHOPIFY APP ROUTES ============
+app.use('/shopify', shopifyAppRoutes);
 
 // ============ STORE ENDPOINTS ============
 

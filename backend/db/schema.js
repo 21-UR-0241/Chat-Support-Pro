@@ -41,14 +41,18 @@ const conversations = pgTable('conversations', {
   cartSubtotal: decimal('cart_subtotal', { precision: 10, scale: 2 }).default('0'),
   source: varchar('source', { length: 100 }),
 
-  // ✅ add these:
+  // ✅ Unread tracking
   unreadCount: integer('unread_count').default(0),
   lastReadAt: timestamp('last_read_at'),
+
+  // ✅ ADD THESE NEW FIELDS:
+  lastMessage: text('last_message'),
+  lastMessageSenderType: varchar('last_message_sender_type', { length: 50 }),
+  lastMessageAt: timestamp('last_message_at'),
 
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
 });
-
 
 const messages = pgTable('messages', {
   id: serial('id').primaryKey(),
