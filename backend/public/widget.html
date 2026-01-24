@@ -2827,83 +2827,6 @@
       50% { opacity: 0.5; }
     }
 
-    /* Customer Context Panel */
-    .customer-context {
-      background: white;
-      border-bottom: 1px solid var(--border-color);
-      padding: 14px 20px;
-      display: none;
-      flex-shrink: 0;
-    }
-
-    .customer-context.visible {
-      display: block;
-    }
-
-    .customer-context-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 10px;
-    }
-
-    .customer-context-header h4 {
-      font-size: 13px;
-      color: var(--text-color);
-      font-weight: 600;
-    }
-
-    .customer-context-header button {
-      background: none;
-      border: none;
-      color: var(--text-secondary);
-      cursor: pointer;
-      font-size: 18px;
-      padding: 0;
-      line-height: 1;
-    }
-
-    .customer-info {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 10px;
-      font-size: 12px;
-    }
-
-    .customer-info-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 10px;
-      background: var(--bg-color);
-      border-radius: 6px;
-      color: var(--text-secondary);
-    }
-
-    .customer-info-item .label {
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: var(--text-secondary);
-      margin-bottom: 2px;
-    }
-
-    .customer-info-item .value {
-      color: var(--text-color);
-      font-weight: 500;
-      font-size: 13px;
-    }
-
-    .customer-info-item.highlight {
-      background: #f0f4f8;
-      border: 1px solid #cbd5e0;
-    }
-
-    .customer-info-item.highlight .value {
-      color: var(--primary-color);
-      font-weight: 600;
-    }
-
     /* Messages Container */
     #chat-messages {
       flex: 1;
@@ -3431,16 +3354,7 @@
     </div>
   </div>
 
-  <!-- Customer Context Panel -->
-  <div id="customer-context" class="customer-context">
-    <div class="customer-context-header">
-      <h4>Customer Information</h4>
-      <button id="toggle-context" aria-label="Toggle context">×</button>
-    </div>
-    <div id="customer-info" class="customer-info">
-      <!-- Customer info will be inserted here -->
-    </div>
-  </div>
+
 
   <div id="chat-messages">
     <!-- Email Collection Form -->
@@ -3559,9 +3473,6 @@
     const brandName = document.getElementById('brand-name');
     const statusText = document.getElementById('status-text');
     const statusIndicator = document.getElementById('status-indicator');
-    const customerContext = document.getElementById('customer-context');
-    const customerInfo = document.getElementById('customer-info');
-    const toggleContext = document.getElementById('toggle-context');
     const headerAvatar = document.getElementById('header-avatar');
 
     if (!STORE_ID) {
@@ -3673,7 +3584,6 @@
           fetchCustomerOrders(customerEmail),
           fetchCustomerCart(customerEmail)
         ]);
-        displayCustomerContext();
         console.log('✅ Customer data loaded');
       } catch (error) {
         console.error('❌ Failed to load customer data:', error);
@@ -3837,103 +3747,6 @@
       } catch (error) {
         console.error('❌ [Cart] Failed to fetch cart:', error);
         return null;
-      }
-    }
-
-    // Display customer context
-    function displayCustomerContext() {
-      if (!customerData && customerOrders.length === 0 && !customerCart && !customerEmail) {
-        customerContext.classList.remove('visible');
-        return;
-      }
-
-      let contextHTML = '';
-      
-      if (customerData?.name || customerName) {
-        contextHTML += `
-          <div class="customer-info-item">
-            <div>
-              <div class="label">Customer</div>
-              <div class="value">${escapeHtml(customerData?.name || customerName)}</div>
-            </div>
-          </div>
-        `;
-      }
-      
-      if (customerData?.email || customerEmail) {
-        contextHTML += `
-          <div class="customer-info-item highlight">
-            <div>
-              <div class="label">Email</div>
-              <div class="value">${escapeHtml(customerData?.email || customerEmail)}</div>
-            </div>
-          </div>
-        `;
-      }
-      
-      if (customerCart && customerCart.subtotal !== undefined && customerCart.subtotal > 0) {
-        contextHTML += `
-          <div class="customer-info-item highlight">
-            <div>
-              <div class="label">Cart Value</div>
-              <div class="value">$${customerCart.subtotal.toFixed(2)}</div>
-            </div>
-          </div>
-        `;
-      } else if (customerCart && customerCart.items && customerCart.items.length > 0) {
-        const subtotal = customerCart.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-        if (subtotal > 0) {
-          contextHTML += `
-            <div class="customer-info-item highlight">
-              <div>
-                <div class="label">Cart Value</div>
-                <div class="value">$${subtotal.toFixed(2)}</div>
-              </div>
-            </div>
-          `;
-        }
-      }
-      
-      if (messageSource) {
-        contextHTML += `
-          <div class="customer-info-item">
-            <div>
-              <div class="label">Source</div>
-              <div class="value">${escapeHtml(messageSource)}</div>
-            </div>
-          </div>
-        `;
-      }
-      
-      if (customerOrders.length > 0) {
-        contextHTML += `
-          <div class="customer-info-item">
-            <div>
-              <div class="label">Orders</div>
-              <div class="value">${customerOrders.length} order${customerOrders.length !== 1 ? 's' : ''}</div>
-            </div>
-          </div>
-        `;
-      }
-      
-      if (customerOrders.length > 0 && customerOrders[0].orderDate) {
-        const lastOrderDate = new Date(customerOrders[0].orderDate);
-        const daysAgo = Math.floor((Date.now() - lastOrderDate.getTime()) / (1000 * 60 * 60 * 24));
-        contextHTML += `
-          <div class="customer-info-item">
-            <div>
-              <div class="label">Last Order</div>
-              <div class="value">${daysAgo === 0 ? 'Today' : daysAgo === 1 ? 'Yesterday' : `${daysAgo} days ago`}</div>
-            </div>
-          </div>
-        `;
-      }
-      
-      if (contextHTML) {
-        customerInfo.innerHTML = contextHTML;
-        customerContext.classList.add('visible');
-      } else {
-        customerContext.classList.remove('visible');
       }
     }
 
@@ -4301,10 +4114,6 @@
 
     // Setup event listeners
     function setupEventListeners() {
-      toggleContext.addEventListener('click', () => {
-        customerContext.classList.toggle('visible');
-      });
-
       chatInput.addEventListener('input', () => {
         sendButton.disabled = !chatInput.value.trim();
         autoResizeTextarea();
