@@ -134,16 +134,27 @@ function ConversationList({
   }, [conversations, activeConversation, loading, notificationsEnabled, soundEnabled]);
 
   // Filter conversations
+// Filter conversations
 const filteredConversations = useMemo(() => {
   if (!conversations) return [];
   return conversations.filter((conv) => {
     const search = filters.search?.toLowerCase();
     if (search) {
+      // Get store name for this conversation
+      const storeName = stores?.find(s =>
+        s.storeIdentifier === conv.storeIdentifier ||
+        s.id === conv.shopId
+      )?.brandName || conv.storeName || '';
+      
       const matchesSearch =
         conv.customerName?.toLowerCase().includes(search) ||
         conv.customerEmail?.toLowerCase().includes(search) ||
         conv.customerId?.toLowerCase().includes(search) ||
-        conv.lastMessage?.toLowerCase().includes(search);
+        conv.lastMessage?.toLowerCase().includes(search) ||
+        storeName.toLowerCase().includes(search) || // ✅ Search store name
+        conv.storeIdentifier?.toLowerCase().includes(search) || // ✅ Search store identifier
+        conv.shopId?.toString().toLowerCase().includes(search); // ✅ Search shop ID
+      
       if (!matchesSearch) return false;
     }
     if (filters.status && conv.status !== filters.status) return false;
@@ -160,7 +171,8 @@ const filteredConversations = useMemo(() => {
     if (filters.priority && conv.priority !== filters.priority) return false;
     return true;
   });
-}, [conversations, filters, stores]); // Added 'stores' to dependencies
+}, [conversations, filters, stores]);
+
 
   // Total unread counter
   const totalUnread = useMemo(() => {
