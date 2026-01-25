@@ -259,47 +259,56 @@ function ChatWindow({
   };
 
   // Handle incoming message
-  const handleIncomingMessage = (message) => {
-    const normalizedMessage = {
-      id: message.id,
-      conversationId: message.conversationId || message.conversation_id,
-      senderType: message.senderType || message.sender_type,
-      senderName: message.senderName || message.sender_name,
-      content: message.content,
-      createdAt: message.createdAt || message.created_at || message.sentAt || message.sent_at,
-    };
-    
-    if (normalizedMessage.conversationId && 
-        normalizedMessage.conversationId !== conversation.id) {
-      console.log('⏭️ [handleIncomingMessage] Wrong conversation');
-      return;
-    }
-    
-    if (displayedMessageIds.current.has(normalizedMessage.id)) {
-      console.log('⏭️ [handleIncomingMessage] Duplicate message');
-      return;
-    }
-    
-    if (normalizedMessage.senderType === 'agent' && 
-        normalizedMessage.senderName === employeeName) {
-      console.log('⏭️ [handleIncomingMessage] Own message');
-      displayedMessageIds.current.add(normalizedMessage.id);
-      return;
-    }
-    
-    console.log('✅ [handleIncomingMessage] Adding message to state');
-    displayedMessageIds.current.add(normalizedMessage.id);
-    
-    setMessages(prev => {
-      const exists = prev.some(m => m.id === normalizedMessage.id);
-      if (exists) return prev;
-      return [...prev, normalizedMessage];
-    });
-    
-    if (normalizedMessage.senderType === 'customer') {
-      setTypingUsers(new Set());
-    }
+const handleIncomingMessage = (message) => {
+  // ✅ ADD THIS DEBUG
+  console.log('🔍 [handleIncomingMessage] Raw message:', message);
+  console.log('🔍 [handleIncomingMessage] Current conversation.id:', conversation?.id);
+  console.log('🔍 [handleIncomingMessage] Employee name:', employeeName);
+  
+  const normalizedMessage = {
+    id: message.id,
+    conversationId: message.conversationId || message.conversation_id,
+    senderType: message.senderType || message.sender_type,
+    senderName: message.senderName || message.sender_name,
+    content: message.content,
+    createdAt: message.createdAt || message.created_at || message.sentAt || message.sent_at,
   };
+  
+  // ✅ ADD THIS DEBUG
+  console.log('🔍 [handleIncomingMessage] Normalized message:', normalizedMessage);
+  console.log('🔍 [handleIncomingMessage] Conversation ID match?', normalizedMessage.conversationId === conversation.id);
+  
+  if (normalizedMessage.conversationId && 
+      normalizedMessage.conversationId !== conversation.id) {
+    console.log('⏭️ [handleIncomingMessage] Wrong conversation - Expected:', conversation.id, 'Got:', normalizedMessage.conversationId);
+    return;
+  }
+  
+  if (displayedMessageIds.current.has(normalizedMessage.id)) {
+    console.log('⏭️ [handleIncomingMessage] Duplicate message:', normalizedMessage.id);
+    return;
+  }
+  
+  if (normalizedMessage.senderType === 'agent' && 
+      normalizedMessage.senderName === employeeName) {
+    console.log('⏭️ [handleIncomingMessage] Own message - senderName:', normalizedMessage.senderName, 'employeeName:', employeeName);
+    displayedMessageIds.current.add(normalizedMessage.id);
+    return;
+  }
+  
+  console.log('✅ [handleIncomingMessage] Adding message to state');
+  displayedMessageIds.current.add(normalizedMessage.id);
+  
+  setMessages(prev => {
+    const exists = prev.some(m => m.id === normalizedMessage.id);
+    if (exists) return prev;
+    return [...prev, normalizedMessage];
+  });
+  
+  if (normalizedMessage.senderType === 'customer') {
+    setTypingUsers(new Set());
+  }
+};
 
   // Handle typing indicator
   const handleTypingIndicator = (data) => {
@@ -373,6 +382,7 @@ function ChatWindow({
       });
       
       setMessages(messageArray);
+       console.log('🔍 [loadMessages] Messages set to state:', messageArray.length);
     } catch (error) {
       console.error('❌ Failed to load messages:', error);
       setMessages([]);

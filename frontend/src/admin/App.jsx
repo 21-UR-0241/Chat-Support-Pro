@@ -44,6 +44,7 @@ function App() {
     setLoading(false);
   };
 
+  
   const handleLogin = (employeeData) => {
     console.log('✅ Login successful, setting authenticated state');
     setEmployee(employeeData);
@@ -168,6 +169,17 @@ useEffect(() => {
       };
     }
   }, [activeConversation, ws]);
+
+    useEffect(() => {
+    if (activeConversation) {
+      const updated = conversations.find(c => c.id === activeConversation.id);
+      
+      if (updated && updated !== activeConversation) {
+        console.log('🔄 [App] Syncing activeConversation with updated data');
+        setActiveConversation(updated);
+      }
+    }
+  }, [conversations]);
 
   const loadStores = async () => {
     try {

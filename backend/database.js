@@ -9,8 +9,10 @@ const pool = new Pool({
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
   max: 50, // Increased for 80+ stores
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  connectionTimeoutMillis: 10000, // ✅ Increased to 10 seconds
+  allowExitOnIdle: false, // ✅ Prevent premature pool shutdown
 });
+
 
 // Pool error handling
 pool.on('error', (err) => {

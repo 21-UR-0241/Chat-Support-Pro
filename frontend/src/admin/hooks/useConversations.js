@@ -155,6 +155,32 @@ export function useConversations(employeeId) {
     });
   }, []);
 
+  const unsubscribe1 = ws.on('new_message', (data) => {
+  console.log('📨 [useConversations] New message:', {
+    conversationId: data.conversationId,
+    hasConversation: !!data.conversation,
+    hasMessage: !!data.message,
+    currentFilter: filters.storeId, // ✅ ADD THIS
+    conversationStoreId: data.conversation?.storeIdentifier || data.conversation?.shopId // ✅ ADD THIS
+  });
+  
+  // ✅ ADD THIS SPECIAL CHECK FOR GUELPH
+  if (data.conversation?.storeIdentifier?.includes('guelph') || 
+      data.conversation?.shopId === 'guelph' ||
+      data.conversationId === 48) {
+    console.log('🔍 [GUELPH DEBUG] Full conversation data:', data.conversation);
+    console.log('🔍 [GUELPH DEBUG] Current filter:', filters);
+  }
+  
+  if (data.conversation) {
+    updateConversationFromData(data.conversation);
+  } else {
+    updateConversationFromMessage(data);
+  }
+
+  playNotificationSound();
+});
+
   // ✅ Fallback: Update conversation from message only
   const updateConversationFromMessage = useCallback((data) => {
     const conversationId = data.conversationId || data.conversation_id;

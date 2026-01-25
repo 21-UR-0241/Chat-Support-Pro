@@ -134,24 +134,33 @@ function ConversationList({
   }, [conversations, activeConversation, loading, notificationsEnabled, soundEnabled]);
 
   // Filter conversations
-  const filteredConversations = useMemo(() => {
-    if (!conversations) return [];
-    return conversations.filter((conv) => {
-      const search = filters.search?.toLowerCase();
-      if (search) {
-        const matchesSearch =
-          conv.customerName?.toLowerCase().includes(search) ||
-          conv.customerEmail?.toLowerCase().includes(search) ||
-          conv.customerId?.toLowerCase().includes(search) ||
-          conv.lastMessage?.toLowerCase().includes(search);
-        if (!matchesSearch) return false;
-      }
-      if (filters.status && conv.status !== filters.status) return false;
-      if (filters.storeId && conv.storeIdentifier !== filters.storeId) return false;
-      if (filters.priority && conv.priority !== filters.priority) return false;
-      return true;
-    });
-  }, [conversations, filters]);
+const filteredConversations = useMemo(() => {
+  if (!conversations) return [];
+  return conversations.filter((conv) => {
+    const search = filters.search?.toLowerCase();
+    if (search) {
+      const matchesSearch =
+        conv.customerName?.toLowerCase().includes(search) ||
+        conv.customerEmail?.toLowerCase().includes(search) ||
+        conv.customerId?.toLowerCase().includes(search) ||
+        conv.lastMessage?.toLowerCase().includes(search);
+      if (!matchesSearch) return false;
+    }
+    if (filters.status && conv.status !== filters.status) return false;
+    
+    if (filters.storeId) {
+      // Match using the same logic as display - check all possible store fields
+      const matchesStore = stores?.find(s =>
+        (s.storeIdentifier === filters.storeId) &&
+        (s.storeIdentifier === conv.storeIdentifier || s.id === conv.shopId)
+      );
+      if (!matchesStore) return false;
+    }
+    
+    if (filters.priority && conv.priority !== filters.priority) return false;
+    return true;
+  });
+}, [conversations, filters, stores]); // Added 'stores' to dependencies
 
   // Total unread counter
   const totalUnread = useMemo(() => {
