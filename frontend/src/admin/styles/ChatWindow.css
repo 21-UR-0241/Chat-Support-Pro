@@ -509,6 +509,36 @@
   }
 }
 
+/* Store Info Styling */
+.store-info {
+  color: #00a884;
+  font-weight: 500;
+}
+
+.store-info strong {
+  font-weight: 600;
+}
+
+/* Mobile - truncate long store names/domains */
+@media (max-width: 768px) {
+  .store-info {
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: inline-block;
+    vertical-align: middle;
+  }
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  .dark-mode .store-info {
+    color: #00a884;
+  }
+}
+
+
 /* Dark Mode Support */
 @media (prefers-color-scheme: dark) {
   .dark-mode .chat-window {
