@@ -154,7 +154,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      margin: 20px 0;
+      margin: 20px 0 10px 0;
       color: var(--text-secondary);
       font-size: 12px;
       gap: 12px;
@@ -750,7 +750,7 @@
   </div>
 
   <script>
-    console.log('🚀 [Widget] Initializing (Auto Email Detection)...');
+    console.log('🚀 [Widget] Initializing (Auto Email Detection with History)...');
 
     // Configuration
     const urlParams = new URLSearchParams(window.location.search);
@@ -777,7 +777,7 @@
     let typingTimeout = null;
     let typingDebounceTimer = null;
     let messageSource = null;
-    let historyLoaded = false; // Track if history has been loaded
+    let historyLoaded = false;
 
     // DOM Elements
     const chatMessages = document.getElementById('chat-messages');
@@ -840,8 +840,6 @@
       const date = new Date(timestamp);
       const now = new Date();
       const diffMs = now - date;
-      const diffMins = Math.floor(diffMs / 60000);
-      const diffHours = Math.floor(diffMs / 3600000);
       const diffDays = Math.floor(diffMs / 86400000);
 
       // If today, show time
@@ -880,7 +878,6 @@
     function autoDetectCustomer() {
       console.log('🔍 [Auto-detect] Starting customer detection...');
       
-      // ===== PRIORITY 1: Recent Order Data (Keep for 30 days) =====
       try {
         const checkoutData = localStorage.getItem('chat_checkout_data');
         if (checkoutData) {
@@ -922,7 +919,6 @@
         console.log('ℹ️ [Auto-detect] No checkout data in localStorage');
       }
       
-      // ===== PRIORITY 2: Parent Page Data (Logged-in customers) =====
       try {
         if (window.parent && window.parent.chatCheckoutData) {
           const data = window.parent.chatCheckoutData;
@@ -960,7 +956,6 @@
         console.log('ℹ️ [Auto-detect] Cannot access parent (cross-origin or no data)');
       }
       
-      // ===== PRIORITY 3: URL Parameters =====
       const urlEmail = urlParams.get('email');
       if (urlEmail && isValidEmail(urlEmail)) {
         console.log('✅ [Auto-detect] Email found in URL:', urlEmail);
@@ -980,7 +975,6 @@
         };
       }
       
-      // ===== PRIORITY 4: Stored Email from Previous Session =====
       try {
         let storedEmail = localStorage.getItem(`chat_email_${STORE_ID}`);
         let storedName = localStorage.getItem(`chat_name_${STORE_ID}`);
@@ -1007,9 +1001,10 @@
       return null;
     }
 
-    // ✅ NEW: Load conversation history
+    // ✅ FIXED: Load conversation history with better error handling
     async function loadConversationHistory() {
       if (!conversationId || historyLoaded) {
+        console.log('ℹ️ [History] Skipping load - conversationId:', conversationId, 'historyLoaded:', historyLoaded);
         return;
       }
 
@@ -1019,11 +1014,18 @@
         // Show loading indicator
         showLoadingHistory();
         
-        const response = await fetchWithTimeout(
-          `${API_URL}/api/conversations/${conversationId}/messages?store=${STORE_ID}`,
-          {},
-          8000
-        );
+        // Try the widget-specific endpoint first
+        let url = `${API_URL}/api/widget/messages?conversationId=${conversationId}&store=${STORE_ID}`;
+        console.log('📜 [History] Fetching from:', url);
+        
+        let response = await fetchWithTimeout(url, {}, 10000);
+        
+        // If that doesn't work, try the alternative endpoint
+        if (!response.ok && response.status === 404) {
+          console.log('📜 [History] Trying alternative endpoint...');
+          url = `${API_URL}/api/conversations/${conversationId}/messages?store=${STORE_ID}`;
+          response = await fetchWithTimeout(url, {}, 10000);
+        }
 
         if (!response.ok) {
           if (response.status === 404) {
@@ -1038,7 +1040,19 @@
           throw new Error(`Failed to load history: ${response.status}`);
         }
 
-        const messages = await response.json();
+        const data = await response.json();
+        console.log('📜 [History] Response data:', data);
+        
+        // Handle different response formats
+        let messages = [];
+        if (Array.isArray(data)) {
+          messages = data;
+        } else if (data.messages && Array.isArray(data.messages)) {
+          messages = data.messages;
+        } else if (data.data && Array.isArray(data.data)) {
+          messages = data.data;
+        }
+        
         console.log('✅ [History] Loaded', messages.length, 'messages');
 
         hideLoadingHistory();
@@ -1046,44 +1060,52 @@
         if (messages.length > 0) {
           // Hide welcome message
           welcomeMessage.classList.remove('visible');
+          welcomeMessage.style.display = 'none';
           
-          // Display all messages
+          // Clear any existing messages (except email-collection and welcome-message)
+          const existingMessages = chatMessages.querySelectorAll('.message');
+          existingMessages.forEach(msg => msg.remove());
+          
+          // Display all messages in order
           messages.forEach(msg => {
             displayHistoryMessage(msg);
           });
           
-          // Add divider if there are messages
-          if (messages.length > 0) {
-            addHistoryDivider();
-          }
-          
           historyLoaded = true;
-          scrollToBottom();
+          
+          // Scroll to bottom after a short delay to ensure messages are rendered
+          setTimeout(() => {
+            scrollToBottom();
+          }, 100);
         } else {
-          // No messages in conversation, show welcome
+          console.log('ℹ️ [History] No messages in conversation, showing welcome');
           welcomeMessage.classList.add('visible');
         }
 
       } catch (error) {
         console.error('❌ [History] Failed to load conversation history:', error);
+        console.error('❌ [History] Error details:', error.message, error.stack);
         hideLoadingHistory();
         welcomeMessage.classList.add('visible');
       }
     }
 
-    // ✅ NEW: Display history message (no animation)
+    // ✅ FIXED: Display history message
     function displayHistoryMessage(message) {
+      console.log('📝 [History] Displaying message:', message);
+      
       const normalizedMessage = {
         id: message.id,
-        senderType: message.senderType || message.sender_type,
-        senderName: message.senderName || message.sender_name,
-        content: message.content,
-        timestamp: message.createdAt || message.created_at || message.timestamp,
+        senderType: message.senderType || message.sender_type || message.type,
+        senderName: message.senderName || message.sender_name || message.sender,
+        content: message.content || message.message || message.text,
+        timestamp: message.createdAt || message.created_at || message.timestamp || message.sentAt || message.sent_at || new Date().toISOString(),
         conversationId: message.conversationId || message.conversation_id
       };
 
       // Skip if already displayed
       if (displayedMessageIds.has(normalizedMessage.id)) {
+        console.log('ℹ️ [History] Message already displayed:', normalizedMessage.id);
         return;
       }
 
@@ -1112,51 +1134,40 @@
         </div>
       `;
       
-      // Find the loading indicator or welcome message
-      const loadingHistory = document.querySelector('.loading-history');
-      const divider = document.querySelector('.history-divider');
-      
-      if (loadingHistory) {
-        chatMessages.insertBefore(messageDiv, loadingHistory);
-      } else if (divider) {
-        chatMessages.insertBefore(messageDiv, divider);
+      // Append to chat messages (but before welcome message if it exists)
+      if (welcomeMessage.parentElement === chatMessages) {
+        chatMessages.insertBefore(messageDiv, welcomeMessage);
       } else {
         chatMessages.appendChild(messageDiv);
       }
     }
 
-    // ✅ NEW: Show loading history indicator
+    // Show loading history indicator
     function showLoadingHistory() {
-      hideLoadingHistory(); // Remove any existing
+      hideLoadingHistory();
       
       const loadingDiv = document.createElement('div');
       loadingDiv.className = 'loading-history';
+      loadingDiv.id = 'loading-history-indicator';
       loadingDiv.innerHTML = `
         <div class="spinner"></div>
         <span>Loading conversation history...</span>
       `;
       
-      chatMessages.appendChild(loadingDiv);
-    }
-
-    // ✅ NEW: Hide loading history indicator
-    function hideLoadingHistory() {
-      const loading = document.querySelector('.loading-history');
-      if (loading) {
-        loading.remove();
+      // Insert before welcome message if it exists
+      if (welcomeMessage.parentElement === chatMessages) {
+        chatMessages.insertBefore(loadingDiv, welcomeMessage);
+      } else {
+        chatMessages.appendChild(loadingDiv);
       }
     }
 
-    // ✅ NEW: Add history divider
-    function addHistoryDivider() {
-      const existingDivider = document.querySelector('.history-divider');
-      if (existingDivider) return;
-      
-      const divider = document.createElement('div');
-      divider.className = 'history-divider';
-      divider.innerHTML = '<span>Previous conversation</span>';
-      
-      chatMessages.appendChild(divider);
+    // Hide loading history indicator
+    function hideLoadingHistory() {
+      const loading = document.getElementById('loading-history-indicator');
+      if (loading) {
+        loading.remove();
+      }
     }
 
     // Handle email form submission
@@ -1185,7 +1196,7 @@
       console.log('✅ [Email] Customer email collected:', customerEmail);
       
       await loadCustomerData();
-      showChatInterface();
+      await showChatInterface();
     });
 
     // Load customer data
@@ -1205,22 +1216,29 @@
       }
     }
 
-    // ✅ UPDATED: Show chat interface and load history
+    // ✅ FIXED: Show chat interface with proper history loading
     async function showChatInterface() {
+      console.log('🎨 [UI] Showing chat interface, conversationId:', conversationId);
+      
       emailCollection.classList.remove('visible');
       chatInputContainer.classList.add('visible');
       
       // Load conversation history if we have a conversationId
-      if (conversationId) {
+      if (conversationId && !historyLoaded) {
+        console.log('📜 [UI] Has conversationId, loading history...');
         await loadConversationHistory();
-      } else {
+      } else if (!conversationId) {
+        console.log('📜 [UI] No conversationId, showing welcome message');
         welcomeMessage.classList.add('visible');
       }
       
       chatInput.focus();
       
+      // Connect to WebSocket after showing interface
       if (conversationId && wsToken) {
-        connectWebSocket();
+        setTimeout(() => {
+          connectWebSocket();
+        }, 500);
       } else {
         updateStatus('online', "We're online");
       }
@@ -1420,7 +1438,7 @@
       bubble.insertAdjacentHTML('beforeend', orderHTML);
     }
 
-    // ✅ UPDATED: Initialize
+    // ✅ UPDATED: Initialize with better debugging
     async function init() {
       try {
         console.log('[Widget] Starting initialization');
@@ -1441,6 +1459,8 @@
           }
           
           conversationId = localStorage.getItem(`chat_conv_${STORE_ID}`);
+          console.log('[Widget] Auto-detected customer:', customerEmail, 'conversationId:', conversationId);
+          
           await loadCustomerData();
           await showChatInterface();
           
@@ -1452,10 +1472,12 @@
             customerEmail = storedEmail;
             customerName = storedName || 'Guest';
             conversationId = localStorage.getItem(`chat_conv_${STORE_ID}`);
+            console.log('[Widget] Stored customer found:', customerEmail, 'conversationId:', conversationId);
             
             await loadCustomerData();
             await showChatInterface();
           } else {
+            console.log('[Widget] No customer found, showing email form');
             emailCollection.classList.add('visible');
             updateStatus('online', "We're online");
           }
@@ -1811,7 +1833,7 @@
       chatInput.value = '';
       chatInput.style.height = 'auto';
 
-      if (welcomeMessage) {
+      if (welcomeMessage && welcomeMessage.style.display !== 'none') {
         welcomeMessage.style.display = 'none';
       }
 
@@ -2013,7 +2035,7 @@
             <span></span>
             <span></span>
             <span></span>
-          </div>
+          </</div>
         </div>
       `;
       chatMessages.appendChild(indicator);
@@ -2061,8 +2083,6 @@
   </script>
 </body>
 </html>
-
-
 
 
 
