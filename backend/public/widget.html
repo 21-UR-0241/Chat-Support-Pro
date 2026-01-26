@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chat Widget - Auto Email Detection</title>
+  <title>Chat Widget - Debug Version</title>
   <style>
     * {
       margin: 0;
@@ -12,7 +12,6 @@
     }
 
     :root {
-      /* Neutral color palette */
       --primary-color: #4a5568;
       --primary-dark: #2d3748;
       --primary-light: #718096;
@@ -33,7 +32,6 @@
       overflow: hidden;
     }
 
-    /* Header - Clean and neutral */
     #chat-header {
       background: var(--white);
       color: var(--text-color);
@@ -57,7 +55,6 @@
       justify-content: center;
       font-size: 16px;
       font-weight: 600;
-      letter-spacing: -0.5px;
     }
 
     #chat-header .info {
@@ -68,7 +65,6 @@
       font-size: 15px;
       font-weight: 600;
       margin-bottom: 2px;
-      color: var(--text-color);
     }
 
     #chat-header .info p {
@@ -86,22 +82,55 @@
       animation: pulse 2s infinite;
     }
 
-    .status-indicator.offline {
-      background: #ef4444;
-      animation: none;
-    }
-
-    .status-indicator.connecting {
-      background: #f59e0b;
-      animation: pulse 1s infinite;
-    }
-
     @keyframes pulse {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.5; }
     }
 
-    /* Messages Container */
+    /* DEBUG PANEL */
+    #debug-panel {
+      position: fixed;
+      bottom: 70px;
+      right: 20px;
+      background: white;
+      border: 2px solid #ef4444;
+      border-radius: 8px;
+      padding: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      z-index: 1000;
+      max-width: 300px;
+    }
+
+    #debug-panel h4 {
+      margin: 0 0 8px 0;
+      color: #ef4444;
+      font-size: 14px;
+    }
+
+    #debug-panel button {
+      background: #ef4444;
+      color: white;
+      border: none;
+      padding: 8px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      margin: 4px;
+    }
+
+    #debug-panel button:hover {
+      background: #dc2626;
+    }
+
+    #debug-info {
+      font-size: 11px;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid #fee2e2;
+      color: #666;
+      word-break: break-all;
+    }
+
     #chat-messages {
       flex: 1;
       overflow-y: auto;
@@ -116,16 +145,11 @@
       width: 6px;
     }
 
-    #chat-messages::-webkit-scrollbar-track {
-      background: transparent;
-    }
-
     #chat-messages::-webkit-scrollbar-thumb {
       background: #cbd5e0;
       border-radius: 3px;
     }
 
-    /* Loading state for message history */
     .loading-history {
       display: flex;
       align-items: center;
@@ -148,27 +172,7 @@
     @keyframes spin {
       to { transform: rotate(360deg); }
     }
-    
-    /* History divider */
-    .history-divider {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin: 20px 0 10px 0;
-      color: var(--text-secondary);
-      font-size: 12px;
-      gap: 12px;
-    }
-    
-    .history-divider::before,
-    .history-divider::after {
-      content: '';
-      flex: 1;
-      height: 1px;
-      background: var(--border-color);
-    }
 
-    /* Email Collection Form */
     #email-collection {
       display: none;
       flex-direction: column;
@@ -176,16 +180,10 @@
       justify-content: center;
       padding: 40px 20px;
       text-align: center;
-      animation: fadeIn 0.3s ease;
     }
 
     #email-collection.visible {
       display: flex;
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(20px); }
-      to { opacity: 1; transform: translateY(0); }
     }
 
     #email-collection .icon {
@@ -216,7 +214,6 @@
       font-size: 14px;
       color: var(--text-secondary);
       margin-bottom: 24px;
-      line-height: 1.6;
     }
 
     .email-form {
@@ -243,14 +240,7 @@
       border: 2px solid var(--border-color);
       border-radius: 8px;
       font-size: 15px;
-      font-family: inherit;
-      transition: all 0.2s;
       outline: none;
-    }
-
-    .form-group input:focus {
-      border-color: var(--primary-color);
-      box-shadow: 0 0 0 3px rgba(74, 85, 104, 0.1);
     }
 
     .form-group input.error {
@@ -278,32 +268,14 @@
       font-size: 15px;
       font-weight: 600;
       cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .submit-button:hover:not(:disabled) {
-      background: var(--primary-dark);
-      transform: translateY(-1px);
-    }
-
-    .submit-button:active:not(:disabled) {
-      transform: translateY(0);
-    }
-
-    .submit-button:disabled {
-      background: #cbd5e0;
-      cursor: not-allowed;
-      opacity: 0.6;
     }
 
     .privacy-note {
       font-size: 12px;
       color: var(--text-secondary);
       margin-top: 16px;
-      line-height: 1.5;
     }
 
-    /* Welcome Message */
     #welcome-message {
       display: none;
       text-align: center;
@@ -336,15 +308,12 @@
     #welcome-message h2 {
       font-size: 18px;
       margin-bottom: 8px;
-      color: var(--text-color);
     }
 
     #welcome-message p {
       font-size: 14px;
-      line-height: 1.5;
     }
 
-    /* Message Bubble */
     .message {
       display: flex;
       gap: 8px;
@@ -384,7 +353,6 @@
       font-size: 12px;
       font-weight: 600;
       flex-shrink: 0;
-      letter-spacing: -0.5px;
     }
 
     .message.customer .avatar {
@@ -397,8 +365,6 @@
       border-radius: 12px;
       box-shadow: 0 1px 2px rgba(0,0,0,0.08);
       border: 1px solid var(--border-color);
-      max-width: 100%;
-      position: relative;
     }
 
     .message.customer .bubble {
@@ -411,44 +377,16 @@
       opacity: 0.7;
     }
 
-    .message.pending .bubble::after {
-      content: '⋯';
-      position: absolute;
-      bottom: 6px;
-      right: 10px;
-      font-size: 14px;
-      opacity: 0.6;
-    }
-
-    .message.failed .bubble {
-      opacity: 0.9;
-      border: 1px solid #ef4444;
-      background: #fef2f2 !important;
-      color: var(--text-color) !important;
-    }
-
-    .message.failed .bubble::after {
-      content: '!';
-      position: absolute;
-      bottom: 6px;
-      right: 10px;
-      font-size: 11px;
-      color: #ef4444;
-      font-weight: 600;
-    }
-
     .message .sender-name {
       font-size: 12px;
       font-weight: 600;
       margin-bottom: 4px;
-      opacity: 0.9;
     }
 
     .message .text {
       font-size: 14px;
       line-height: 1.5;
       word-wrap: break-word;
-      white-space: pre-wrap;
     }
 
     .message .time {
@@ -460,7 +398,6 @@
 
     .message.customer .time {
       color: rgba(255,255,255,0.8);
-      text-align: right;
     }
 
     .message.system {
@@ -476,115 +413,6 @@
       padding: 8px 12px;
     }
 
-    /* Order Context in Messages */
-    .order-context {
-      background: var(--bg-color);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 10px;
-      margin-top: 8px;
-      font-size: 12px;
-    }
-
-    .order-context-header {
-      font-weight: 600;
-      color: var(--text-color);
-      margin-bottom: 6px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .order-context-item {
-      display: flex;
-      justify-content: space-between;
-      padding: 4px 0;
-      color: var(--text-secondary);
-    }
-
-    .order-context-item strong {
-      color: var(--text-color);
-    }
-
-    .order-status {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 12px;
-      font-size: 11px;
-      font-weight: 500;
-    }
-
-    .order-status.completed {
-      background: #d1fae5;
-      color: #065f46;
-    }
-
-    .order-status.pending {
-      background: #fef3c7;
-      color: #92400e;
-    }
-
-    .order-status.processing {
-      background: #dbeafe;
-      color: #1e40af;
-    }
-
-    .order-status.shipped {
-      background: #e0e7ff;
-      color: #3730a3;
-    }
-
-    .order-status.cancelled {
-      background: #fee2e2;
-      color: #dc2626;
-    }
-
-    /* Typing Indicator */
-    .typing-indicator {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 14px;
-      background: white;
-      border-radius: 12px;
-      border: 1px solid var(--border-color);
-      width: fit-content;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.08);
-    }
-
-    .typing-indicator .dots {
-      display: flex;
-      gap: 4px;
-    }
-
-    .typing-indicator .dots span {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--text-secondary);
-      animation: typing 1.4s infinite;
-    }
-
-    .typing-indicator .dots span:nth-child(2) {
-      animation-delay: 0.2s;
-    }
-
-    .typing-indicator .dots span:nth-child(3) {
-      animation-delay: 0.4s;
-    }
-
-    @keyframes typing {
-      0%, 60%, 100% {
-        transform: translateY(0);
-        opacity: 0.5;
-      }
-      30% {
-        transform: translateY(-6px);
-        opacity: 1;
-      }
-    }
-
-    /* Input Container */
     #chat-input-container {
       padding: 16px 20px;
       background: white;
@@ -604,21 +432,9 @@
       border: 1px solid var(--border-color);
       border-radius: 8px;
       font-size: 14px;
-      font-family: inherit;
       outline: none;
-      transition: all 0.2s;
       resize: none;
       max-height: 120px;
-      line-height: 1.4;
-    }
-
-    #chat-input:focus {
-      border-color: var(--primary-color);
-      box-shadow: 0 0 0 3px rgba(74, 85, 104, 0.1);
-    }
-
-    #chat-input::placeholder {
-      color: #a0aec0;
     }
 
     #send-button {
@@ -632,34 +448,11 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      transition: all 0.2s;
-      flex-shrink: 0;
-    }
-
-    #send-button:hover:not(:disabled) {
-      background: var(--primary-dark);
-      transform: translateY(-1px);
-    }
-
-    #send-button:active:not(:disabled) {
-      transform: translateY(0);
     }
 
     #send-button:disabled {
       background: #cbd5e0;
       cursor: not-allowed;
-      opacity: 0.6;
-    }
-
-    /* Error State */
-    .error-message {
-      background: #fef2f2;
-      color: #dc2626;
-      padding: 12px 16px;
-      border-radius: 8px;
-      margin: 20px;
-      font-size: 14px;
-      border-left: 4px solid #ef4444;
     }
   </style>
 </head>
@@ -670,13 +463,21 @@
       <h3 id="brand-name">Chat Support</h3>
       <p id="status">
         <span class="status-indicator" id="status-indicator"></span>
-        <span id="status-text">Connecting...</span>
+        <span id="status-text">Loading...</span>
       </p>
     </div>
   </div>
 
+  <!-- DEBUG PANEL -->
+  <div id="debug-panel">
+    <h4>🔍 Debug Panel</h4>
+    <button onclick="testLoadHistory()">Load History</button>
+    <button onclick="checkLocalStorage()">Check Storage</button>
+    <button onclick="clearAllData()">Clear All</button>
+    <div id="debug-info"></div>
+  </div>
+
   <div id="chat-messages">
-    <!-- Email Collection Form -->
     <div id="email-collection">
       <div class="icon">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -685,7 +486,7 @@
         </svg>
       </div>
       <h2>Welcome! Let's get started</h2>
-      <p>Please enter your email address to continue.<br>We'll use this to look up your account and orders.</p>
+      <p>Please enter your email address to continue.</p>
       
       <form class="email-form" id="email-form">
         <div class="form-group">
@@ -695,7 +496,6 @@
             id="customer-email" 
             name="email"
             placeholder="your@email.com"
-            autocomplete="email"
             required
           >
           <div class="error-text" id="email-error">Please enter a valid email address</div>
@@ -708,29 +508,23 @@
             id="customer-name" 
             name="name"
             placeholder="Your name"
-            autocomplete="name"
           >
         </div>
         
-        <button type="submit" class="submit-button" id="start-chat-btn">
-          Start Chat
-        </button>
+        <button type="submit" class="submit-button">Start Chat</button>
         
-        <p class="privacy-note">
-          Your information is secure and will only be used to provide customer support.
-        </p>
+        <p class="privacy-note">Your information is secure.</p>
       </form>
     </div>
 
-    <!-- Welcome Message (shown after email is collected) -->
     <div id="welcome-message">
       <div class="welcome-icon">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
         </svg>
       </div>
-      <h2>Welcome to Chat Support!</h2>
-      <p>How can we help you today?<br>Send us a message and we'll get back to you right away.</p>
+      <h2>Welcome!</h2>
+      <p>How can we help you today?</p>
     </div>
   </div>
 
@@ -739,9 +533,8 @@
       id="chat-input" 
       placeholder="Type your message..."
       rows="1"
-      autocomplete="off"
     ></textarea>
-    <button id="send-button" disabled aria-label="Send message">
+    <button id="send-button" disabled>
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <line x1="22" y1="2" x2="11" y2="13"></line>
         <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
@@ -750,36 +543,18 @@
   </div>
 
   <script>
-    console.log('🚀 [Widget] Initializing (Auto Email Detection with History)...');
+    console.log('🚀 [Widget] Starting...');
 
-    // Configuration
     const urlParams = new URLSearchParams(window.location.search);
     const STORE_ID = urlParams.get('store');
     const API_URL = window.location.origin;
-    const WS_URL = window.location.origin.replace(/^http/, 'ws') + '/ws';
 
-    // State
     let conversationId = null;
-    let ws = null;
-    let wsToken = null;
-    let tokenLastRefreshed = null;
-    const TOKEN_REFRESH_INTERVAL = 5 * 60 * 1000;
     let customerEmail = null;
     let customerName = null;
-    let customerData = null;
-    let customerOrders = [];
-    let customerCart = null;
-    let storeSettings = null;
-    let reconnectAttempts = 0;
-    let maxReconnectAttempts = 5;
-    let reconnectDelay = 2000;
     let displayedMessageIds = new Set();
-    let typingTimeout = null;
-    let typingDebounceTimer = null;
-    let messageSource = null;
     let historyLoaded = false;
 
-    // DOM Elements
     const chatMessages = document.getElementById('chat-messages');
     const chatInput = document.getElementById('chat-input');
     const sendButton = document.getElementById('send-button');
@@ -787,41 +562,13 @@
     const welcomeMessage = document.getElementById('welcome-message');
     const chatInputContainer = document.getElementById('chat-input-container');
     const emailForm = document.getElementById('email-form');
-    const customerEmailInput = document.getElementById('customer-email');
-    const customerNameInput = document.getElementById('customer-name');
-    const emailError = document.getElementById('email-error');
-    const brandName = document.getElementById('brand-name');
-    const statusText = document.getElementById('status-text');
-    const statusIndicator = document.getElementById('status-indicator');
-    const headerAvatar = document.getElementById('header-avatar');
+    const debugInfo = document.getElementById('debug-info');
 
-    if (!STORE_ID) {
-      showError('Widget configuration error. Please contact support.');
-      console.error('[Widget] No store ID provided');
+    function updateDebugInfo(info) {
+      debugInfo.innerHTML = info;
+      console.log('📊 [Debug]', info);
     }
 
-    // Detect message source
-    function detectMessageSource() {
-      const source = urlParams.get('source') || urlParams.get('channel');
-      if (source) {
-        messageSource = source;
-      } else {
-        const referrer = document.referrer;
-        if (referrer) {
-          try {
-            const url = new URL(referrer);
-            messageSource = url.hostname;
-          } catch (e) {
-            messageSource = 'Website';
-          }
-        } else {
-          messageSource = 'Direct';
-        }
-      }
-      return messageSource;
-    }
-
-    // Get initials from name
     function getInitials(name) {
       if (!name) return 'CS';
       const parts = name.trim().split(' ');
@@ -829,320 +576,228 @@
       return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
     }
 
-    // Validate email
     function isValidEmail(email) {
-      const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      return re.test(email);
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
     }
 
-    // Format timestamp
     function formatMessageTime(timestamp) {
       const date = new Date(timestamp);
-      const now = new Date();
-      const diffMs = now - date;
-      const diffDays = Math.floor(diffMs / 86400000);
-
-      // If today, show time
-      if (diffDays === 0) {
-        return date.toLocaleTimeString('en-US', { 
-          hour: 'numeric', 
-          minute: '2-digit' 
-        });
-      }
-      
-      // If yesterday
-      if (diffDays === 1) {
-        return 'Yesterday ' + date.toLocaleTimeString('en-US', { 
-          hour: 'numeric', 
-          minute: '2-digit' 
-        });
-      }
-      
-      // If within last week
-      if (diffDays < 7) {
-        return date.toLocaleDateString('en-US', { weekday: 'short' }) + ' ' + 
-               date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-      }
-      
-      // Otherwise show date
-      return date.toLocaleDateString('en-US', { 
-        month: 'short', 
-        day: 'numeric' 
-      }) + ' ' + date.toLocaleTimeString('en-US', { 
-        hour: 'numeric', 
-        minute: '2-digit' 
-      });
+      return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
     }
 
-    // Auto-detect customer
-    function autoDetectCustomer() {
-      console.log('🔍 [Auto-detect] Starting customer detection...');
-      
-      try {
-        const checkoutData = localStorage.getItem('chat_checkout_data');
-        if (checkoutData) {
-          const data = JSON.parse(checkoutData);
-          const hoursSinceCheckout = (Date.now() - data.timestamp) / (1000 * 60 * 60);
-          const daysSinceCheckout = hoursSinceCheckout / 24;
-          
-          if (daysSinceCheckout < 30 && data.email && isValidEmail(data.email)) {
-            console.log('✅ [Auto-detect] Previous order found:', data.orderNumber || 'N/A', '(', daysSinceCheckout.toFixed(1), 'days ago)');
-            
-            customerCart = {
-              subtotal: data.subtotal || 0,
-              total: data.total || 0,
-              itemCount: data.itemCount || 0,
-              items: data.items || []
-            };
-            
-            return {
-              email: data.email,
-              name: data.name || data.firstName || null,
-              firstName: data.firstName || null,
-              phone: data.phone || null,
-              orderNumber: data.orderNumber || null,
-              orderId: data.orderId || null,
-              autoDetected: true,
-              source: 'previous_order',
-              daysSinceOrder: daysSinceCheckout,
-              recentOrder: daysSinceCheckout < 7,
-              checkoutData: data
-            };
-          } else if (daysSinceCheckout >= 30) {
-            console.log('ℹ️ [Auto-detect] Order data expired (', daysSinceCheckout.toFixed(0), 'days old), clearing...');
-            localStorage.removeItem('chat_checkout_data');
-            localStorage.removeItem('chat_recent_order');
-            localStorage.removeItem('chat_last_order_time');
-          }
-        }
-      } catch (e) {
-        console.log('ℹ️ [Auto-detect] No checkout data in localStorage');
-      }
-      
-      try {
-        if (window.parent && window.parent.chatCheckoutData) {
-          const data = window.parent.chatCheckoutData;
-          console.log('✅ [Auto-detect] Checkout data found in parent page:', data.email);
-          
-          customerCart = {
-            subtotal: data.subtotal || 0,
-            total: data.total || 0,
-            itemCount: data.itemCount || 0,
-            items: data.items || []
-          };
-          
-          return {
-            email: data.email,
-            name: data.name || data.firstName,
-            firstName: data.firstName,
-            phone: data.phone,
-            autoDetected: true,
-            source: 'parent_checkout',
-            checkoutData: data
-          };
-        }
-        
-        if (window.parent && window.parent.chatCustomerData) {
-          const data = window.parent.chatCustomerData;
-          console.log('✅ [Auto-detect] Customer data found in parent page:', data.email);
-          return {
-            email: data.email,
-            name: data.name || data.firstName,
-            autoDetected: true,
-            source: 'parent_page'
-          };
-        }
-      } catch (e) {
-        console.log('ℹ️ [Auto-detect] Cannot access parent (cross-origin or no data)');
-      }
-      
-      const urlEmail = urlParams.get('email');
-      if (urlEmail && isValidEmail(urlEmail)) {
-        console.log('✅ [Auto-detect] Email found in URL:', urlEmail);
-        
-        const subtotal = urlParams.get('subtotal');
-        if (subtotal) {
-          customerCart = {
-            subtotal: parseFloat(subtotal) || 0
-          };
-        }
-        
-        return {
-          email: urlEmail,
-          name: urlParams.get('name') || null,
-          autoDetected: true,
-          source: 'url_params'
-        };
-      }
-      
-      try {
-        let storedEmail = localStorage.getItem(`chat_email_${STORE_ID}`);
-        let storedName = localStorage.getItem(`chat_name_${STORE_ID}`);
-        
-        if (!storedEmail) {
-          storedEmail = localStorage.getItem('chat_customer_email');
-          storedName = localStorage.getItem('chat_customer_name');
-        }
-        
-        if (storedEmail && isValidEmail(storedEmail)) {
-          console.log('✅ [Auto-detect] Email found in stored session:', storedEmail);
-          return {
-            email: storedEmail,
-            name: storedName || null,
-            autoDetected: true,
-            source: 'stored_session'
-          };
-        }
-      } catch (e) {
-        console.log('ℹ️ [Auto-detect] Cannot access localStorage');
-      }
-
-      console.log('ℹ️ [Auto-detect] No customer data found - will show email form');
-      return null;
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
     }
 
-    // ✅ FIXED: Load conversation history with better error handling
+    // ✅ DEBUG FUNCTIONS
+    function checkLocalStorage() {
+      const email = localStorage.getItem(`chat_email_${STORE_ID}`);
+      const name = localStorage.getItem(`chat_name_${STORE_ID}`);
+      const conv = localStorage.getItem(`chat_conv_${STORE_ID}`);
+      
+      const info = `
+        <div><strong>Store:</strong> ${STORE_ID}</div>
+        <div><strong>Email:</strong> ${email || 'None'}</div>
+        <div><strong>Name:</strong> ${name || 'None'}</div>
+        <div><strong>Conv ID:</strong> ${conv || 'None'}</div>
+      `;
+      
+      updateDebugInfo(info);
+      
+      console.log('💾 [Storage] Email:', email);
+      console.log('💾 [Storage] Name:', name);
+      console.log('💾 [Storage] ConversationId:', conv);
+    }
+
+    function clearAllData() {
+      localStorage.removeItem(`chat_email_${STORE_ID}`);
+      localStorage.removeItem(`chat_name_${STORE_ID}`);
+      localStorage.removeItem(`chat_conv_${STORE_ID}`);
+      conversationId = null;
+      customerEmail = null;
+      customerName = null;
+      historyLoaded = false;
+      displayedMessageIds.clear();
+      
+      console.log('🗑️ [Storage] All data cleared');
+      updateDebugInfo('All data cleared!');
+      
+      location.reload();
+    }
+
+    // ✅ MAIN: Load conversation history
     async function loadConversationHistory() {
-      if (!conversationId || historyLoaded) {
-        console.log('ℹ️ [History] Skipping load - conversationId:', conversationId, 'historyLoaded:', historyLoaded);
+      console.log('═══════════════════════════════════');
+      console.log('📜 [HISTORY] STARTING LOAD');
+      console.log('═══════════════════════════════════');
+      
+      if (!conversationId) {
+        console.log('❌ [History] No conversationId');
+        updateDebugInfo('No conversation ID');
+        return;
+      }
+
+      if (historyLoaded) {
+        console.log('ℹ️ [History] Already loaded');
         return;
       }
 
       try {
-        console.log('📜 [History] Loading conversation history for ID:', conversationId);
+        console.log('📜 [History] ConversationId:', conversationId);
+        console.log('📜 [History] Store:', STORE_ID);
         
-        // Show loading indicator
         showLoadingHistory();
         
-        // Try the widget-specific endpoint first
-        let url = `${API_URL}/api/widget/messages?conversationId=${conversationId}&store=${STORE_ID}`;
-        console.log('📜 [History] Fetching from:', url);
-        
-        let response = await fetchWithTimeout(url, {}, 10000);
-        
-        // If that doesn't work, try the alternative endpoint
-        if (!response.ok && response.status === 404) {
-          console.log('📜 [History] Trying alternative endpoint...');
-          url = `${API_URL}/api/conversations/${conversationId}/messages?store=${STORE_ID}`;
-          response = await fetchWithTimeout(url, {}, 10000);
+        // Try multiple endpoint formats
+        const endpoints = [
+          `${API_URL}/api/conversations/${conversationId}/messages?store=${STORE_ID}`,
+          `${API_URL}/api/widget/messages?conversationId=${conversationId}&store=${STORE_ID}`,
+          `${API_URL}/api/messages?conversationId=${conversationId}&store=${STORE_ID}`,
+        ];
+
+        let response = null;
+        let usedEndpoint = null;
+
+        for (const endpoint of endpoints) {
+          console.log('🔗 [History] Trying:', endpoint);
+          
+          try {
+            const res = await fetch(endpoint);
+            console.log('📡 [History] Response status:', res.status);
+            
+            if (res.ok) {
+              response = res;
+              usedEndpoint = endpoint;
+              console.log('✅ [History] Success with:', endpoint);
+              break;
+            } else {
+              console.log('⚠️ [History] Failed:', endpoint, 'Status:', res.status);
+            }
+          } catch (err) {
+            console.log('❌ [History] Error with:', endpoint, err.message);
+          }
         }
 
-        if (!response.ok) {
-          if (response.status === 404) {
-            console.warn('⚠️ [History] Conversation not found, clearing stored ID');
-            localStorage.removeItem(`chat_conv_${STORE_ID}`);
-            conversationId = null;
-            historyLoaded = false;
-            hideLoadingHistory();
-            welcomeMessage.classList.add('visible');
-            return;
-          }
-          throw new Error(`Failed to load history: ${response.status}`);
+        if (!response || !response.ok) {
+          console.log('❌ [History] All endpoints failed');
+          updateDebugInfo('All API endpoints failed');
+          hideLoadingHistory();
+          welcomeMessage.classList.add('visible');
+          return;
         }
 
         const data = await response.json();
-        console.log('📜 [History] Response data:', data);
+        console.log('📦 [History] Raw data:', data);
+        console.log('📦 [History] Data type:', typeof data);
+        console.log('📦 [History] Is array:', Array.isArray(data));
         
-        // Handle different response formats
+        // Parse messages from different formats
         let messages = [];
+        
         if (Array.isArray(data)) {
           messages = data;
+          console.log('✅ [History] Data is array');
         } else if (data.messages && Array.isArray(data.messages)) {
           messages = data.messages;
+          console.log('✅ [History] Data has messages array');
         } else if (data.data && Array.isArray(data.data)) {
           messages = data.data;
+          console.log('✅ [History] Data has data array');
+        } else {
+          console.log('❌ [History] Unknown data format');
         }
         
-        console.log('✅ [History] Loaded', messages.length, 'messages');
+        console.log('📊 [History] Total messages:', messages.length);
+        updateDebugInfo(`Found ${messages.length} messages from ${usedEndpoint}`);
 
         hideLoadingHistory();
         
         if (messages.length > 0) {
-          // Hide welcome message
-          welcomeMessage.classList.remove('visible');
           welcomeMessage.style.display = 'none';
           
-          // Clear any existing messages (except email-collection and welcome-message)
-          const existingMessages = chatMessages.querySelectorAll('.message');
-          existingMessages.forEach(msg => msg.remove());
-          
-          // Display all messages in order
-          messages.forEach(msg => {
+          messages.forEach((msg, index) => {
+            console.log(`─────────────────────────────`);
+            console.log(`📝 [History] Message #${index + 1}:`);
+            console.log('  ID:', msg.id);
+            console.log('  Type:', msg.senderType || msg.sender_type || msg.type);
+            console.log('  Sender:', msg.senderName || msg.sender_name);
+            console.log('  Content:', (msg.content || msg.message || msg.text || '').substring(0, 50));
+            console.log('  Time:', msg.createdAt || msg.created_at || msg.timestamp);
+            
             displayHistoryMessage(msg);
           });
           
+          console.log('─────────────────────────────');
+          
           historyLoaded = true;
           
-          // Scroll to bottom after a short delay to ensure messages are rendered
           setTimeout(() => {
-            scrollToBottom();
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            console.log('📜 [History] Scrolled to bottom');
           }, 100);
         } else {
-          console.log('ℹ️ [History] No messages in conversation, showing welcome');
+          console.log('ℹ️ [History] No messages');
           welcomeMessage.classList.add('visible');
         }
 
+        console.log('═══════════════════════════════════');
+        console.log('✅ [HISTORY] COMPLETED');
+        console.log('═══════════════════════════════════');
+
       } catch (error) {
-        console.error('❌ [History] Failed to load conversation history:', error);
-        console.error('❌ [History] Error details:', error.message, error.stack);
+        console.error('❌ [History] Error:', error);
+        console.error('❌ [History] Stack:', error.stack);
+        updateDebugInfo(`Error: ${error.message}`);
         hideLoadingHistory();
         welcomeMessage.classList.add('visible');
       }
     }
 
-    // ✅ FIXED: Display history message
-    function displayHistoryMessage(message) {
-      console.log('📝 [History] Displaying message:', message);
-      
-      const normalizedMessage = {
-        id: message.id,
-        senderType: message.senderType || message.sender_type || message.type,
-        senderName: message.senderName || message.sender_name || message.sender,
-        content: message.content || message.message || message.text,
-        timestamp: message.createdAt || message.created_at || message.timestamp || message.sentAt || message.sent_at || new Date().toISOString(),
-        conversationId: message.conversationId || message.conversation_id
+    function displayHistoryMessage(msg) {
+      const message = {
+        id: msg.id,
+        senderType: msg.senderType || msg.sender_type || msg.type || 'agent',
+        senderName: msg.senderName || msg.sender_name || msg.sender || 'Support',
+        content: msg.content || msg.message || msg.text || '',
+        timestamp: msg.createdAt || msg.created_at || msg.timestamp || new Date().toISOString()
       };
 
-      // Skip if already displayed
-      if (displayedMessageIds.has(normalizedMessage.id)) {
-        console.log('ℹ️ [History] Message already displayed:', normalizedMessage.id);
+      if (displayedMessageIds.has(message.id)) {
+        console.log('  ⏭️ Skip duplicate:', message.id);
         return;
       }
 
-      displayedMessageIds.add(normalizedMessage.id);
+      console.log('  ✏️ Display message:', message.id);
+
+      displayedMessageIds.add(message.id);
 
       const messageDiv = document.createElement('div');
-      messageDiv.className = `message ${normalizedMessage.senderType} history`;
-      messageDiv.dataset.messageId = normalizedMessage.id;
+      messageDiv.className = `message ${message.senderType} history`;
+      messageDiv.dataset.messageId = message.id;
       
-      const time = formatMessageTime(normalizedMessage.timestamp);
+      const time = formatMessageTime(message.timestamp);
+      const avatarText = message.senderType === 'customer' 
+        ? getInitials(customerName || message.senderName) 
+        : getInitials(message.senderName);
       
-      const avatarText = normalizedMessage.senderType === 'customer' 
-        ? getInitials(customerName || normalizedMessage.senderName) 
-        : getInitials(normalizedMessage.senderName || 'Support');
-      
-      const senderName = normalizedMessage.senderType !== 'system' && normalizedMessage.senderName 
-        ? `<div class="sender-name">${escapeHtml(normalizedMessage.senderName)}</div>` 
+      const senderName = message.senderType !== 'system' 
+        ? `<div class="sender-name">${escapeHtml(message.senderName)}</div>` 
         : '';
       
       messageDiv.innerHTML = `
         <div class="avatar">${avatarText}</div>
         <div class="bubble">
           ${senderName}
-          <div class="text">${escapeHtml(normalizedMessage.content)}</div>
+          <div class="text">${escapeHtml(message.content)}</div>
           <div class="time">${time}</div>
         </div>
       `;
       
-      // Append to chat messages (but before welcome message if it exists)
-      if (welcomeMessage.parentElement === chatMessages) {
-        chatMessages.insertBefore(messageDiv, welcomeMessage);
-      } else {
-        chatMessages.appendChild(messageDiv);
-      }
+      chatMessages.appendChild(messageDiv);
     }
 
-    // Show loading history indicator
     function showLoadingHistory() {
       hideLoadingHistory();
       
@@ -1151,41 +806,43 @@
       loadingDiv.id = 'loading-history-indicator';
       loadingDiv.innerHTML = `
         <div class="spinner"></div>
-        <span>Loading conversation history...</span>
+        <span>Loading conversation...</span>
       `;
       
-      // Insert before welcome message if it exists
-      if (welcomeMessage.parentElement === chatMessages) {
-        chatMessages.insertBefore(loadingDiv, welcomeMessage);
-      } else {
-        chatMessages.appendChild(loadingDiv);
-      }
+      chatMessages.appendChild(loadingDiv);
     }
 
-    // Hide loading history indicator
     function hideLoadingHistory() {
       const loading = document.getElementById('loading-history-indicator');
-      if (loading) {
-        loading.remove();
-      }
+      if (loading) loading.remove();
     }
 
-    // Handle email form submission
+    // ✅ MANUAL TEST FUNCTION
+    window.testLoadHistory = async function() {
+      console.log('🔧 [Test] Manual history load triggered');
+      historyLoaded = false;
+      displayedMessageIds.clear();
+      
+      // Clear existing messages
+      const messages = chatMessages.querySelectorAll('.message');
+      messages.forEach(m => m.remove());
+      
+      checkLocalStorage();
+      await loadConversationHistory();
+    };
+
+    window.checkLocalStorage = checkLocalStorage;
+    window.clearAllData = clearAllData;
+
     emailForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       
-      const email = customerEmailInput.value.trim();
-      const name = customerNameInput.value.trim();
+      const email = document.getElementById('customer-email').value.trim();
+      const name = document.getElementById('customer-name').value.trim();
       
       if (!isValidEmail(email)) {
-        customerEmailInput.classList.add('error');
-        emailError.classList.add('visible');
-        customerEmailInput.focus();
         return;
       }
-      
-      customerEmailInput.classList.remove('error');
-      emailError.classList.remove('visible');
       
       customerEmail = email;
       customerName = name || 'Guest';
@@ -1193,950 +850,114 @@
       localStorage.setItem(`chat_email_${STORE_ID}`, customerEmail);
       localStorage.setItem(`chat_name_${STORE_ID}`, customerName);
       
-      console.log('✅ [Email] Customer email collected:', customerEmail);
+      console.log('✅ [Email] Saved:', customerEmail);
       
-      await loadCustomerData();
       await showChatInterface();
     });
 
-    // Load customer data
-    async function loadCustomerData() {
-      if (!customerEmail) return;
-      
-      try {
-        console.log('🔄 Loading customer data...');
-        await Promise.all([
-          fetchCustomerData(customerEmail),
-          fetchCustomerOrders(customerEmail),
-          fetchCustomerCart(customerEmail)
-        ]);
-        console.log('✅ Customer data loaded');
-      } catch (error) {
-        console.error('❌ Failed to load customer data:', error);
-      }
-    }
-
-    // ✅ FIXED: Show chat interface with proper history loading
     async function showChatInterface() {
-      console.log('🎨 [UI] Showing chat interface, conversationId:', conversationId);
+      console.log('🎨 [UI] Show interface');
       
       emailCollection.classList.remove('visible');
       chatInputContainer.classList.add('visible');
       
-      // Load conversation history if we have a conversationId
       if (conversationId && !historyLoaded) {
-        console.log('📜 [UI] Has conversationId, loading history...');
+        console.log('📜 [UI] Has conversation, loading history...');
         await loadConversationHistory();
-      } else if (!conversationId) {
-        console.log('📜 [UI] No conversationId, showing welcome message');
+      } else {
+        console.log('📜 [UI] No conversation or already loaded');
         welcomeMessage.classList.add('visible');
       }
       
       chatInput.focus();
-      
-      // Connect to WebSocket after showing interface
-      if (conversationId && wsToken) {
-        setTimeout(() => {
-          connectWebSocket();
-        }, 500);
-      } else {
-        updateStatus('online', "We're online");
-      }
     }
 
-    // Utility: Fetch with timeout
-    async function fetchWithTimeout(url, options = {}, timeout = 10000) {
-      const controller = new AbortController();
-      const id = setTimeout(() => controller.abort(), timeout);
+    function autoDetectCustomer() {
+      console.log('🔍 [Detect] Starting...');
       
       try {
-        const response = await fetch(url, {
-          ...options,
-          signal: controller.signal
-        });
-        clearTimeout(id);
-        return response;
-      } catch (error) {
-        clearTimeout(id);
-        if (error.name === 'AbortError') {
-          throw new Error('Request timeout');
-        }
-        throw error;
-      }
-    }
-
-    // Smart token refresh
-    async function ensureFreshToken(forceRefresh = false) {
-      const now = Date.now();
-      
-      if (!forceRefresh && wsToken && tokenLastRefreshed && (now - tokenLastRefreshed) < TOKEN_REFRESH_INTERVAL) {
-        console.log('✅ Using cached token (still fresh)');
-        return wsToken;
-      }
-      
-      try {
-        console.log('🔄 Refreshing token...');
-        const tokenResponse = await fetchWithTimeout(
-          `${API_URL}/api/widget/session?store=${STORE_ID}${conversationId ? `&conversationId=${conversationId}` : ''}`,
-          {},
-          5000
-        );
-        
-        if (tokenResponse.ok) {
-          const tokenData = await tokenResponse.json();
-          wsToken = tokenData.token;
-          tokenLastRefreshed = now;
-          console.log('✅ Token refreshed');
-          return wsToken;
-        } else {
-          console.warn('⚠️ Token refresh failed');
-          return wsToken;
-        }
-      } catch (error) {
-        console.error('❌ Token refresh error:', error);
-        return wsToken;
-      }
-    }
-
-    // Fetch customer data
-    async function fetchCustomerData(email) {
-      if (!email) return null;
-      
-      try {
-        console.log('🔍 [Customer] Fetching customer data for:', email);
-        const response = await fetchWithTimeout(
-          `${API_URL}/api/customers/lookup?store=${STORE_ID}&email=${encodeURIComponent(email)}`,
-          {},
-          5000
-        );
-        
-        if (response.ok) {
-          const data = await response.json();
-          console.log('✅ [Customer] Customer data loaded:', data);
-          customerData = data;
-          return data;
-        } else {
-          console.warn('⚠️ [Customer] Customer not found');
-          return null;
-        }
-      } catch (error) {
-        console.error('❌ [Customer] Failed to fetch customer data:', error);
-        return null;
-      }
-    }
-
-    // Fetch customer orders
-    async function fetchCustomerOrders(email) {
-      if (!email) return [];
-      
-      try {
-        console.log('🔍 [Orders] Fetching orders for:', email);
-        const response = await fetchWithTimeout(
-          `${API_URL}/api/customers/orders?store=${STORE_ID}&email=${encodeURIComponent(email)}`,
-          {},
-          5000
-        );
-        
-        if (response.ok) {
-          const orders = await response.json();
-          console.log('✅ [Orders] Orders loaded:', orders.length);
-          customerOrders = orders;
-          return orders;
-        } else {
-          console.warn('⚠️ [Orders] No orders found');
-          return [];
-        }
-      } catch (error) {
-        console.error('❌ [Orders] Failed to fetch orders:', error);
-        return [];
-      }
-    }
-
-    // Fetch customer cart
-    async function fetchCustomerCart(email) {
-      if (!email) return null;
-      
-      try {
-        if (window.parent && window.parent.chatCartData) {
-          const cartData = window.parent.chatCartData;
-          console.log('✅ [Cart] Cart data found in parent page:', cartData);
-          customerCart = cartData;
-          return cartData;
+        if (window.parent && window.parent.chatCustomerData) {
+          const data = window.parent.chatCustomerData;
+          console.log('✅ [Detect] Found in parent:', data.email);
+          return {
+            email: data.email,
+            name: data.name || data.firstName,
+            autoDetected: true
+          };
         }
       } catch (e) {
-        console.log('ℹ️ [Cart] Cannot access parent cart data (cross-origin)');
+        console.log('ℹ️ [Detect] No parent data');
+      }
+      
+      const urlEmail = urlParams.get('email');
+      if (urlEmail && isValidEmail(urlEmail)) {
+        console.log('✅ [Detect] Found in URL:', urlEmail);
+        return {
+          email: urlEmail,
+          name: urlParams.get('name') || null,
+          autoDetected: true
+        };
       }
       
       try {
-        console.log('🔍 [Cart] Fetching cart from API for:', email);
-        const response = await fetchWithTimeout(
-          `${API_URL}/api/customers/cart?store=${STORE_ID}&email=${encodeURIComponent(email)}`,
-          {},
-          5000
-        );
+        const storedEmail = localStorage.getItem(`chat_email_${STORE_ID}`);
+        const storedName = localStorage.getItem(`chat_name_${STORE_ID}`);
         
-        if (response.ok) {
-          const cart = await response.json();
-          console.log('✅ [Cart] Cart loaded from API:', cart);
-          customerCart = cart;
-          return cart;
-        } else {
-          console.warn('⚠️ [Cart] No cart found');
-          return null;
+        if (storedEmail && isValidEmail(storedEmail)) {
+          console.log('✅ [Detect] Found in storage:', storedEmail);
+          return {
+            email: storedEmail,
+            name: storedName || null,
+            autoDetected: true
+          };
         }
-      } catch (error) {
-        console.error('❌ [Cart] Failed to fetch cart:', error);
-        return null;
-      }
+      } catch (e) {}
+
+      console.log('ℹ️ [Detect] Nothing found');
+      return null;
     }
 
-    // Get recent order context
-    function getRecentOrderContext() {
-      if (customerOrders.length === 0) return null;
-      return customerOrders[0];
-    }
-
-    // Add order context to message
-    function addOrderContextToMessage(messageDiv, orderData) {
-      if (!orderData) return;
-      
-      const bubble = messageDiv.querySelector('.bubble');
-      if (!bubble) return;
-      
-      const statusClass = orderData.status ? orderData.status.toLowerCase() : 'pending';
-      
-      const orderHTML = `
-        <div class="order-context">
-          <div class="order-context-header">
-            Order #${escapeHtml(orderData.orderNumber || orderData.id)}
-          </div>
-          <div class="order-context-item">
-            <span>Status:</span>
-            <span class="order-status ${statusClass}">${escapeHtml(orderData.status || 'Pending')}</span>
-          </div>
-          ${orderData.orderDate ? `
-            <div class="order-context-item">
-              <span>Date:</span>
-              <strong>${new Date(orderData.orderDate).toLocaleDateString()}</strong>
-            </div>
-          ` : ''}
-          ${orderData.total !== undefined ? `
-            <div class="order-context-item">
-              <span>Total:</span>
-              <strong>$${orderData.total.toFixed(2)}</strong>
-            </div>
-          ` : ''}
-          ${orderData.items && orderData.items.length > 0 ? `
-            <div class="order-context-item">
-              <span>Items:</span>
-              <strong>${orderData.items.length} item${orderData.items.length !== 1 ? 's' : ''}</strong>
-            </div>
-          ` : ''}
-        </div>
-      `;
-      
-      bubble.insertAdjacentHTML('beforeend', orderHTML);
-    }
-
-    // ✅ UPDATED: Initialize with better debugging
     async function init() {
       try {
-        console.log('[Widget] Starting initialization');
+        console.log('[Widget] Init');
         
-        detectMessageSource();
-        await loadSettings();
-        setupEventListeners();
+        const detected = autoDetectCustomer();
         
-        const autoDetected = autoDetectCustomer();
-        
-        if (autoDetected) {
-          customerEmail = autoDetected.email;
-          customerName = autoDetected.name || 'Guest';
+        if (detected) {
+          customerEmail = detected.email;
+          customerName = detected.name || 'Guest';
           
           localStorage.setItem(`chat_email_${STORE_ID}`, customerEmail);
-          if (customerName) {
-            localStorage.setItem(`chat_name_${STORE_ID}`, customerName);
-          }
+          if (customerName) localStorage.setItem(`chat_name_${STORE_ID}`, customerName);
           
           conversationId = localStorage.getItem(`chat_conv_${STORE_ID}`);
-          console.log('[Widget] Auto-detected customer:', customerEmail, 'conversationId:', conversationId);
           
-          await loadCustomerData();
+          console.log('[Widget] Detected email:', customerEmail);
+          console.log('[Widget] Conversation ID:', conversationId);
+          
+          updateDebugInfo(`Email: ${customerEmail}<br>Conv: ${conversationId || 'None'}`);
+          
           await showChatInterface();
-          
         } else {
-          const storedEmail = localStorage.getItem(`chat_email_${STORE_ID}`);
-          const storedName = localStorage.getItem(`chat_name_${STORE_ID}`);
-          
-          if (storedEmail && isValidEmail(storedEmail)) {
-            customerEmail = storedEmail;
-            customerName = storedName || 'Guest';
-            conversationId = localStorage.getItem(`chat_conv_${STORE_ID}`);
-            console.log('[Widget] Stored customer found:', customerEmail, 'conversationId:', conversationId);
-            
-            await loadCustomerData();
-            await showChatInterface();
-          } else {
-            console.log('[Widget] No customer found, showing email form');
-            emailCollection.classList.add('visible');
-            updateStatus('online', "We're online");
-          }
+          console.log('[Widget] No detection, show form');
+          emailCollection.classList.add('visible');
         }
         
-        console.log('[Widget] Initialization complete');
+        console.log('[Widget] Init complete');
+        checkLocalStorage();
       } catch (error) {
-        console.error('❌ [Widget] Initialization failed:', error);
-        showError('Failed to load chat. Please refresh the page.');
-        updateStatus('offline', 'Offline');
+        console.error('❌ [Widget] Init failed:', error);
       }
     }
 
-    // Update connection status
-    function updateStatus(status, text) {
-      statusText.textContent = text;
-      statusIndicator.classList.remove('offline', 'connecting');
-      
-      if (status === 'online') {
-        // indicator has pulse animation by default
-      } else if (status === 'connecting') {
-        statusIndicator.classList.add('connecting');
-      } else {
-        statusIndicator.classList.add('offline');
-      }
-    }
-
-    // Load widget settings
-    async function loadSettings() {
-      try {
-        const response = await fetchWithTimeout(`${API_URL}/api/widget/settings?store=${STORE_ID}`, {}, 8000);
-        
-        if (!response.ok) {
-          throw new Error(`Failed to load settings: ${response.status}`);
-        }
-        
-        storeSettings = await response.json();
-        
-        brandName.textContent = storeSettings.brandName || 'Chat Support';
-        headerAvatar.textContent = getInitials(storeSettings.brandName || 'Chat Support');
-        
-        if (storeSettings.primaryColor) {
-          document.documentElement.style.setProperty('--primary-color', storeSettings.primaryColor);
-        }
-        
-        if (storeSettings.widgetSettings?.greeting) {
-          welcomeMessage.querySelector('p').innerHTML = storeSettings.widgetSettings.greeting;
-        }
-        
-        if (storeSettings.widgetSettings?.placeholder) {
-          chatInput.placeholder = storeSettings.widgetSettings.placeholder;
-        }
-        
-        await ensureFreshToken(true);
-        
-      } catch (error) {
-        console.error('❌ [Widget] Failed to load settings:', error);
-      }
-    }
-
-    // Connect to WebSocket
-    async function connectWebSocket() {
-      if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
-        console.log('[WebSocket] Already connected or connecting');
-        return;
-      }
-
-      if (!conversationId) {
-        console.log('[WebSocket] No conversation ID, skipping connection');
-        return;
-      }
-
-      try {
-        console.log('[WebSocket] Connecting...');
-        updateStatus('connecting', 'Connecting...');
-        
-        await ensureFreshToken(reconnectAttempts > 0);
-        
-        if (!wsToken) {
-          console.error('[WebSocket] No token available');
-          updateStatus('offline', 'No token available');
-          return;
-        }
-        
-        if (ws) {
-          ws.close();
-          ws = null;
-        }
-        
-        ws = new WebSocket(WS_URL);
-        
-        ws.onopen = () => {
-          console.log('[WebSocket] Connection opened');
-          reconnectAttempts = 0;
-          
-          const authMessage = {
-            type: 'auth',
-            token: wsToken,
-            clientType: 'customer'
-          };
-          
-          ws.send(JSON.stringify(authMessage));
-        };
-        
-        ws.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            handleWebSocketMessage(data);
-          } catch (error) {
-            console.error('[WebSocket] Failed to parse message:', error);
-          }
-        };
-        
-        ws.onerror = (error) => {
-          console.error('[WebSocket] Error:', error);
-          updateStatus('offline', 'Connection error');
-        };
-        
-        ws.onclose = (event) => {
-          console.log('[WebSocket] Connection closed:', event.code);
-          updateStatus('offline', 'Disconnected');
-          ws = null;
-          
-          if (reconnectAttempts < maxReconnectAttempts && conversationId) {
-            reconnectAttempts++;
-            const delay = reconnectDelay * reconnectAttempts;
-            console.log(`[WebSocket] Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
-            updateStatus('connecting', 'Reconnecting...');
-            
-            setTimeout(() => {
-              connectWebSocket();
-            }, delay);
-          } else if (reconnectAttempts >= maxReconnectAttempts) {
-            updateStatus('offline', 'Offline');
-          }
-        };
-        
-      } catch (error) {
-        console.error('[WebSocket] Connection failed:', error);
-        updateStatus('offline', 'Connection failed');
-      }
-    }
-
-    // Handle WebSocket messages
-    function handleWebSocketMessage(data) {
-      switch (data.type) {
-        case 'connected':
-          console.log('[WebSocket] Connected');
-          break;
-          
-        case 'auth_ok':
-          console.log('[WebSocket] Authenticated');
-          updateStatus('online', "We're online");
-          
-          const joinMessage = {
-            type: 'join_conversation',
-            conversationId: parseInt(conversationId),
-            role: 'customer',
-            token: wsToken,
-            customerEmail: customerEmail,
-            customerName: customerName,
-            storeId: storeSettings?.storeId
-          };
-          
-          ws.send(JSON.stringify(joinMessage));
-          break;
-          
-        case 'joined':
-          console.log('[WebSocket] Joined conversation');
-          updateStatus('online', "We're online");
-          break;
-          
-        case 'new_message':
-          if (data.message) {
-            displayMessageFromWebSocket(data.message);
-          }
-          break;
-          
-        case 'message_confirmed':
-          updateMessageStatus(data.tempId, 'confirmed', data.message);
-          break;
-          
-        case 'message_failed':
-          updateMessageStatus(data.tempId, 'failed');
-          break;
-          
-        case 'typing':
-          if (data.isTyping && data.senderType === 'agent') {
-            showTypingIndicator();
-          } else if (!data.isTyping) {
-            hideTypingIndicator();
-          }
-          break;
-          
-        case 'agent_joined':
-        case 'customer_joined':
-        case 'customer_left':
-        case 'agent_left':
-          console.log(`[WebSocket] ${data.type}:`, data);
-          break;
-          
-        case 'error':
-          console.error('[WebSocket] Error:', data.message);
-          if (data.message && (data.message.includes('token') || data.message.includes('auth'))) {
-            wsToken = null;
-            tokenLastRefreshed = null;
-          }
-          break;
-          
-        case 'pong':
-          break;
-          
-        default:
-          console.log(`[WebSocket] Unhandled message type: ${data.type}`, data);
-      }
-    }
-
-    // Display message from WebSocket
-    function displayMessageFromWebSocket(message) {
-      const normalizedMessage = {
-        id: message.id,
-        senderType: message.senderType || message.sender_type,
-        senderName: message.senderName || message.sender_name,
-        content: message.content,
-        conversationId: message.conversationId || message.conversation_id,
-        pending: message.pending
-      };
-      
-      if (normalizedMessage.conversationId && 
-          normalizedMessage.conversationId !== parseInt(conversationId)) {
-        return;
-      }
-      
-      if (displayedMessageIds.has(normalizedMessage.id)) {
-        return;
-      }
-      
-      if (normalizedMessage.senderType === 'customer') {
-        displayedMessageIds.add(normalizedMessage.id);
-        return;
-      }
-      
-      hideTypingIndicator();
-      
-      displayedMessageIds.add(normalizedMessage.id);
-      
-      const messageDiv = addMessage(
-        normalizedMessage.senderType,
-        normalizedMessage.content,
-        normalizedMessage.senderName || 'Support',
-        normalizedMessage.id,
-        normalizedMessage.pending
-      );
-      
-      const recentOrder = getRecentOrderContext();
-      if (recentOrder && normalizedMessage.senderType === 'agent') {
-        if (normalizedMessage.content.toLowerCase().includes('order')) {
-          addOrderContextToMessage(messageDiv, recentOrder);
-        }
-      }
-    }
-
-    // Update message status
-    function updateMessageStatus(tempId, status, confirmedMessage = null) {
-      const messageElements = document.querySelectorAll('.message');
-      messageElements.forEach(el => {
-        if (el.dataset.messageId === tempId) {
-          if (status === 'confirmed') {
-            el.dataset.messageId = confirmedMessage?.id || tempId;
-            el.classList.remove('pending');
-          } else if (status === 'failed') {
-            el.classList.remove('pending');
-            el.classList.add('failed');
-          }
-        }
-      });
-    }
-
-    // Setup event listeners
-    function setupEventListeners() {
-      chatInput.addEventListener('input', () => {
-        sendButton.disabled = !chatInput.value.trim();
-        autoResizeTextarea();
-        
-        clearTimeout(typingDebounceTimer);
-        typingDebounceTimer = setTimeout(() => {
-          if (ws && ws.readyState === WebSocket.OPEN && conversationId && chatInput.value.trim()) {
-            ws.send(JSON.stringify({
-              type: 'typing',
-              conversationId: parseInt(conversationId),
-              isTyping: true,
-              senderType: 'customer',
-              senderName: customerName || 'Customer'
-            }));
-            
-            clearTimeout(typingTimeout);
-            typingTimeout = setTimeout(() => {
-              if (ws && ws.readyState === WebSocket.OPEN && conversationId) {
-                ws.send(JSON.stringify({
-                  type: 'typing',
-                  conversationId: parseInt(conversationId),
-                  isTyping: false,
-                  senderType: 'customer'
-                }));
-              }
-            }, 3000);
-          }
-        }, 300);
-      });
-
-      chatInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault();
-          if (chatInput.value.trim()) {
-            sendMessage();
-          }
-        }
-      });
-
-      sendButton.addEventListener('click', sendMessage);
-    }
-
-    // Auto-resize textarea
-    function autoResizeTextarea() {
-      chatInput.style.height = 'auto';
-      chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px';
-    }
-
-    // Send message
-    async function sendMessage() {
-      const message = chatInput.value.trim();
-      if (!message) return;
-
-      clearTimeout(typingTimeout);
-      clearTimeout(typingDebounceTimer);
-      
-      if (ws && ws.readyState === WebSocket.OPEN && conversationId) {
-        ws.send(JSON.stringify({
-          type: 'typing',
-          conversationId: parseInt(conversationId),
-          isTyping: false,
-          senderType: 'customer'
-        }));
-      }
-
-      chatInput.disabled = true;
-      sendButton.disabled = true;
-
-      const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-      addMessage('customer', message, customerName || 'You', tempId, true);
-      
-      chatInput.value = '';
-      chatInput.style.height = 'auto';
-
-      if (welcomeMessage && welcomeMessage.style.display !== 'none') {
-        welcomeMessage.style.display = 'none';
-      }
-
-      try {
-        if (!conversationId) {
-          await ensureFreshToken(true);
-          
-          const convResponse = await fetchWithTimeout(`${API_URL}/api/conversations`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              storeIdentifier: STORE_ID,
-              customerEmail: customerEmail,
-              customerName: customerName,
-              initialMessage: message,
-              customerData: customerData,
-              hasOrders: customerOrders.length > 0,
-              orderCount: customerOrders.length,
-              cartSubtotal: customerCart?.subtotal || 0,
-              source: messageSource || 'website'
-            })
-          }, 8000);
-
-          if (!convResponse.ok) {
-            throw new Error('Failed to create conversation');
-          }
-
-          const conv = await convResponse.json();
-          conversationId = conv.id;
-          
-          localStorage.setItem(`chat_conv_${STORE_ID}`, conversationId);
-          
-          updateMessageStatus(tempId, 'confirmed', { id: tempId });
-          
-          await ensureFreshToken(true);
-          
-          if (wsToken && !ws) {
-            connectWebSocket().catch(err => console.warn('WebSocket connection failed:', err));
-          }
-          
-          let autoReply = 'Thanks for reaching out! An agent will be with you shortly.';
-          if (customerData && customerData.name) {
-            autoReply = `Hi ${customerData.name}! Thanks for reaching out. An agent will be with you shortly.`;
-          }
-          if (customerOrders.length > 0) {
-            autoReply += ` We can see you have ${customerOrders.length} order${customerOrders.length !== 1 ? 's' : ''} with us.`;
-          }
-          
-          addMessage('agent', autoReply, 'Support Team');
-          
-        } else {
-          await ensureFreshToken(false);
-          
-          const msgResponse = await fetchWithTimeout(`${API_URL}/api/widget/messages`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              conversationId: parseInt(conversationId),
-              customerEmail: customerEmail,
-              customerName: customerName,
-              content: message,
-              storeIdentifier: STORE_ID,
-              tempId: tempId,
-              customerData: customerData,
-              hasOrders: customerOrders.length > 0,
-              cartSubtotal: customerCart?.subtotal || 0,
-              source: messageSource || 'website'
-            })
-          }, 8000);
-
-          if (!msgResponse.ok) {
-            const errorData = await msgResponse.json().catch(() => ({}));
-            
-            updateMessageStatus(tempId, 'failed');
-            
-            if (errorData.error && (
-              errorData.error.includes('conversation') || 
-              errorData.error === 'conversation_not_found' ||
-              errorData.error.includes('token') ||
-              errorData.error.includes('unauthorized')
-            )) {
-              console.warn('🔄 Conversation expired or token invalid - resetting...');
-              
-              localStorage.removeItem(`chat_conv_${STORE_ID}`);
-              conversationId = null;
-              wsToken = null;
-              tokenLastRefreshed = null;
-              historyLoaded = false;
-              
-              if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.close();
-                ws = null;
-              }
-              
-              const failedMsg = document.querySelector(`[data-message-id="${tempId}"]`);
-              if (failedMsg) failedMsg.remove();
-              
-              addMessage('system', 'Session expired. Creating new conversation...', 'System');
-              
-              await new Promise(resolve => setTimeout(resolve, 800));
-              
-              const systemMsg = chatMessages.lastElementChild;
-              if (systemMsg && systemMsg.classList.contains('system')) {
-                systemMsg.remove();
-              }
-              
-              chatInput.value = message;
-              chatInput.disabled = false;
-              sendButton.disabled = false;
-              
-              return sendMessage();
-            } else {
-              throw new Error(errorData.error || 'Failed to send message');
-            }
-          } else {
-            const sentMessage = await msgResponse.json();
-            
-            updateMessageStatus(tempId, 'confirmed', sentMessage);
-            
-            if (sentMessage.id) {
-              displayedMessageIds.add(sentMessage.id);
-            }
-          }
-        }
-
-        chatInput.disabled = false;
-        sendButton.disabled = false;
-        chatInput.focus();
-        
-      } catch (error) {
-        console.error('❌ [Widget] Failed to send message:', error);
-        
-        if (error.message.includes('token') || error.message.includes('unauthorized')) {
-          wsToken = null;
-          tokenLastRefreshed = null;
-        }
-        
-        updateMessageStatus(tempId, 'failed');
-        
-        const errorMsg = error.message === 'Request timeout' 
-          ? 'Request timed out. Please check your connection and try again.'
-          : 'Failed to send message. Please try again.';
-        
-        addMessage('system', errorMsg, 'System');
-        
-        chatInput.disabled = false;
-        sendButton.disabled = false;
-        chatInput.focus();
-      }
-    }
-
-    // Add message to UI
-    function addMessage(type, text, sender, messageId = null, pending = false) {
-      const messageDiv = document.createElement('div');
-      messageDiv.className = `message ${type}`;
-      if (pending) {
-        messageDiv.classList.add('pending');
-      }
-      messageDiv.dataset.messageId = messageId || `local-${Date.now()}`;
-      
-      const time = new Date().toLocaleTimeString('en-US', { 
-        hour: 'numeric', 
-        minute: '2-digit' 
-      });
-      
-      const avatarText = type === 'customer' ? getInitials(customerName || sender) : 
-                         type === 'agent' ? getInitials(sender || 'Support') : 
-                         '!';
-      
-      const senderName = type !== 'system' && sender ? 
-        `<div class="sender-name">${escapeHtml(sender)}</div>` : '';
-      
-      messageDiv.innerHTML = `
-        <div class="avatar">${avatarText}</div>
-        <div class="bubble">
-          ${senderName}
-          <div class="text">${escapeHtml(text)}</div>
-          <div class="time">${time}</div>
-        </div>
-      `;
-      
-      chatMessages.appendChild(messageDiv);
-      scrollToBottom();
-      
-      return messageDiv;
-    }
-
-    // Show typing indicator
-    function showTypingIndicator() {
-      hideTypingIndicator();
-      
-      const indicator = document.createElement('div');
-      indicator.className = 'message agent';
-      indicator.id = 'typing-indicator';
-      indicator.innerHTML = `
-        <div class="avatar">SA</div>
-        <div class="typing-indicator">
-          <div class="dots">
-            <span></span>
-            <span></span>
-            <span></span>
-          </</div>
-        </div>
-      `;
-      chatMessages.appendChild(indicator);
-      scrollToBottom();
-    }
-
-    // Hide typing indicator
-    function hideTypingIndicator() {
-      const indicator = document.getElementById('typing-indicator');
-      if (indicator) {
-        indicator.remove();
-      }
-    }
-
-    // Scroll to bottom
-    function scrollToBottom() {
-      chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
-
-    // Show error
-    function showError(message) {
-      const errorDiv = document.createElement('div');
-      errorDiv.className = 'error-message';
-      errorDiv.textContent = message;
-      chatMessages.innerHTML = '';
-      chatMessages.appendChild(errorDiv);
-    }
-
-    // Escape HTML
-    function escapeHtml(text) {
-      const div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
-    }
-
-    // Cleanup
-    window.addEventListener('beforeunload', () => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.close();
-      }
+    chatInput.addEventListener('input', () => {
+      sendButton.disabled = !chatInput.value.trim();
     });
 
-    // Initialize
     init();
   </script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
