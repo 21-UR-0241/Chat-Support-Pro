@@ -1,7 +1,3 @@
-/**
- * useWebSocket Hook
- * Manages WebSocket connection and listeners
- */
 
 import { useEffect, useRef, useCallback } from 'react';
 import websocketService from '../services/websocket';
