@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chat Widget - Debug Version</title>
+  <title>Chat Widget - Fixed</title>
   <style>
     * {
       margin: 0;
@@ -82,53 +82,19 @@
       animation: pulse 2s infinite;
     }
 
+    .status-indicator.offline {
+      background: #ef4444;
+      animation: none;
+    }
+
+    .status-indicator.connecting {
+      background: #f59e0b;
+      animation: pulse 1s infinite;
+    }
+
     @keyframes pulse {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.5; }
-    }
-
-    /* DEBUG PANEL */
-    #debug-panel {
-      position: fixed;
-      bottom: 70px;
-      right: 20px;
-      background: white;
-      border: 2px solid #ef4444;
-      border-radius: 8px;
-      padding: 12px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-      z-index: 1000;
-      max-width: 300px;
-    }
-
-    #debug-panel h4 {
-      margin: 0 0 8px 0;
-      color: #ef4444;
-      font-size: 14px;
-    }
-
-    #debug-panel button {
-      background: #ef4444;
-      color: white;
-      border: none;
-      padding: 8px 12px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 12px;
-      margin: 4px;
-    }
-
-    #debug-panel button:hover {
-      background: #dc2626;
-    }
-
-    #debug-info {
-      font-size: 11px;
-      margin-top: 8px;
-      padding-top: 8px;
-      border-top: 1px solid #fee2e2;
-      color: #666;
-      word-break: break-all;
     }
 
     #chat-messages {
@@ -387,6 +353,7 @@
       font-size: 14px;
       line-height: 1.5;
       word-wrap: break-word;
+      white-space: pre-wrap;
     }
 
     .message .time {
@@ -411,6 +378,50 @@
       color: #dc2626;
       font-size: 13px;
       padding: 8px 12px;
+    }
+
+    .typing-indicator {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      background: white;
+      border-radius: 12px;
+      border: 1px solid var(--border-color);
+      width: fit-content;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+    }
+
+    .typing-indicator .dots {
+      display: flex;
+      gap: 4px;
+    }
+
+    .typing-indicator .dots span {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--text-secondary);
+      animation: typing 1.4s infinite;
+    }
+
+    .typing-indicator .dots span:nth-child(2) {
+      animation-delay: 0.2s;
+    }
+
+    .typing-indicator .dots span:nth-child(3) {
+      animation-delay: 0.4s;
+    }
+
+    @keyframes typing {
+      0%, 60%, 100% {
+        transform: translateY(0);
+        opacity: 0.5;
+      }
+      30% {
+        transform: translateY(-6px);
+        opacity: 1;
+      }
     }
 
     #chat-input-container {
@@ -468,15 +479,6 @@
     </div>
   </div>
 
-  <!-- DEBUG PANEL -->
-  <div id="debug-panel">
-    <h4>🔍 Debug Panel</h4>
-    <button onclick="testLoadHistory()">Load History</button>
-    <button onclick="checkLocalStorage()">Check Storage</button>
-    <button onclick="clearAllData()">Clear All</button>
-    <div id="debug-info"></div>
-  </div>
-
   <div id="chat-messages">
     <div id="email-collection">
       <div class="icon">
@@ -494,11 +496,10 @@
           <input 
             type="email" 
             id="customer-email" 
-            name="email"
             placeholder="your@email.com"
             required
           >
-          <div class="error-text" id="email-error">Please enter a valid email address</div>
+          <div class="error-text" id="email-error">Please enter a valid email</div>
         </div>
         
         <div class="form-group">
@@ -506,7 +507,6 @@
           <input 
             type="text" 
             id="customer-name" 
-            name="name"
             placeholder="Your name"
           >
         </div>
@@ -548,11 +548,26 @@
     const urlParams = new URLSearchParams(window.location.search);
     const STORE_ID = urlParams.get('store');
     const API_URL = window.location.origin;
+    const WS_URL = window.location.origin.replace(/^http/, 'ws') + '/ws';
 
     let conversationId = null;
+    let ws = null;
+    let wsToken = null;
+    let tokenLastRefreshed = null;
+    const TOKEN_REFRESH_INTERVAL = 5 * 60 * 1000;
     let customerEmail = null;
     let customerName = null;
+    let customerData = null;
+    let customerOrders = [];
+    let customerCart = null;
+    let storeSettings = null;
+    let reconnectAttempts = 0;
+    let maxReconnectAttempts = 5;
+    let reconnectDelay = 2000;
     let displayedMessageIds = new Set();
+    let typingTimeout = null;
+    let typingDebounceTimer = null;
+    let messageSource = null;
     let historyLoaded = false;
 
     const chatMessages = document.getElementById('chat-messages');
@@ -562,11 +577,33 @@
     const welcomeMessage = document.getElementById('welcome-message');
     const chatInputContainer = document.getElementById('chat-input-container');
     const emailForm = document.getElementById('email-form');
-    const debugInfo = document.getElementById('debug-info');
+    const statusText = document.getElementById('status-text');
+    const statusIndicator = document.getElementById('status-indicator');
+    const brandName = document.getElementById('brand-name');
+    const headerAvatar = document.getElementById('header-avatar');
 
-    function updateDebugInfo(info) {
-      debugInfo.innerHTML = info;
-      console.log('📊 [Debug]', info);
+    if (!STORE_ID) {
+      console.error('[Widget] No store ID');
+    }
+
+    function detectMessageSource() {
+      const source = urlParams.get('source') || urlParams.get('channel');
+      if (source) {
+        messageSource = source;
+      } else {
+        const referrer = document.referrer;
+        if (referrer) {
+          try {
+            const url = new URL(referrer);
+            messageSource = url.hostname;
+          } catch (e) {
+            messageSource = 'Website';
+          }
+        } else {
+          messageSource = 'Direct';
+        }
+      }
+      return messageSource;
     }
 
     function getInitials(name) {
@@ -582,135 +619,134 @@
 
     function formatMessageTime(timestamp) {
       const date = new Date(timestamp);
-      return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-    }
+      const now = new Date();
+      const diffDays = Math.floor((now - date) / 86400000);
 
-    function escapeHtml(text) {
-      const div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
-    }
-
-    // ✅ DEBUG FUNCTIONS
-    function checkLocalStorage() {
-      const email = localStorage.getItem(`chat_email_${STORE_ID}`);
-      const name = localStorage.getItem(`chat_name_${STORE_ID}`);
-      const conv = localStorage.getItem(`chat_conv_${STORE_ID}`);
-      
-      const info = `
-        <div><strong>Store:</strong> ${STORE_ID}</div>
-        <div><strong>Email:</strong> ${email || 'None'}</div>
-        <div><strong>Name:</strong> ${name || 'None'}</div>
-        <div><strong>Conv ID:</strong> ${conv || 'None'}</div>
-      `;
-      
-      updateDebugInfo(info);
-      
-      console.log('💾 [Storage] Email:', email);
-      console.log('💾 [Storage] Name:', name);
-      console.log('💾 [Storage] ConversationId:', conv);
-    }
-
-    function clearAllData() {
-      localStorage.removeItem(`chat_email_${STORE_ID}`);
-      localStorage.removeItem(`chat_name_${STORE_ID}`);
-      localStorage.removeItem(`chat_conv_${STORE_ID}`);
-      conversationId = null;
-      customerEmail = null;
-      customerName = null;
-      historyLoaded = false;
-      displayedMessageIds.clear();
-      
-      console.log('🗑️ [Storage] All data cleared');
-      updateDebugInfo('All data cleared!');
-      
-      location.reload();
-    }
-
-    // ✅ MAIN: Load conversation history
-    async function loadConversationHistory() {
-      console.log('═══════════════════════════════════');
-      console.log('📜 [HISTORY] STARTING LOAD');
-      console.log('═══════════════════════════════════');
-      
-      if (!conversationId) {
-        console.log('❌ [History] No conversationId');
-        updateDebugInfo('No conversation ID');
-        return;
+      if (diffDays === 0) {
+        return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
       }
+      
+      if (diffDays === 1) {
+        return 'Yesterday ' + date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      }
+      
+      if (diffDays < 7) {
+        return date.toLocaleDateString('en-US', { weekday: 'short' }) + ' ' + 
+               date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      }
+      
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' + 
+             date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    }
 
-      if (historyLoaded) {
-        console.log('ℹ️ [History] Already loaded');
+    function autoDetectCustomer() {
+      console.log('🔍 [Detect] Starting...');
+      
+      try {
+        if (window.parent && window.parent.chatCustomerData) {
+          const data = window.parent.chatCustomerData;
+          console.log('✅ [Detect] Found in parent');
+          return {
+            email: data.email,
+            name: data.name || data.firstName,
+            autoDetected: true
+          };
+        }
+      } catch (e) {}
+      
+      const urlEmail = urlParams.get('email');
+      if (urlEmail && isValidEmail(urlEmail)) {
+        console.log('✅ [Detect] Found in URL');
+        return {
+          email: urlEmail,
+          name: urlParams.get('name') || null,
+          autoDetected: true
+        };
+      }
+      
+      try {
+        const storedEmail = localStorage.getItem(`chat_email_${STORE_ID}`);
+        const storedName = localStorage.getItem(`chat_name_${STORE_ID}`);
+        
+        if (storedEmail && isValidEmail(storedEmail)) {
+          console.log('✅ [Detect] Found in storage');
+          return {
+            email: storedEmail,
+            name: storedName || null,
+            autoDetected: true
+          };
+        }
+      } catch (e) {}
+
+      console.log('ℹ️ [Detect] Nothing found');
+      return null;
+    }
+
+    // ✅ FIXED: Load conversation history WITH TOKEN
+    async function loadConversationHistory() {
+      if (!conversationId || historyLoaded) {
+        console.log('ℹ️ [History] Skip - no ID or already loaded');
         return;
       }
 
       try {
-        console.log('📜 [History] ConversationId:', conversationId);
-        console.log('📜 [History] Store:', STORE_ID);
+        console.log('📜 [History] Loading for conversation:', conversationId);
         
         showLoadingHistory();
         
-        // Try multiple endpoint formats
-        const endpoints = [
-          `${API_URL}/api/conversations/${conversationId}/messages?store=${STORE_ID}`,
-          `${API_URL}/api/widget/messages?conversationId=${conversationId}&store=${STORE_ID}`,
-          `${API_URL}/api/messages?conversationId=${conversationId}&store=${STORE_ID}`,
-        ];
-
-        let response = null;
-        let usedEndpoint = null;
-
-        for (const endpoint of endpoints) {
-          console.log('🔗 [History] Trying:', endpoint);
-          
-          try {
-            const res = await fetch(endpoint);
-            console.log('📡 [History] Response status:', res.status);
-            
-            if (res.ok) {
-              response = res;
-              usedEndpoint = endpoint;
-              console.log('✅ [History] Success with:', endpoint);
-              break;
-            } else {
-              console.log('⚠️ [History] Failed:', endpoint, 'Status:', res.status);
-            }
-          } catch (err) {
-            console.log('❌ [History] Error with:', endpoint, err.message);
-          }
+        // ✅ CRITICAL FIX: Get token first!
+        await ensureFreshToken(false);
+        
+        if (!wsToken) {
+          console.error('❌ [History] No token available');
+          hideLoadingHistory();
+          welcomeMessage.classList.add('visible');
+          return;
         }
 
-        if (!response || !response.ok) {
-          console.log('❌ [History] All endpoints failed');
-          updateDebugInfo('All API endpoints failed');
+        console.log('✅ [History] Token available, fetching messages...');
+        
+        // ✅ FIX: Include Authorization header
+        const url = `${API_URL}/api/conversations/${conversationId}/messages?store=${STORE_ID}`;
+        console.log('📜 [History] Fetching:', url);
+        
+        const response = await fetch(url, {
+          headers: {
+            'Authorization': `Bearer ${wsToken}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        console.log('📡 [History] Response status:', response.status);
+
+        if (!response.ok) {
+          if (response.status === 404) {
+            console.warn('⚠️ [History] Conversation not found');
+            localStorage.removeItem(`chat_conv_${STORE_ID}`);
+            conversationId = null;
+            historyLoaded = false;
+          } else if (response.status === 401) {
+            console.error('❌ [History] Unauthorized - token might be invalid');
+            wsToken = null;
+            tokenLastRefreshed = null;
+            await ensureFreshToken(true);
+            // Retry with new token
+            return loadConversationHistory();
+          } else {
+            console.error('❌ [History] HTTP', response.status);
+          }
+          
           hideLoadingHistory();
           welcomeMessage.classList.add('visible');
           return;
         }
 
         const data = await response.json();
-        console.log('📦 [History] Raw data:', data);
-        console.log('📦 [History] Data type:', typeof data);
-        console.log('📦 [History] Is array:', Array.isArray(data));
+        console.log('📦 [History] Data received:', data);
         
-        // Parse messages from different formats
-        let messages = [];
+        let messages = Array.isArray(data) ? data : (data.messages || data.data || []);
         
-        if (Array.isArray(data)) {
-          messages = data;
-          console.log('✅ [History] Data is array');
-        } else if (data.messages && Array.isArray(data.messages)) {
-          messages = data.messages;
-          console.log('✅ [History] Data has messages array');
-        } else if (data.data && Array.isArray(data.data)) {
-          messages = data.data;
-          console.log('✅ [History] Data has data array');
-        } else {
-          console.log('❌ [History] Unknown data format');
-        }
-        
-        console.log('📊 [History] Total messages:', messages.length);
-        updateDebugInfo(`Found ${messages.length} messages from ${usedEndpoint}`);
+        console.log('✅ [History] Parsed', messages.length, 'messages');
 
         hideLoadingHistory();
         
@@ -718,18 +754,9 @@
           welcomeMessage.style.display = 'none';
           
           messages.forEach((msg, index) => {
-            console.log(`─────────────────────────────`);
-            console.log(`📝 [History] Message #${index + 1}:`);
-            console.log('  ID:', msg.id);
-            console.log('  Type:', msg.senderType || msg.sender_type || msg.type);
-            console.log('  Sender:', msg.senderName || msg.sender_name);
-            console.log('  Content:', (msg.content || msg.message || msg.text || '').substring(0, 50));
-            console.log('  Time:', msg.createdAt || msg.created_at || msg.timestamp);
-            
+            console.log(`📝 [History] Message ${index + 1}:`, msg.senderType, '-', (msg.content || '').substring(0, 30));
             displayHistoryMessage(msg);
           });
-          
-          console.log('─────────────────────────────');
           
           historyLoaded = true;
           
@@ -742,14 +769,8 @@
           welcomeMessage.classList.add('visible');
         }
 
-        console.log('═══════════════════════════════════');
-        console.log('✅ [HISTORY] COMPLETED');
-        console.log('═══════════════════════════════════');
-
       } catch (error) {
         console.error('❌ [History] Error:', error);
-        console.error('❌ [History] Stack:', error.stack);
-        updateDebugInfo(`Error: ${error.message}`);
         hideLoadingHistory();
         welcomeMessage.classList.add('visible');
       }
@@ -765,11 +786,8 @@
       };
 
       if (displayedMessageIds.has(message.id)) {
-        console.log('  ⏭️ Skip duplicate:', message.id);
         return;
       }
-
-      console.log('  ✏️ Display message:', message.id);
 
       displayedMessageIds.add(message.id);
 
@@ -817,23 +835,6 @@
       if (loading) loading.remove();
     }
 
-    // ✅ MANUAL TEST FUNCTION
-    window.testLoadHistory = async function() {
-      console.log('🔧 [Test] Manual history load triggered');
-      historyLoaded = false;
-      displayedMessageIds.clear();
-      
-      // Clear existing messages
-      const messages = chatMessages.querySelectorAll('.message');
-      messages.forEach(m => m.remove());
-      
-      checkLocalStorage();
-      await loadConversationHistory();
-    };
-
-    window.checkLocalStorage = checkLocalStorage;
-    window.clearAllData = clearAllData;
-
     emailForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       
@@ -852,8 +853,25 @@
       
       console.log('✅ [Email] Saved:', customerEmail);
       
+      await loadCustomerData();
       await showChatInterface();
     });
+
+    async function loadCustomerData() {
+      if (!customerEmail) return;
+      
+      try {
+        console.log('🔄 Loading customer data...');
+        await Promise.all([
+          fetchCustomerData(customerEmail),
+          fetchCustomerOrders(customerEmail),
+          fetchCustomerCart(customerEmail)
+        ]);
+        console.log('✅ Customer data loaded');
+      } catch (error) {
+        console.error('❌ Failed to load customer data:', error);
+      }
+    }
 
     async function showChatInterface() {
       console.log('🎨 [UI] Show interface');
@@ -861,65 +879,152 @@
       emailCollection.classList.remove('visible');
       chatInputContainer.classList.add('visible');
       
+      // ✅ CRITICAL: Ensure token before loading history
       if (conversationId && !historyLoaded) {
-        console.log('📜 [UI] Has conversation, loading history...');
+        console.log('📜 [UI] Loading history...');
+        await ensureFreshToken(true); // Get token first
         await loadConversationHistory();
       } else {
-        console.log('📜 [UI] No conversation or already loaded');
+        console.log('📜 [UI] Show welcome');
         welcomeMessage.classList.add('visible');
       }
       
       chatInput.focus();
+      
+      if (conversationId && wsToken) {
+        setTimeout(() => connectWebSocket(), 500);
+      } else {
+        updateStatus('online', "We're online");
+      }
     }
 
-    function autoDetectCustomer() {
-      console.log('🔍 [Detect] Starting...');
+    async function fetchWithTimeout(url, options = {}, timeout = 10000) {
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), timeout);
       
       try {
-        if (window.parent && window.parent.chatCustomerData) {
-          const data = window.parent.chatCustomerData;
-          console.log('✅ [Detect] Found in parent:', data.email);
-          return {
-            email: data.email,
-            name: data.name || data.firstName,
-            autoDetected: true
-          };
+        const response = await fetch(url, {
+          ...options,
+          signal: controller.signal
+        });
+        clearTimeout(id);
+        return response;
+      } catch (error) {
+        clearTimeout(id);
+        if (error.name === 'AbortError') {
+          throw new Error('Request timeout');
         }
-      } catch (e) {
-        console.log('ℹ️ [Detect] No parent data');
+        throw error;
       }
+    }
+
+    async function ensureFreshToken(forceRefresh = false) {
+      const now = Date.now();
       
-      const urlEmail = urlParams.get('email');
-      if (urlEmail && isValidEmail(urlEmail)) {
-        console.log('✅ [Detect] Found in URL:', urlEmail);
-        return {
-          email: urlEmail,
-          name: urlParams.get('name') || null,
-          autoDetected: true
-        };
+      if (!forceRefresh && wsToken && tokenLastRefreshed && (now - tokenLastRefreshed) < TOKEN_REFRESH_INTERVAL) {
+        console.log('✅ Using cached token');
+        return wsToken;
       }
       
       try {
-        const storedEmail = localStorage.getItem(`chat_email_${STORE_ID}`);
-        const storedName = localStorage.getItem(`chat_name_${STORE_ID}`);
+        console.log('🔄 Refreshing token...');
+        const response = await fetchWithTimeout(
+          `${API_URL}/api/widget/session?store=${STORE_ID}${conversationId ? `&conversationId=${conversationId}` : ''}`,
+          {},
+          5000
+        );
         
-        if (storedEmail && isValidEmail(storedEmail)) {
-          console.log('✅ [Detect] Found in storage:', storedEmail);
-          return {
-            email: storedEmail,
-            name: storedName || null,
-            autoDetected: true
-          };
+        if (response.ok) {
+          const data = await response.json();
+          wsToken = data.token;
+          tokenLastRefreshed = now;
+          console.log('✅ Token refreshed');
+          return wsToken;
+        } else {
+          console.warn('⚠️ Token refresh failed:', response.status);
+        }
+      } catch (error) {
+        console.error('❌ Token error:', error);
+      }
+      return wsToken;
+    }
+
+    async function fetchCustomerData(email) {
+      if (!email) return null;
+      
+      try {
+        const response = await fetchWithTimeout(
+          `${API_URL}/api/customers/lookup?store=${STORE_ID}&email=${encodeURIComponent(email)}`,
+          {},
+          5000
+        );
+        
+        if (response.ok) {
+          customerData = await response.json();
+          console.log('✅ Customer data loaded');
+          return customerData;
+        }
+      } catch (error) {
+        console.error('❌ Failed to fetch customer:', error);
+      }
+      return null;
+    }
+
+    async function fetchCustomerOrders(email) {
+      if (!email) return [];
+      
+      try {
+        const response = await fetchWithTimeout(
+          `${API_URL}/api/customers/orders?store=${STORE_ID}&email=${encodeURIComponent(email)}`,
+          {},
+          5000
+        );
+        
+        if (response.ok) {
+          customerOrders = await response.json();
+          console.log('✅ Orders loaded:', customerOrders.length);
+          return customerOrders;
+        }
+      } catch (error) {
+        console.error('❌ Failed to fetch orders:', error);
+      }
+      return [];
+    }
+
+    async function fetchCustomerCart(email) {
+      if (!email) return null;
+      
+      try {
+        if (window.parent && window.parent.chatCartData) {
+          customerCart = window.parent.chatCartData;
+          return customerCart;
         }
       } catch (e) {}
-
-      console.log('ℹ️ [Detect] Nothing found');
+      
+      try {
+        const response = await fetchWithTimeout(
+          `${API_URL}/api/customers/cart?store=${STORE_ID}&email=${encodeURIComponent(email)}`,
+          {},
+          5000
+        );
+        
+        if (response.ok) {
+          customerCart = await response.json();
+          return customerCart;
+        }
+      } catch (error) {
+        console.error('❌ Failed to fetch cart:', error);
+      }
       return null;
     }
 
     async function init() {
       try {
         console.log('[Widget] Init');
+        
+        detectMessageSource();
+        await loadSettings();
+        setupEventListeners();
         
         const detected = autoDetectCustomer();
         
@@ -932,44 +1037,547 @@
           
           conversationId = localStorage.getItem(`chat_conv_${STORE_ID}`);
           
-          console.log('[Widget] Detected email:', customerEmail);
-          console.log('[Widget] Conversation ID:', conversationId);
+          console.log('[Widget] Email:', customerEmail);
+          console.log('[Widget] Conv:', conversationId);
           
-          updateDebugInfo(`Email: ${customerEmail}<br>Conv: ${conversationId || 'None'}`);
-          
+          await loadCustomerData();
           await showChatInterface();
         } else {
-          console.log('[Widget] No detection, show form');
+          console.log('[Widget] Show email form');
           emailCollection.classList.add('visible');
+          updateStatus('online', "We're online");
         }
         
         console.log('[Widget] Init complete');
-        checkLocalStorage();
       } catch (error) {
         console.error('❌ [Widget] Init failed:', error);
+        updateStatus('offline', 'Offline');
       }
     }
 
-    chatInput.addEventListener('input', () => {
-      sendButton.disabled = !chatInput.value.trim();
+    function updateStatus(status, text) {
+      statusText.textContent = text;
+      statusIndicator.classList.remove('offline', 'connecting');
+      
+      if (status === 'connecting') {
+        statusIndicator.classList.add('connecting');
+      } else if (status === 'offline') {
+        statusIndicator.classList.add('offline');
+      }
+    }
+
+    async function loadSettings() {
+      try {
+        const response = await fetchWithTimeout(`${API_URL}/api/widget/settings?store=${STORE_ID}`, {}, 8000);
+        
+        if (response.ok) {
+          storeSettings = await response.json();
+          
+          brandName.textContent = storeSettings.brandName || 'Chat Support';
+          headerAvatar.textContent = getInitials(storeSettings.brandName || 'Chat Support');
+          
+          if (storeSettings.primaryColor) {
+            document.documentElement.style.setProperty('--primary-color', storeSettings.primaryColor);
+          }
+          
+          if (storeSettings.widgetSettings?.greeting) {
+            welcomeMessage.querySelector('p').innerHTML = storeSettings.widgetSettings.greeting;
+          }
+          
+          if (storeSettings.widgetSettings?.placeholder) {
+            chatInput.placeholder = storeSettings.widgetSettings.placeholder;
+          }
+        }
+        
+        await ensureFreshToken(true);
+      } catch (error) {
+        console.error('❌ Failed to load settings:', error);
+      }
+    }
+
+    async function connectWebSocket() {
+      if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+        return;
+      }
+
+      if (!conversationId) return;
+
+      try {
+        console.log('[WebSocket] Connecting...');
+        updateStatus('connecting', 'Connecting...');
+        
+        await ensureFreshToken(reconnectAttempts > 0);
+        
+        if (!wsToken) {
+          updateStatus('offline', 'No token');
+          return;
+        }
+        
+        if (ws) {
+          ws.close();
+          ws = null;
+        }
+        
+        ws = new WebSocket(WS_URL);
+        
+        ws.onopen = () => {
+          console.log('[WebSocket] Connected');
+          reconnectAttempts = 0;
+          
+          ws.send(JSON.stringify({
+            type: 'auth',
+            token: wsToken,
+            clientType: 'customer'
+          }));
+        };
+        
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            handleWebSocketMessage(data);
+          } catch (error) {
+            console.error('[WebSocket] Parse error:', error);
+          }
+        };
+        
+        ws.onerror = (error) => {
+          console.error('[WebSocket] Error:', error);
+          updateStatus('offline', 'Error');
+        };
+        
+        ws.onclose = (event) => {
+          console.log('[WebSocket] Closed:', event.code);
+          updateStatus('offline', 'Disconnected');
+          ws = null;
+          
+          if (reconnectAttempts < maxReconnectAttempts && conversationId) {
+            reconnectAttempts++;
+            const delay = reconnectDelay * reconnectAttempts;
+            console.log(`[WebSocket] Reconnect in ${delay}ms`);
+            updateStatus('connecting', 'Reconnecting...');
+            
+            setTimeout(() => connectWebSocket(), delay);
+          } else if (reconnectAttempts >= maxReconnectAttempts) {
+            updateStatus('offline', 'Offline');
+          }
+        };
+        
+      } catch (error) {
+        console.error('[WebSocket] Failed:', error);
+        updateStatus('offline', 'Failed');
+      }
+    }
+
+    function handleWebSocketMessage(data) {
+      switch (data.type) {
+        case 'connected':
+          console.log('[WebSocket] Connected');
+          break;
+          
+        case 'auth_ok':
+          console.log('[WebSocket] Authenticated');
+          updateStatus('online', "We're online");
+          
+          ws.send(JSON.stringify({
+            type: 'join_conversation',
+            conversationId: parseInt(conversationId),
+            role: 'customer',
+            token: wsToken,
+            customerEmail: customerEmail,
+            customerName: customerName,
+            storeId: storeSettings?.storeId
+          }));
+          break;
+          
+        case 'joined':
+          console.log('[WebSocket] Joined');
+          updateStatus('online', "We're online");
+          break;
+          
+        case 'new_message':
+          if (data.message) {
+            displayMessageFromWebSocket(data.message);
+          }
+          break;
+          
+        case 'message_confirmed':
+          updateMessageStatus(data.tempId, 'confirmed', data.message);
+          break;
+          
+        case 'message_failed':
+          updateMessageStatus(data.tempId, 'failed');
+          break;
+          
+        case 'typing':
+          if (data.isTyping && data.senderType === 'agent') {
+            showTypingIndicator();
+          } else if (!data.isTyping) {
+            hideTypingIndicator();
+          }
+          break;
+          
+        case 'error':
+          console.error('[WebSocket] Error:', data.message);
+          if (data.message && (data.message.includes('token') || data.message.includes('auth'))) {
+            wsToken = null;
+            tokenLastRefreshed = null;
+          }
+          break;
+          
+        default:
+          console.log(`[WebSocket] ${data.type}`);
+      }
+    }
+
+    function displayMessageFromWebSocket(message) {
+      const msg = {
+        id: message.id,
+        senderType: message.senderType || message.sender_type,
+        senderName: message.senderName || message.sender_name,
+        content: message.content,
+        conversationId: message.conversationId || message.conversation_id,
+        pending: message.pending
+      };
+      
+      if (msg.conversationId && msg.conversationId !== parseInt(conversationId)) {
+        return;
+      }
+      
+      if (displayedMessageIds.has(msg.id)) {
+        return;
+      }
+      
+      if (msg.senderType === 'customer') {
+        displayedMessageIds.add(msg.id);
+        return;
+      }
+      
+      hideTypingIndicator();
+      displayedMessageIds.add(msg.id);
+      
+      addMessage(
+        msg.senderType,
+        msg.content,
+        msg.senderName || 'Support',
+        msg.id,
+        msg.pending
+      );
+    }
+
+    function updateMessageStatus(tempId, status, confirmedMessage = null) {
+      const elements = document.querySelectorAll('.message');
+      elements.forEach(el => {
+        if (el.dataset.messageId === tempId) {
+          if (status === 'confirmed') {
+            el.dataset.messageId = confirmedMessage?.id || tempId;
+            el.classList.remove('pending');
+          } else if (status === 'failed') {
+            el.classList.remove('pending');
+            el.classList.add('failed');
+          }
+        }
+      });
+    }
+
+    function setupEventListeners() {
+      chatInput.addEventListener('input', () => {
+        sendButton.disabled = !chatInput.value.trim();
+        autoResizeTextarea();
+        
+        clearTimeout(typingDebounceTimer);
+        typingDebounceTimer = setTimeout(() => {
+          if (ws && ws.readyState === WebSocket.OPEN && conversationId && chatInput.value.trim()) {
+            ws.send(JSON.stringify({
+              type: 'typing',
+              conversationId: parseInt(conversationId),
+              isTyping: true,
+              senderType: 'customer',
+              senderName: customerName || 'Customer'
+            }));
+            
+            clearTimeout(typingTimeout);
+            typingTimeout = setTimeout(() => {
+              if (ws && ws.readyState === WebSocket.OPEN && conversationId) {
+                ws.send(JSON.stringify({
+                  type: 'typing',
+                  conversationId: parseInt(conversationId),
+                  isTyping: false,
+                  senderType: 'customer'
+                }));
+              }
+            }, 3000);
+          }
+        }, 300);
+      });
+
+      chatInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          if (chatInput.value.trim()) {
+            sendMessage();
+          }
+        }
+      });
+
+      sendButton.addEventListener('click', sendMessage);
+    }
+
+    function autoResizeTextarea() {
+      chatInput.style.height = 'auto';
+      chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px';
+    }
+
+    async function sendMessage() {
+      const message = chatInput.value.trim();
+      if (!message) return;
+
+      clearTimeout(typingTimeout);
+      clearTimeout(typingDebounceTimer);
+      
+      if (ws && ws.readyState === WebSocket.OPEN && conversationId) {
+        ws.send(JSON.stringify({
+          type: 'typing',
+          conversationId: parseInt(conversationId),
+          isTyping: false,
+          senderType: 'customer'
+        }));
+      }
+
+      chatInput.disabled = true;
+      sendButton.disabled = true;
+
+      const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+      addMessage('customer', message, customerName || 'You', tempId, true);
+      
+      chatInput.value = '';
+      chatInput.style.height = 'auto';
+
+      if (welcomeMessage.style.display !== 'none') {
+        welcomeMessage.style.display = 'none';
+      }
+
+      try {
+        if (!conversationId) {
+          await ensureFreshToken(true);
+          
+          const response = await fetchWithTimeout(`${API_URL}/api/conversations`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              storeIdentifier: STORE_ID,
+              customerEmail: customerEmail,
+              customerName: customerName,
+              initialMessage: message,
+              customerData: customerData,
+              hasOrders: customerOrders.length > 0,
+              orderCount: customerOrders.length,
+              cartSubtotal: customerCart?.subtotal || 0,
+              source: messageSource || 'website'
+            })
+          }, 8000);
+
+          if (!response.ok) {
+            throw new Error('Failed to create conversation');
+          }
+
+          const conv = await response.json();
+          conversationId = conv.id;
+          
+          localStorage.setItem(`chat_conv_${STORE_ID}`, conversationId);
+          
+          updateMessageStatus(tempId, 'confirmed', { id: tempId });
+          
+          await ensureFreshToken(true);
+          
+          if (wsToken && !ws) {
+            connectWebSocket().catch(err => console.warn('WS failed:', err));
+          }
+          
+          let autoReply = 'Thanks for reaching out! An agent will be with you shortly.';
+          if (customerData && customerData.name) {
+            autoReply = `Hi ${customerData.name}! ${autoReply}`;
+          }
+          if (customerOrders.length > 0) {
+            autoReply += ` We can see you have ${customerOrders.length} order${customerOrders.length !== 1 ? 's' : ''} with us.`;
+          }
+          
+          addMessage('agent', autoReply, 'Support Team');
+          
+        } else {
+          await ensureFreshToken(false);
+          
+          const response = await fetchWithTimeout(`${API_URL}/api/widget/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              conversationId: parseInt(conversationId),
+              customerEmail: customerEmail,
+              customerName: customerName,
+              content: message,
+              storeIdentifier: STORE_ID,
+              tempId: tempId,
+              customerData: customerData,
+              hasOrders: customerOrders.length > 0,
+              cartSubtotal: customerCart?.subtotal || 0,
+              source: messageSource || 'website'
+            })
+          }, 8000);
+
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            
+            updateMessageStatus(tempId, 'failed');
+            
+            if (errorData.error && (
+              errorData.error.includes('conversation') || 
+              errorData.error === 'conversation_not_found' ||
+              errorData.error.includes('token') ||
+              errorData.error.includes('unauthorized')
+            )) {
+              console.warn('🔄 Session expired');
+              
+              localStorage.removeItem(`chat_conv_${STORE_ID}`);
+              conversationId = null;
+              wsToken = null;
+              tokenLastRefreshed = null;
+              historyLoaded = false;
+              
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.close();
+                ws = null;
+              }
+              
+              const failedMsg = document.querySelector(`[data-message-id="${tempId}"]`);
+              if (failedMsg) failedMsg.remove();
+              
+              addMessage('system', 'Session expired. Creating new conversation...', 'System');
+              
+              await new Promise(resolve => setTimeout(resolve, 800));
+              
+              const systemMsg = chatMessages.lastElementChild;
+              if (systemMsg && systemMsg.classList.contains('system')) {
+                systemMsg.remove();
+              }
+              
+              chatInput.value = message;
+              chatInput.disabled = false;
+              sendButton.disabled = false;
+              
+              return sendMessage();
+            } else {
+              throw new Error(errorData.error || 'Failed to send');
+            }
+          } else {
+            const sentMessage = await response.json();
+            
+            updateMessageStatus(tempId, 'confirmed', sentMessage);
+            
+            if (sentMessage.id) {
+              displayedMessageIds.add(sentMessage.id);
+            }
+          }
+        }
+
+        chatInput.disabled = false;
+        sendButton.disabled = false;
+        chatInput.focus();
+        
+      } catch (error) {
+        console.error('❌ Send failed:', error);
+        
+        if (error.message.includes('token') || error.message.includes('unauthorized')) {
+          wsToken = null;
+          tokenLastRefreshed = null;
+        }
+        
+        updateMessageStatus(tempId, 'failed');
+        
+        const errorMsg = error.message === 'Request timeout' 
+          ? 'Request timed out. Please try again.'
+          : 'Failed to send. Please try again.';
+        
+        addMessage('system', errorMsg, 'System');
+        
+        chatInput.disabled = false;
+        sendButton.disabled = false;
+        chatInput.focus();
+      }
+    }
+
+    function addMessage(type, text, sender, messageId = null, pending = false) {
+      const messageDiv = document.createElement('div');
+      messageDiv.className = `message ${type}`;
+      if (pending) {
+        messageDiv.classList.add('pending');
+      }
+      messageDiv.dataset.messageId = messageId || `local-${Date.now()}`;
+      
+      const time = new Date().toLocaleTimeString('en-US', { 
+        hour: 'numeric', 
+        minute: '2-digit' 
+      });
+      
+      const avatarText = type === 'customer' ? getInitials(customerName || sender) : 
+                         type === 'agent' ? getInitials(sender || 'Support') : 
+                         '!';
+      
+      const senderName = type !== 'system' && sender ? 
+        `<div class="sender-name">${escapeHtml(sender)}</div>` : '';
+      
+      messageDiv.innerHTML = `
+        <div class="avatar">${avatarText}</div>
+        <div class="bubble">
+          ${senderName}
+          <div class="text">${escapeHtml(text)}</div>
+          <div class="time">${time}</div>
+        </div>
+      `;
+      
+      chatMessages.appendChild(messageDiv);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+      
+      return messageDiv;
+    }
+
+    function showTypingIndicator() {
+      hideTypingIndicator();
+      
+      const indicator = document.createElement('div');
+      indicator.className = 'message agent';
+      indicator.id = 'typing-indicator';
+      indicator.innerHTML = `
+        <div class="avatar">SA</div>
+        <div class="typing-indicator">
+          <div class="dots">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+        </div>
+      `;
+      chatMessages.appendChild(indicator);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    function hideTypingIndicator() {
+      const indicator = document.getElementById('typing-indicator');
+      if (indicator) indicator.remove();
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    window.addEventListener('beforeunload', () => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.close();
+      }
     });
 
     init();
   </script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
