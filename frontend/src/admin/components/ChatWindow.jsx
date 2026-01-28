@@ -259,6 +259,7 @@ function ChatWindow({
   };
 
   // Handle incoming message
+// Handle incoming message
 const handleIncomingMessage = (message) => {
   console.log('🔍 [handleIncomingMessage] Raw message:', message);
   console.log('🔍 [handleIncomingMessage] Current conversation.id:', conversation?.id);
@@ -275,7 +276,7 @@ const handleIncomingMessage = (message) => {
   
   console.log('🔍 [handleIncomingMessage] Normalized message:', normalizedMessage);
   
-  // ✅ FIXED: Strict conversation ID check - reject if missing or mismatched
+  // ✅ FIXED: Strict conversation ID check
   if (!normalizedMessage.conversationId) {
     console.log('⏭️ [handleIncomingMessage] Missing conversationId, rejecting message');
     return;
@@ -286,12 +287,13 @@ const handleIncomingMessage = (message) => {
     return;
   }
   
-  // ✅ FIXED: Check for duplicates BEFORE adding to displayedMessageIds
+  // Check for duplicates
   if (displayedMessageIds.current.has(normalizedMessage.id)) {
     console.log('⏭️ [handleIncomingMessage] Duplicate message:', normalizedMessage.id);
     return;
   }
   
+  // Skip own messages
   if (normalizedMessage.senderType === 'agent' && 
       normalizedMessage.senderName === employeeName) {
     console.log('⏭️ [handleIncomingMessage] Own message - senderName:', normalizedMessage.senderName, 'employeeName:', employeeName);
@@ -311,8 +313,80 @@ const handleIncomingMessage = (message) => {
     return [...prev, normalizedMessage];
   });
   
+  // ✅ ONLY NOTIFY FOR CUSTOMER MESSAGES
   if (normalizedMessage.senderType === 'customer') {
     setTypingUsers(new Set());
+    
+    // Show browser notification
+    showNotification(normalizedMessage);
+    
+    // Play notification sound (optional)
+    playNotificationSound();
+  }
+};
+
+// ✅ ADD: Function to show browser notification
+const showNotification = (message) => {
+  // Check if browser supports notifications
+  if (!("Notification" in window)) {
+    console.log('⚠️ Browser does not support notifications');
+    return;
+  }
+  
+  // Check notification permission
+  if (Notification.permission === "granted") {
+    createNotification(message);
+  } else if (Notification.permission !== "denied") {
+    Notification.requestPermission().then(permission => {
+      if (permission === "granted") {
+        createNotification(message);
+      }
+    });
+  }
+};
+
+// ✅ ADD: Create notification
+const createNotification = (message) => {
+  const title = `New message from ${message.senderName || 'Customer'}`;
+  const options = {
+    body: message.content.substring(0, 100) + (message.content.length > 100 ? '...' : ''),
+    icon: '/notification-icon.png', // Add your icon path
+    badge: '/badge-icon.png', // Optional badge icon
+    tag: `msg-${message.id}`, // Prevents duplicate notifications
+    requireInteraction: false, // Auto-close after a few seconds
+    silent: false,
+  };
+  
+  try {
+    const notification = new Notification(title, options);
+    
+    // Click to focus window
+    notification.onclick = () => {
+      window.focus();
+      notification.close();
+    };
+    
+    // Auto-close after 5 seconds
+    setTimeout(() => {
+      notification.close();
+    }, 5000);
+    
+    console.log('🔔 Notification shown for customer message');
+  } catch (error) {
+    console.error('❌ Failed to create notification:', error);
+  }
+};
+
+// ✅ ADD: Play notification sound (optional)
+const playNotificationSound = () => {
+  try {
+    const audio = new Audio('/notification-sound.mp3'); // Add your sound file
+    audio.volume = 0.5; // 50% volume
+    audio.play().catch(err => {
+      console.log('⚠️ Could not play notification sound:', err);
+    });
+  } catch (error) {
+    console.error('❌ Error playing notification sound:', error);
   }
 };
 
