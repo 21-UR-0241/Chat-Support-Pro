@@ -260,7 +260,6 @@ function ChatWindow({
 
   // Handle incoming message
 const handleIncomingMessage = (message) => {
-  // ✅ ADD THIS DEBUG
   console.log('🔍 [handleIncomingMessage] Raw message:', message);
   console.log('🔍 [handleIncomingMessage] Current conversation.id:', conversation?.id);
   console.log('🔍 [handleIncomingMessage] Employee name:', employeeName);
@@ -274,16 +273,20 @@ const handleIncomingMessage = (message) => {
     createdAt: message.createdAt || message.created_at || message.sentAt || message.sent_at,
   };
   
-  // ✅ ADD THIS DEBUG
   console.log('🔍 [handleIncomingMessage] Normalized message:', normalizedMessage);
-  console.log('🔍 [handleIncomingMessage] Conversation ID match?', normalizedMessage.conversationId === conversation.id);
   
-  if (normalizedMessage.conversationId && 
-      normalizedMessage.conversationId !== conversation.id) {
+  // ✅ FIXED: Strict conversation ID check - reject if missing or mismatched
+  if (!normalizedMessage.conversationId) {
+    console.log('⏭️ [handleIncomingMessage] Missing conversationId, rejecting message');
+    return;
+  }
+  
+  if (normalizedMessage.conversationId !== conversation.id) {
     console.log('⏭️ [handleIncomingMessage] Wrong conversation - Expected:', conversation.id, 'Got:', normalizedMessage.conversationId);
     return;
   }
   
+  // ✅ FIXED: Check for duplicates BEFORE adding to displayedMessageIds
   if (displayedMessageIds.current.has(normalizedMessage.id)) {
     console.log('⏭️ [handleIncomingMessage] Duplicate message:', normalizedMessage.id);
     return;
@@ -301,7 +304,10 @@ const handleIncomingMessage = (message) => {
   
   setMessages(prev => {
     const exists = prev.some(m => m.id === normalizedMessage.id);
-    if (exists) return prev;
+    if (exists) {
+      console.log('⏭️ [handleIncomingMessage] Message already exists in state');
+      return prev;
+    }
     return [...prev, normalizedMessage];
   });
   
