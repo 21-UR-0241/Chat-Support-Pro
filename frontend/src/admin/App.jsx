@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useRef } from 'react';
 import api from './services/api';
 import { useConversations } from './hooks/useConversations';
@@ -87,6 +86,7 @@ function DashboardContent({ employee, onLogout }) {
   const [loadingStores, setLoadingStores] = useState(true);
   const [error, setError] = useState(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
 
   // ✅ Track active notifications by conversation ID
   const activeNotificationsRef = useRef(new Map());
@@ -296,6 +296,20 @@ function DashboardContent({ employee, onLogout }) {
     setActiveConversation(null);
   };
 
+  // ✅ Logout confirmation handlers
+  const handleLogoutClick = () => {
+    setShowLogoutModal(true);
+  };
+
+  const handleConfirmLogout = () => {
+    setShowLogoutModal(false);
+    onLogout();
+  };
+
+  const handleCancelLogout = () => {
+    setShowLogoutModal(false);
+  };
+
   // ✅ Enhanced notification function with tracking
   const showNotification = (conversationId, customerName, messagePreview) => {
     if (!('Notification' in window)) {
@@ -424,6 +438,14 @@ function DashboardContent({ employee, onLogout }) {
     setActivePage('dashboard');
   };
 
+  // ✅ Prevent non-admin access to employee management
+  useEffect(() => {
+    if (activePage === 'employees' && employee.role !== 'admin') {
+      console.warn('⚠️ Non-admin user attempted to access employee management');
+      setActivePage('dashboard');
+    }
+  }, [activePage, employee.role]);
+
   const isConnected = getConnectionStatus();
 
   return (
@@ -478,17 +500,57 @@ function DashboardContent({ employee, onLogout }) {
           )}
           
           <div 
-            className="employee-info" 
-            onClick={onLogout} 
+            className="employee-info"
+            data-role={employee.role}
+            onClick={handleLogoutClick}
             title="Click to logout"
           >
-            <span className="employee-name">{employee.name}</span>
+            <div className="employee-details">
+              <span className="employee-name">{employee.name}</span>
+              <span className="employee-role">{employee.role === 'admin' ? '👑 Admin' : '👤 Agent'}</span>
+            </div>
             <div className="employee-avatar">
               {getInitials(employee.name)}
             </div>
           </div>
         </div>
       </header>
+
+      {/* Logout Confirmation Modal */}
+      {showLogoutModal && (
+        <div className="modal-overlay" onClick={handleCancelLogout}>
+          <div className="modal-content logout-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>🚪 Confirm Logout</h3>
+            </div>
+            <div className="modal-body">
+              <p>Are you sure you want to logout?</p>
+              <p className="logout-user-info">
+                Logged in as: <strong>{employee.name}</strong>
+                <span className={`logout-role-badge ${employee.role}`}>
+                  {employee.role === 'admin' ? '👑 Admin' : '👤 Agent'}
+                </span>
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button 
+                className="btn-cancel" 
+                onClick={handleCancelLogout}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button 
+                className="btn-logout" 
+                onClick={handleConfirmLogout}
+                type="button"
+              >
+                Yes, Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Mobile Menu */}
       <MobileMenu
@@ -504,7 +566,7 @@ function DashboardContent({ employee, onLogout }) {
           refreshConversations();
           closeMobileMenu();
         }}
-        onLogout={onLogout}
+        onLogout={handleLogoutClick}
         stats={stats}
         isConnected={isConnected}
       />

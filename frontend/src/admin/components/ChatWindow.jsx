@@ -1,9 +1,9 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import api from '../services/api';
 import MessageBubble from './MessageBubble';
 import CustomerInfo from './CustomerInfo';
+import '../styles/ChatWindow.css';
 
 function ChatWindow({
   conversation,
@@ -21,6 +21,8 @@ function ChatWindow({
   const [typingUsers, setTypingUsers] = useState(new Set());
   const [showCustomerInfo, setShowCustomerInfo] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
@@ -32,7 +34,7 @@ function ChatWindow({
   const maxReconnectAttempts = 5;
   const hasAuthenticated = useRef(false);
   const hasJoined = useRef(false);
-  const activeNotificationsRef = useRef(new Map()); // ✅ Track active notifications
+  const activeNotificationsRef = useRef(new Map());
 
   // 🔌 WebSocket Connection
   useEffect(() => {
@@ -67,18 +69,15 @@ function ChatWindow({
     }
 
     try {
-      // Close existing connection
       if (wsRef.current) {
         console.log('🔌 [connectWebSocket] Closing existing connection');
         wsRef.current.close();
         wsRef.current = null;
       }
 
-      // Reset flags
       hasAuthenticated.current = false;
       hasJoined.current = false;
 
-      // Get WebSocket URL from environment variable
       const WS_URL = import.meta.env.VITE_WS_URL || 
                      (import.meta.env.PROD 
                        ? 'wss://chat-support-pro.onrender.com'
@@ -91,7 +90,6 @@ function ChatWindow({
       ws.onopen = () => {
         console.log('✅ [WebSocket] Connection opened');
         
-        // Get auth token
         const token = localStorage.getItem('token');
         if (!token) {
           console.error('❌ [WebSocket] No auth token found in localStorage');
@@ -99,7 +97,6 @@ function ChatWindow({
           return;
         }
         
-        // Send authentication
         const authMessage = {
           type: 'auth',
           token: token,
@@ -126,7 +123,6 @@ function ChatWindow({
             setWsConnected(true);
             reconnectAttempts.current = 0;
             
-            // Send join message IMMEDIATELY (no timeout)
             if (!hasJoined.current && conversation) {
               const joinMessage = {
                 type: 'join_conversation',
@@ -142,7 +138,6 @@ function ChatWindow({
             return;
           }
           
-          // Handle join confirmation
           if (data.type === 'joined' || data.type === 'join_ok') {
             if (hasJoined.current) {
               console.log('⚠️ [WebSocket] Already joined, ignoring duplicate join confirmation');
@@ -154,7 +149,6 @@ function ChatWindow({
             return;
           }
           
-          // Handle other messages
           handleWebSocketMessage(data);
           
         } catch (error) {
@@ -174,7 +168,6 @@ function ChatWindow({
         hasAuthenticated.current = false;
         hasJoined.current = false;
         
-        // Attempt to reconnect
         if (conversation && reconnectAttempts.current < maxReconnectAttempts) {
           reconnectAttempts.current++;
           const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 10000);
@@ -198,7 +191,6 @@ function ChatWindow({
     }
   };
 
-  // Disconnect WebSocket
   const disconnectWebSocket = () => {
     console.log('🔌 [disconnectWebSocket] Called');
     
@@ -241,7 +233,6 @@ function ChatWindow({
     hasJoined.current = false;
   };
 
-  // Handle WebSocket messages
   const handleWebSocketMessage = (data) => {
     switch (data.type) {
       case 'connected':
@@ -268,7 +259,6 @@ function ChatWindow({
     }
   };
 
-  // ✅ Handle incoming message with notification support
   const handleIncomingMessage = (message) => {
     console.log('🔍 [handleIncomingMessage] Raw message:', message);
     console.log('🔍 [handleIncomingMessage] Current conversation.id:', conversation?.id);
@@ -285,7 +275,6 @@ function ChatWindow({
     
     console.log('🔍 [handleIncomingMessage] Normalized message:', normalizedMessage);
     
-    // ✅ FIXED: Strict conversation ID check
     if (!normalizedMessage.conversationId) {
       console.log('⏭️ [handleIncomingMessage] Missing conversationId, rejecting message');
       return;
@@ -296,13 +285,11 @@ function ChatWindow({
       return;
     }
     
-    // Check for duplicates
     if (displayedMessageIds.current.has(normalizedMessage.id)) {
       console.log('⏭️ [handleIncomingMessage] Duplicate message:', normalizedMessage.id);
       return;
     }
     
-    // Skip own messages
     if (normalizedMessage.senderType === 'agent' && 
         normalizedMessage.senderName === employeeName) {
       console.log('⏭️ [handleIncomingMessage] Own message - senderName:', normalizedMessage.senderName, 'employeeName:', employeeName);
@@ -322,32 +309,23 @@ function ChatWindow({
       return [...prev, normalizedMessage];
     });
     
-    // ✅ Handle notifications based on sender type
     if (normalizedMessage.senderType === 'customer') {
       setTypingUsers(new Set());
-      
-      // Show browser notification for customer messages
       showNotification(normalizedMessage);
-      
-      // Play notification sound (optional)
       playNotificationSound();
     } else if (normalizedMessage.senderType === 'agent') {
-      // ✅ CLEAR ALL NOTIFICATIONS when any agent replies
       clearAllNotifications(normalizedMessage.conversationId);
       setTypingUsers(new Set());
       console.log('🔕 Cleared notifications - agent replied');
     }
   };
 
-  // ✅ Show browser notification (customer messages only)
   const showNotification = (message) => {
-    // Check if browser supports notifications
     if (!("Notification" in window)) {
       console.log('⚠️ Browser does not support notifications');
       return;
     }
     
-    // Check notification permission
     if (Notification.permission === "granted") {
       createNotification(message);
     } else if (Notification.permission !== "denied") {
@@ -359,14 +337,13 @@ function ChatWindow({
     }
   };
 
-  // ✅ Create notification
   const createNotification = (message) => {
     const title = `New message from ${message.senderName || 'Customer'}`;
     const options = {
       body: message.content.substring(0, 100) + (message.content.length > 100 ? '...' : ''),
-      icon: '/notification-icon.png', // Add your icon path
-      badge: '/badge-icon.png', // Optional badge icon
-      tag: `msg-${message.conversationId}`, // Use conversationId as tag to replace notifications
+      icon: '/notification-icon.png',
+      badge: '/badge-icon.png',
+      tag: `msg-${message.conversationId}`,
       requireInteraction: false,
       silent: false,
     };
@@ -374,25 +351,21 @@ function ChatWindow({
     try {
       const notification = new Notification(title, options);
       
-      // Store notification reference by conversation ID
       if (!activeNotificationsRef.current.has(message.conversationId)) {
         activeNotificationsRef.current.set(message.conversationId, []);
       }
       activeNotificationsRef.current.get(message.conversationId).push(notification);
       
-      // Click to focus window
       notification.onclick = () => {
         window.focus();
         notification.close();
         removeNotificationFromTracking(message.conversationId, notification);
       };
       
-      // Remove from tracking when closed
       notification.onclose = () => {
         removeNotificationFromTracking(message.conversationId, notification);
       };
       
-      // Auto-close after 5 seconds
       setTimeout(() => {
         notification.close();
       }, 5000);
@@ -403,7 +376,6 @@ function ChatWindow({
     }
   };
 
-  // ✅ Remove notification from tracking
   const removeNotificationFromTracking = (conversationId, notification) => {
     const notifications = activeNotificationsRef.current.get(conversationId);
     if (notifications) {
@@ -417,7 +389,6 @@ function ChatWindow({
     }
   };
 
-  // ✅ Clear all notifications for a conversation
   const clearAllNotifications = (conversationId) => {
     const notifications = activeNotificationsRef.current.get(conversationId);
     if (notifications && notifications.length > 0) {
@@ -433,11 +404,10 @@ function ChatWindow({
     }
   };
 
-  // ✅ Play notification sound (optional)
   const playNotificationSound = () => {
     try {
-      const audio = new Audio('/notification-sound.mp3'); // Add your sound file
-      audio.volume = 0.5; // 50% volume
+      const audio = new Audio('/notification-sound.mp3');
+      audio.volume = 0.5;
       audio.play().catch(err => {
         console.log('⚠️ Could not play notification sound:', err);
       });
@@ -446,7 +416,6 @@ function ChatWindow({
     }
   };
 
-  // Handle typing indicator
   const handleTypingIndicator = (data) => {
     const isTyping = data.isTyping;
     const senderName = data.senderName || data.sender_name || 'Customer';
@@ -464,7 +433,6 @@ function ChatWindow({
     });
   };
 
-  // Send typing indicator
   const sendTypingIndicator = (isTyping) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !hasJoined.current) {
       console.log('⚠️ [sendTypingIndicator] Cannot send - wsState:', wsRef.current?.readyState, 'hasJoined:', hasJoined.current);
@@ -483,7 +451,6 @@ function ChatWindow({
     wsRef.current.send(JSON.stringify(typingMessage));
   };
 
-  // Load messages
   useEffect(() => {
     if (conversation) {
       console.log('🔄 [useEffect] Loading messages for:', conversation.id);
@@ -562,7 +529,6 @@ function ChatWindow({
 
     setMessages(prev => [...prev, optimisticMessage]);
 
-    // ✅ Clear notifications immediately when agent sends message
     clearAllNotifications(conversation.id);
     console.log('🔕 Cleared notifications - you replied');
 
@@ -610,19 +576,29 @@ function ChatWindow({
     }
   };
 
-  const handleCloseConversation = async () => {
-    if (window.confirm('Are you sure you want to close this conversation?')) {
-      try {
-        await api.closeConversation(conversation.id);
-        if (onClose) onClose();
-      } catch (error) {
-        console.error('Failed to close conversation:', error);
-        alert('Failed to close conversation');
-      }
+  // ✅ Delete conversation handlers
+  const handleDeleteClick = () => {
+    setShowDeleteModal(true);
+  };
+
+  const handleCancelDelete = () => {
+    setShowDeleteModal(false);
+  };
+
+  const handleConfirmDelete = async () => {
+    try {
+      setDeleting(true);
+      await api.closeConversation(conversation.id);
+      setShowDeleteModal(false);
+      if (onClose) onClose();
+    } catch (error) {
+      console.error('Failed to delete conversation:', error);
+      alert('Failed to delete conversation. Please try again.');
+    } finally {
+      setDeleting(false);
     }
   };
 
-  // Handle back button (mobile) - onClose will be called
   const handleBackClick = () => {
     console.log('⬅️ [ChatWindow] Back button clicked');
     if (onClose) {
@@ -640,7 +616,6 @@ function ChatWindow({
       .slice(0, 2);
   };
 
-  // Group messages for proper bubble display
   const getGroupedMessages = () => {
     if (!messages || messages.length === 0) return [];
 
@@ -661,7 +636,6 @@ function ChatWindow({
     });
   };
 
-  // ✅ Early return if no conversation - BEFORE accessing conversation properties
   if (!conversation) {
     return (
       <div className="chat-window">
@@ -674,7 +648,6 @@ function ChatWindow({
     );
   }
 
-  // ✅ Get store details AFTER null check
   const getStoreDetails = () => {
     if (!stores || !conversation) return null;
     
@@ -697,7 +670,6 @@ function ChatWindow({
       {/* Header */}
       <div className="chat-header">
         <div className="chat-header-left">
-          {/* Back button for mobile */}
           <button 
             className="chat-back-btn-mobile"
             onClick={handleBackClick}
@@ -714,19 +686,25 @@ function ChatWindow({
           <div className="chat-header-info">
             <h3>{conversation.customerName || 'Guest'}</h3>
             <div className="chat-header-subtitle">
-              {/* ✅ Store Name and Domain */}
               {storeName && (
                 <span className="store-info">
                   <strong>{storeName}</strong>
-                  {storeDomain && ` (${storeDomain})`}
+                  <span className="store-domain-mobile">
+                    {storeDomain && ` • ${storeDomain}`}
+                  </span>
                 </span>
               )}
-              {storeName && ' • '}
-              {conversation.customerEmail || 'No email'}
-              <span style={{ 
-                color: wsConnected ? '#48bb78' : '#fc8181', 
-                marginLeft: '8px' 
-              }} title={wsConnected ? 'Connected' : 'Disconnected'}>
+              <span className="customer-email-desktop">
+                {storeName && ' • '}
+                {conversation.customerEmail || 'No email'}
+              </span>
+              <span 
+                style={{ 
+                  color: wsConnected ? '#48bb78' : '#fc8181', 
+                  marginLeft: '8px' 
+                }} 
+                title={wsConnected ? 'Connected' : 'Disconnected'}
+              >
                 ●
               </span>
             </div>
@@ -743,18 +721,52 @@ function ChatWindow({
             ℹ️
           </button>
           <button
-            className="icon-btn"
-            onClick={handleCloseConversation}
-            title="Close conversation"
+            className="icon-btn delete-btn"
+            onClick={handleDeleteClick}
+            title="Delete conversation"
             type="button"
           >
-            ✓
-          </button>
-          <button className="icon-btn" title="More options" type="button">
-            ⋮
+            🗑️
           </button>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="modal-overlay" onClick={handleCancelDelete}>
+          <div className="modal-content delete-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>🗑️ Delete Conversation</h3>
+            </div>
+            <div className="modal-body">
+              <p>Are you sure you want to delete this conversation?</p>
+              <div className="delete-warning">
+                <p><strong>Customer:</strong> {conversation.customerName || 'Guest'}</p>
+                <p><strong>Store:</strong> {storeName}</p>
+                <p className="warning-text">⚠️ This action cannot be undone. All messages will be permanently deleted.</p>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button 
+                className="btn-cancel" 
+                onClick={handleCancelDelete}
+                disabled={deleting}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button 
+                className="btn-delete" 
+                onClick={handleConfirmDelete}
+                disabled={deleting}
+                type="button"
+              >
+                {deleting ? 'Deleting...' : 'Yes, Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Content */}
       <div className="chat-content">
@@ -771,7 +783,6 @@ function ChatWindow({
             </div>
           ) : (
             <>
-              {/* Render grouped messages */}
               {groupedMessages.map((message, index) => (
                 <MessageBubble
                   key={message.id || `msg-${index}`}
@@ -785,7 +796,6 @@ function ChatWindow({
                 />
               ))}
               
-              {/* Typing indicator */}
               {typingUsers.size > 0 && (
                 <div className="typing-indicator">
                   <div className="typing-indicator-avatar">
@@ -804,7 +814,6 @@ function ChatWindow({
           )}
         </div>
 
-        {/* Customer Info Sidebar */}
         {showCustomerInfo && (
           <CustomerInfo
             conversation={conversation}
