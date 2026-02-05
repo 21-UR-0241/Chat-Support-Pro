@@ -108,11 +108,6 @@
 
 
 
-/**
- * MessageBubble Component
- * WhatsApp-style conversation bubbles with file attachment support
- */
-
 import React from 'react';
 
 function MessageBubble({
@@ -151,13 +146,14 @@ function MessageBubble({
       .slice(0, 2);
   };
 
-  // Parse file data
+  // Parse file data - handles both object and JSON string
   const parseFileData = (fileData) => {
     if (!fileData) return null;
     if (typeof fileData === 'object') return fileData;
     try {
       return JSON.parse(fileData);
     } catch (e) {
+      console.error('Failed to parse file data:', e);
       return null;
     }
   };
@@ -200,15 +196,28 @@ function MessageBubble({
     return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
   };
 
-  const senderName = message.senderName || (isAgent ? 'Agent' : 'Customer');
+  const senderName = message.senderName || message.sender_name || (isAgent ? 'Agent' : 'Customer');
   const messageText = message.text || message.content || '';
-  const messageTime = formatTime(message.timestamp || message.createdAt);
+  const messageTime = formatTime(message.timestamp || message.createdAt || message.created_at);
   
-  // File attachment data
-  const fileData = parseFileData(message.fileData);
+  // ✅ FIX: Check both camelCase (from WebSocket) and snake_case (from database)
+  const rawFileData = message.fileData || message.file_data;
+  const fileData = parseFileData(rawFileData);
   const fileType = getFileType(fileData);
   const hasFile = message.fileUrl || fileData;
   const fileUrl = fileData?.url || message.fileUrl;
+
+  // Debug log to see what we're getting
+  if (hasFile) {
+    console.log('📎 Message with file:', {
+      messageId: message.id,
+      hasRawFileData: !!rawFileData,
+      rawFileDataType: typeof rawFileData,
+      parsedFileData: fileData,
+      fileUrl: fileUrl,
+      fileType: fileType
+    });
+  }
 
   return (
     <div className={`message-row ${isAgent ? 'agent' : 'customer'} ${isFirstInGroup ? 'first-in-group' : ''} ${isLastInGroup ? 'last-in-group' : ''}`}>
@@ -229,7 +238,7 @@ function MessageBubble({
         <div className={`message-bubble ${isAgent ? 'agent' : 'customer'} ${sending ? 'sending' : ''} ${isFirstInGroup ? 'first' : ''} ${isLastInGroup ? 'last' : ''}`}>
           
           {/* File Attachment */}
-          {hasFile && fileData && (
+          {hasFile && fileData && fileUrl && (
             <div className="message-attachment">
               {fileType === 'image' ? (
                 <div className="attachment-image">
@@ -245,8 +254,12 @@ function MessageBubble({
                       display: 'block',
                     }}
                     onError={(e) => {
+                      console.error('❌ Failed to load image:', fileUrl);
                       e.target.style.display = 'none';
                       e.target.parentElement.innerHTML = '<div style="padding: 20px; text-align: center; color: #667781;">Image failed to load</div>';
+                    }}
+                    onLoad={() => {
+                      console.log('✅ Image loaded successfully:', fileUrl);
                     }}
                   />
                   {fileData.name && (
