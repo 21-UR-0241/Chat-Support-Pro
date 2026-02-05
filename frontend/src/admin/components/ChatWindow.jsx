@@ -1024,7 +1024,6 @@ function ChatWindow({
 
   // Load templates from database on mount
   useEffect(() => {
-    console.log('🔄 ChatWindow mounted, loading templates...');
     loadTemplates();
   }, []);
 
@@ -1042,12 +1041,10 @@ function ChatWindow({
 
   const loadTemplates = async () => {
     try {
-      console.log('📋 [loadTemplates] Fetching templates from API...');
       const data = await api.getTemplates();
-      console.log('✅ [loadTemplates] Templates received:', data);
       setTemplates(Array.isArray(data) ? data : []);
     } catch (error) {
-      console.error('❌ [loadTemplates] Failed to load templates:', error);
+      console.error('Failed to load templates:', error);
       setTemplates([]);
     }
   };
@@ -1141,7 +1138,6 @@ function ChatWindow({
       e.preventDefault();
       e.stopPropagation();
     }
-    console.log('📝 [handleAddTemplate] Opening modal');
     setEditingTemplate(null);
     setTemplateName('');
     setTemplateContent('');
@@ -1154,7 +1150,6 @@ function ChatWindow({
       e.preventDefault();
       e.stopPropagation();
     }
-    console.log('✏️ [handleEditTemplate] Editing template:', template);
     setEditingTemplate(template);
     setTemplateName(template.name || '');
     setTemplateContent(template.content || '');
@@ -1167,8 +1162,6 @@ function ChatWindow({
       e.preventDefault();
       e.stopPropagation();
     }
-
-    console.log('💾 [handleSaveTemplate] Saving...');
 
     const trimmedName = templateName.trim();
     const trimmedContent = templateContent.trim();
@@ -1204,10 +1197,8 @@ function ChatWindow({
       setTemplateContent('');
       setEditingTemplate(null);
       
-      console.log('✅ [handleSaveTemplate] Template saved successfully');
-      
     } catch (error) {
-      console.error('❌ [handleSaveTemplate] Error:', error);
+      console.error('Failed to save template:', error);
       alert(`Failed to save template: ${error.message || 'Please try again.'}`);
     } finally {
       setTemplateLoading(false);
@@ -1227,15 +1218,13 @@ function ChatWindow({
     try {
       await api.deleteTemplate(templateId);
       setTemplates(prev => prev.filter(t => t.id !== templateId));
-      console.log('✅ Template deleted');
     } catch (error) {
-      console.error('❌ Failed to delete template:', error);
+      console.error('Failed to delete template:', error);
       alert('Failed to delete template. Please try again.');
     }
   };
 
   const handleUseTemplate = (template) => {
-    console.log('✨ Using template:', template.name);
     setMessageText(template.content);
     setShowTemplates(false);
     if (textareaRef.current) {
@@ -1303,10 +1292,8 @@ function ChatWindow({
       disconnectWebSocket();
       return;
     }
-    console.log('🔌 [ChatWindow] Setting up WebSocket for conversation:', conversation.id);
     connectWebSocket();
     return () => {
-      console.log('🧹 [ChatWindow] Cleaning up WebSocket');
       disconnectWebSocket();
     };
   }, [conversation?.id, employeeName]);
@@ -1353,7 +1340,7 @@ function ChatWindow({
       
       setMessages(messageArray);
     } catch (error) {
-      console.error('❌ Failed to load messages:', error);
+      console.error('Failed to load messages:', error);
       setMessages([]);
     } finally {
       setLoading(false);
@@ -1392,6 +1379,7 @@ function ChatWindow({
           type: selectedFile.type,
           size: selectedFile.size,
         };
+        console.log('✅ File uploaded, fileData:', fileData);
       }
 
       setMessageText('');
@@ -1408,7 +1396,7 @@ function ChatWindow({
         conversationId: conversation.id,
         senderType: 'agent',
         senderName: employeeName || 'Agent',
-        content: text || (fileData ? `📎 ${fileData.name}` : ''),
+        content: text || '',
         fileUrl: fileUrl,
         fileData: fileData,
         createdAt: new Date().toISOString(),
@@ -1416,19 +1404,31 @@ function ChatWindow({
         sending: true,
       };
 
+      console.log('📤 Adding optimistic message:', optimisticMessage);
       setMessages(prev => [...prev, optimisticMessage]);
       clearAllNotifications(conversation.id);
 
       const sentMessage = await onSendMessage(conversation, text, fileData);
+      console.log('✅ Server response:', sentMessage);
       
       if (sentMessage.id) {
         displayedMessageIds.current.add(sentMessage.id);
       }
       
+      // ✅ FIX: Preserve fileData from optimistic message if server response doesn't have it
+      const mergedMessage = {
+        ...sentMessage,
+        fileUrl: sentMessage.fileUrl || fileUrl,
+        fileData: sentMessage.fileData || fileData,
+        sending: false
+      };
+      
+      console.log('🔄 Updating message with merged data:', mergedMessage);
+      
       setMessages(prev =>
         prev.map(msg =>
           msg._optimistic && msg.id === optimisticMessage.id
-            ? { ...sentMessage, sending: false } 
+            ? mergedMessage
             : msg
         )
       );
@@ -2073,7 +2073,6 @@ function ChatWindow({
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            console.log('📋 Template button clicked');
             setShowTemplates(!showTemplates);
           }}
           title="Quick replies"
