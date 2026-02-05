@@ -2934,6 +2934,23 @@ function setupKeepAlive() {
   }, 60 * 1000);
 }
 
+// Add this to server.js after your other routes
+app.get('/api/debug/bunny-config', authenticateToken, (req, res) => {
+  res.json({
+    configured: {
+      BUNNY_STORAGE_ZONE: !!process.env.BUNNY_STORAGE_ZONE,
+      BUNNY_ACCESS_KEY: !!process.env.BUNNY_ACCESS_KEY,
+      BUNNY_STORAGE_HOSTNAME: !!process.env.BUNNY_STORAGE_HOSTNAME,
+      BUNNY_CDN_URL: !!process.env.BUNNY_CDN_URL,
+    },
+    values: {
+      BUNNY_STORAGE_ZONE: process.env.BUNNY_STORAGE_ZONE || 'NOT SET',
+      BUNNY_STORAGE_HOSTNAME: process.env.BUNNY_STORAGE_HOSTNAME || 'NOT SET',
+      BUNNY_CDN_URL: process.env.BUNNY_CDN_URL || 'NOT SET',
+      BUNNY_ACCESS_KEY: process.env.BUNNY_ACCESS_KEY ? '***' + process.env.BUNNY_ACCESS_KEY.slice(-4) : 'NOT SET',
+    }
+  });
+});
 // ============ START SERVER ============
 
 const PORT = process.env.PORT || 3000;
