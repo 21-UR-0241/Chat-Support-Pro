@@ -1,4 +1,5 @@
 
+
 import React, { useMemo, useEffect, useRef, useState } from 'react';
 import '../styles/ConversationList.css';
 
@@ -134,11 +135,68 @@ function ConversationList({
     previousConversationsRef.current = conversations;
   }, [conversations, activeConversation, loading, notificationsEnabled, soundEnabled]);
 
-  // Filter conversations
-  const filteredConversations = useMemo(() => {
+  // Group conversations by email and store
+  const groupedConversations = useMemo(() => {
     if (!conversations) return [];
-    return conversations.filter((conv) => {
+    
+    const grouped = new Map();
+    
+    conversations.forEach((conv) => {
+      // Create a unique key based on email + store identifier
+      const email = (conv.customerEmail || '').toLowerCase().trim();
+      const storeId = conv.storeIdentifier || conv.shopId || '';
+      
+      // Skip if no email (can't group without email)
+      if (!email) {
+        // Add ungrouped conversations with a unique key
+        const uniqueKey = `no-email-${conv.id}`;
+        grouped.set(uniqueKey, {
+          conversations: [conv],
+          mostRecent: conv,
+          groupKey: uniqueKey,
+        });
+        return;
+      }
+      
+      const groupKey = `${email}-${storeId}`;
+      
+      if (grouped.has(groupKey)) {
+        const group = grouped.get(groupKey);
+        group.conversations.push(conv);
+        
+        // Update most recent conversation
+        const currentMostRecent = group.mostRecent;
+        const currentTime = new Date(conv.lastMessageAt || 0);
+        const mostRecentTime = new Date(currentMostRecent.lastMessageAt || 0);
+        
+        if (currentTime > mostRecentTime) {
+          group.mostRecent = conv;
+        }
+      } else {
+        grouped.set(groupKey, {
+          conversations: [conv],
+          mostRecent: conv,
+          groupKey,
+        });
+      }
+    });
+    
+    // Convert map to array and sort by most recent message
+    return Array.from(grouped.values()).sort((a, b) => {
+      const timeA = new Date(a.mostRecent.lastMessageAt || 0);
+      const timeB = new Date(b.mostRecent.lastMessageAt || 0);
+      return timeB - timeA;
+    });
+  }, [conversations]);
+
+  // Filter grouped conversations
+  const filteredGroupedConversations = useMemo(() => {
+    if (!groupedConversations) return [];
+    
+    return groupedConversations.filter((group) => {
+      const conv = group.mostRecent;
       const search = filters.search?.toLowerCase();
+      
       if (search) {
         // Get store name for this conversation
         const storeName = stores?.find(s =>
@@ -157,7 +215,12 @@ function ConversationList({
         
         if (!matchesSearch) return false;
       }
-      if (filters.status && conv.status !== filters.status) return false;
+      
+      if (filters.status) {
+        // Check if any conversation in the group matches the status
+        const hasMatchingStatus = group.conversations.some(c => c.status === filters.status);
+        if (!hasMatchingStatus) return false;
+      }
       
       if (filters.storeId) {
         const matchesStore = stores?.find(s =>
@@ -167,10 +230,29 @@ function ConversationList({
         if (!matchesStore) return false;
       }
       
-      if (filters.priority && conv.priority !== filters.priority) return false;
+      if (filters.priority) {
+        // Check if any conversation in the group matches the priority
+        const hasMatchingPriority = group.conversations.some(c => c.priority === filters.priority);
+        if (!hasMatchingPriority) return false;
+      }
+      
+      // Read/Unread filter
+      if (filters.readStatus) {
+        // Calculate total unread for the group
+        const totalUnread = group.conversations.reduce((sum, c) => {
+          const count = c.unreadCount || c.unread_count || c.unread || 0;
+          return sum + count;
+        }, 0);
+        
+        const hasUnread = totalUnread > 0;
+        
+        if (filters.readStatus === 'unread' && !hasUnread) return false;
+        if (filters.readStatus === 'read' && hasUnread) return false;
+      }
+      
       return true;
     });
-  }, [conversations, filters, stores]);
+  }, [groupedConversations, filters, stores]);
 
   // Total unread counter
   const totalUnread = useMemo(() => {
@@ -239,10 +321,16 @@ function ConversationList({
 
   // Clear all filters
   const clearFilters = () => {
-    onFilterChange({ search: '', status: '', priority: '', storeId: '' });
+    onFilterChange({ search: '', status: '', priority: '', storeId: '', readStatus: '' });
   };
 
-  const hasActiveFilters = filters.status || filters.priority || filters.storeId;
+  // Handle clicking on a grouped conversation
+  const handleGroupClick = (group) => {
+    // Always select the most recent conversation in the group
+    onSelectConversation(group.mostRecent);
+  };
+
+  const hasActiveFilters = filters.status || filters.priority || filters.storeId || filters.readStatus;
 
   return (
     <div className="conversation-list">
@@ -346,6 +434,31 @@ function ConversationList({
         </div>
       </div>
 
+      {/* Read/Unread Filter Tabs */}
+      <div className="read-status-tabs">
+        <button
+          className={`read-status-tab ${!filters.readStatus ? 'active' : ''}`}
+          onClick={() => onFilterChange({ ...filters, readStatus: '' })}
+        >
+          All
+        </button>
+        <button
+          className={`read-status-tab ${filters.readStatus === 'unread' ? 'active' : ''}`}
+          onClick={() => onFilterChange({ ...filters, readStatus: 'unread' })}
+        >
+          Unread
+          {totalUnread > 0 && (
+            <span className="tab-badge">{totalUnread}</span>
+          )}
+        </button>
+        <button
+          className={`read-status-tab ${filters.readStatus === 'read' ? 'active' : ''}`}
+          onClick={() => onFilterChange({ ...filters, readStatus: 'read' })}
+        >
+          Read
+        </button>
+      </div>
+
       {/* Filters */}
       <div className="conversation-filters">
         {stores && stores.length > 0 && (
@@ -376,7 +489,7 @@ function ConversationList({
             <div className="spinner"></div>
             <p>Loading chats...</p>
           </div>
-        ) : filteredConversations.length === 0 ? (
+        ) : filteredGroupedConversations.length === 0 ? (
           <div className="empty-conversations">
             <div className="empty-icon">💬</div>
             <h3>No chats</h3>
@@ -387,11 +500,19 @@ function ConversationList({
             </p>
           </div>
         ) : (
-          filteredConversations.map((conversation) => {
-            const isActive = activeConversation?.id === conversation.id;
-            const unreadCount = conversation.unreadCount || conversation.unread_count || conversation.unread || 0;
-            const hasUnread = unreadCount > 0;
-            const isUrgent = conversation.priority === 'urgent';
+          filteredGroupedConversations.map((group) => {
+            const conversation = group.mostRecent;
+            const isActive = group.conversations.some(c => c.id === activeConversation?.id);
+            const isGrouped = group.conversations.length > 1;
+            
+            // Calculate total unread for the group
+            const totalGroupUnread = group.conversations.reduce((sum, c) => {
+              const count = c.unreadCount || c.unread_count || c.unread || 0;
+              return sum + count;
+            }, 0);
+            
+            const hasUnread = totalGroupUnread > 0;
+            const isUrgent = group.conversations.some(c => c.priority === 'urgent');
 
             const storeName =
               stores?.find(s =>
@@ -401,13 +522,16 @@ function ConversationList({
 
             return (
               <div
-                key={conversation.id}
+                key={group.groupKey}
                 className={`conversation-item ${isActive ? 'active' : ''} ${hasUnread ? 'unread' : ''}`}
-                onClick={() => onSelectConversation(conversation)}
+                onClick={() => handleGroupClick(group)}
               >
                 <div className="conversation-avatar">
                   <UserIcon />
-                  {hasUnread && <span className="avatar-badge">{unreadCount}</span>}
+                  {hasUnread && <span className="avatar-badge">{totalGroupUnread}</span>}
+                  {isGrouped && (
+                    <span className="group-count-badge">{group.conversations.length}</span>
+                  )}
                 </div>
 
                 <div className="conversation-details">
@@ -461,7 +585,7 @@ function ConversationList({
                     </p>
                     {hasUnread && (
                       <span className="unread-badge">
-                        {unreadCount}
+                        {totalGroupUnread}
                       </span>
                     )}
                   </div>

@@ -5,7 +5,7 @@ import websocketService from '../services/websocket';
 export function useWebSocket(employeeId) {
   const isConnectedRef = useRef(false);
 
-  useEffect(() => {
+  useEffect(() => {   
     if (employeeId && !isConnectedRef.current) {
       websocketService.connect(employeeId);
       isConnectedRef.current = true;

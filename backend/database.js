@@ -1,5 +1,5 @@
 
-//backend/database.js
+
 const { Pool } = require('pg');
 require('dotenv').config();
 
@@ -254,6 +254,20 @@ async function initDatabase() {
     `);
     
     // ============================================
+    // MESSAGE TEMPLATES TABLE
+    // ============================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS message_templates (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        name VARCHAR(255) NOT NULL,
+        content TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    
+    // ============================================
     // ANALYTICS TABLE
     // ============================================
     await client.query(`
@@ -326,6 +340,10 @@ async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_webhook_received ON webhook_logs(received_at DESC);
       CREATE INDEX IF NOT EXISTS idx_webhook_processed ON webhook_logs(processed);
       
+      -- Message template indexes
+      CREATE INDEX IF NOT EXISTS idx_message_templates_user_id ON message_templates(user_id);
+      CREATE INDEX IF NOT EXISTS idx_message_templates_created ON message_templates(created_at DESC);
+      
       -- Analytics indexes
       CREATE INDEX IF NOT EXISTS idx_analytics_shop_date ON analytics_daily(shop_id, date);
     `);
@@ -356,11 +374,10 @@ async function runMigrations() {
     await migration_002_add_conversation_metadata();
     await migration_003_add_unread_fields();
     await migration_004_add_last_message_fields();
-
+    await migration_005_add_message_templates();
     
     // Add future migrations here:
-    // await migration_002_add_new_feature();
-    // await migration_003_add_indexes();
+    // await migration_006_add_new_feature();
     
     console.log('✅ All migrations completed successfully');
   } catch (error) {
@@ -489,7 +506,7 @@ async function migration_002_add_conversation_metadata() {
 async function migration_003_add_unread_fields() {
   const client = await pool.connect();
   try {
-    console.log('📝 [Migration 003] Adding unread fields...'); // ✅ ADD THIS
+    console.log('📝 [Migration 003] Adding unread fields...');
     
     await client.query(`
       ALTER TABLE conversations
@@ -501,14 +518,15 @@ async function migration_003_add_unread_fields() {
       ADD COLUMN IF NOT EXISTS last_read_at TIMESTAMP;
     `);
     
-    console.log('✅ [Migration 003] Completed'); // ✅ ADD THIS
+    console.log('✅ [Migration 003] Completed');
   } catch (error) {
-    console.error('❌ [Migration 003] Failed:', error); // ✅ ADD THIS
+    console.error('❌ [Migration 003] Failed:', error);
     throw error;
   } finally {
     client.release();
   }
 }
+
 async function migration_004_add_last_message_fields() {
   const client = await pool.connect();
   
@@ -589,6 +607,73 @@ async function migration_004_add_last_message_fields() {
     client.release();
   }
 }
+
+/**
+ * Migration 005: Add message templates table
+ */
+async function migration_005_add_message_templates() {
+  const client = await pool.connect();
+  
+  try {
+    console.log('📝 [Migration 005] Adding message_templates table...');
+    
+    // Check if table exists
+    const tableCheck = await client.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'message_templates'
+      );
+    `);
+    
+    if (tableCheck.rows[0].exists) {
+      console.log('⏭️  [Migration 005] message_templates table already exists, skipping');
+      return;
+    }
+    
+    // Create message_templates table
+    await client.query(`
+      CREATE TABLE message_templates (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        name VARCHAR(255) NOT NULL,
+        content TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    
+    // Create indexes
+    await client.query(`
+      CREATE INDEX idx_message_templates_user_id ON message_templates(user_id);
+      CREATE INDEX idx_message_templates_created ON message_templates(created_at DESC);
+    `);
+    
+    // Create trigger for updated_at
+    await client.query(`
+      CREATE OR REPLACE FUNCTION update_message_templates_updated_at()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        NEW.updated_at = CURRENT_TIMESTAMP;
+        RETURN NEW;
+      END;
+      $$ language 'plpgsql';
+      
+      CREATE TRIGGER trigger_message_templates_updated_at 
+        BEFORE UPDATE ON message_templates 
+        FOR EACH ROW 
+        EXECUTE FUNCTION update_message_templates_updated_at();
+    `);
+    
+    console.log('✅ [Migration 005] message_templates table created successfully');
+  } catch (error) {
+    console.error('❌ [Migration 005] Failed:', error);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 // ============================================
 // STORE FUNCTIONS
 // ============================================
@@ -778,8 +863,8 @@ async function saveConversation(data) {
     status = 'open',
     priority = 'normal',
     tags = [],
-    cart_subtotal = 0,      // ADD THIS
-    source = 'website'      // ADD THIS
+    cart_subtotal = 0,
+    source = 'website'
   } = data;
   
   try {
@@ -793,7 +878,7 @@ async function saveConversation(data) {
       RETURNING *
     `, [
       store_id, store_identifier, customer_email, customer_name, customer_id,
-      customer_phone, status, priority, tags, cart_subtotal, source  // ADD THESE
+      customer_phone, status, priority, tags, cart_subtotal, source
     ]);
     
     return result.rows[0];
@@ -1000,18 +1085,23 @@ async function assignConversation(conversationId, employeeEmail) {
     throw error;
   }
 }
-// ============================================
-// CONVERSATION FUNCTIONS
-// ============================================
 
+/**
+ * Mark conversation as read
+ */
 async function markConversationRead(conversationId) {
-  await pool.query(`
-    UPDATE conversations
-    SET unread_count = 0,
-        last_read_at = NOW(),
-        updated_at = NOW()
-    WHERE id = $1
-  `, [conversationId]);
+  try {
+    await pool.query(`
+      UPDATE conversations
+      SET unread_count = 0,
+          last_read_at = NOW(),
+          updated_at = NOW()
+      WHERE id = $1
+    `, [conversationId]);
+  } catch (error) {
+    console.error('Error marking conversation read:', error);
+    throw error;
+  }
 }
 
 // ============================================
@@ -1068,8 +1158,8 @@ async function saveMessage(data) {
       'total_message_count = total_message_count + 1',
       'last_message_at = NOW()',
       'updated_at = NOW()',
-      'last_message = $2',  // ✅ NEW: Track last message content
-      'last_message_sender_type = $3'  // ✅ NEW: Track who sent last message
+      'last_message = $2',
+      'last_message_sender_type = $3'
     ];
     
     console.log('🔍 [saveMessage] Sender type:', sender_type);
@@ -1103,7 +1193,6 @@ async function saveMessage(data) {
     
     console.log('🔍 [saveMessage] Update SQL will include:', updateFields);
     
-    // ✅ CHANGED: Now passing content and sender_type as parameters $2 and $3
     await client.query(`
       UPDATE conversations 
       SET ${updateFields.join(', ')}
@@ -1439,6 +1528,100 @@ async function createCannedResponse(data) {
 }
 
 // ============================================
+// MESSAGE TEMPLATE FUNCTIONS
+// ============================================
+
+/**
+ * Get all templates for a specific user
+ */
+async function getTemplatesByUserId(userId) {
+  try {
+    const result = await pool.query(
+      `SELECT id, user_id, name, content, created_at, updated_at 
+       FROM message_templates 
+       WHERE user_id = $1 
+       ORDER BY created_at DESC`,
+      [userId]
+    );
+    return result.rows;
+  } catch (error) {
+    console.error('Error fetching templates:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get a single template by ID
+ */
+async function getTemplateById(templateId) {
+  try {
+    const result = await pool.query(
+      `SELECT id, user_id, name, content, created_at, updated_at 
+       FROM message_templates 
+       WHERE id = $1`,
+      [templateId]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error fetching template:', error);
+    throw error;
+  }
+}
+
+/**
+ * Create a new template
+ */
+async function createTemplate({ user_id, name, content }) {
+  try {
+    const result = await pool.query(
+      `INSERT INTO message_templates (user_id, name, content) 
+       VALUES ($1, $2, $3) 
+       RETURNING id, user_id, name, content, created_at, updated_at`,
+      [user_id, name, content]
+    );
+    return result.rows[0];
+  } catch (error) {
+    console.error('Error creating template:', error);
+    throw error;
+  }
+}
+
+/**
+ * Update an existing template
+ */
+async function updateTemplate(templateId, { name, content }) {
+  try {
+    const result = await pool.query(
+      `UPDATE message_templates 
+       SET name = $1, content = $2, updated_at = CURRENT_TIMESTAMP 
+       WHERE id = $3 
+       RETURNING id, user_id, name, content, created_at, updated_at`,
+      [name, content, templateId]
+    );
+    return result.rows[0];
+  } catch (error) {
+    console.error('Error updating template:', error);
+    throw error;
+  }
+}
+
+/**
+ * Delete a template
+ */
+async function deleteTemplate(templateId) {
+  try {
+    await pool.query(
+      'DELETE FROM message_templates WHERE id = $1',
+      [templateId]
+    );
+    return { success: true };
+  } catch (error) {
+    console.error('Error deleting template:', error);
+    throw error;
+  }
+}
+
+// ============================================
 // ANALYTICS FUNCTIONS
 // ============================================
 
@@ -1558,7 +1741,7 @@ module.exports = {
   updateConversation,
   closeConversation,
   assignConversation,
-  markConversationRead, // ✅ add here
+  markConversationRead,
   
   // Message functions
   saveMessage,
@@ -1583,6 +1766,13 @@ module.exports = {
   // Canned responses
   getCannedResponses,
   createCannedResponse,
+  
+  // Message templates
+  getTemplatesByUserId,
+  getTemplateById,
+  createTemplate,
+  updateTemplate,
+  deleteTemplate,
   
   // Analytics
   getDashboardStats,
