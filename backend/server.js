@@ -1482,8 +1482,6 @@
 // module.exports = { app, server };
 
 
-
-
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -1570,7 +1568,7 @@ app.post('/webhooks/:shop/:topic', rawBodyMiddleware, handleWebhook);
 app.use(express.json());
 
 app.use(session({
-  secret: process.env.JWT_SECRET, // ✅ Reuse existing JWT_SECRET
+  secret: process.env.JWT_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -1578,6 +1576,7 @@ app.use(session({
     maxAge: 24 * 60 * 60 * 1000 // 24 hours
   }
 }));
+
 // ============ WIDGET STATIC FILES ============
 
 app.get('/widget-init.js', (req, res) => {
@@ -1590,7 +1589,6 @@ app.get('/widget-init.js', (req, res) => {
     'Access-Control-Allow-Headers': 'Content-Type, Authorization'
   });
   
-  console.log('📦 Serving widget-init.js with CORS headers');
   res.sendFile(__dirname + '/public/widget-init.js');
 });
 
@@ -1604,7 +1602,6 @@ app.get('/widget.html', (req, res) => {
     'Content-Security-Policy': "frame-ancestors *"
   });
   
-  console.log('📦 Serving widget.html for iframe');
   res.sendFile(__dirname + '/public/widget.html');
 });
 
@@ -1684,98 +1681,6 @@ app.get('/health', async (req, res) => {
   }
 });
 
-// ============ DEBUG ENDPOINTS (Remove in Production) ============
-
-app.get('/debug/conversation/:id', async (req, res) => {
-  try {
-    const conversationId = parseInt(req.params.id);
-    
-    console.log('🔍 DEBUG: Fetching conversation:', conversationId);
-    
-    const conversation = await db.getConversation(conversationId);
-    const messages = await db.getMessages(conversationId);
-    
-    res.json({
-      success: true,
-      raw: {
-        conversation,
-        messages
-      },
-      converted: {
-        conversation: snakeToCamel(conversation),
-        messages: messages.map(snakeToCamel)
-      },
-      messageCount: messages.length
-    });
-  } catch (error) {
-    console.error('❌ Debug error:', error);
-    res.status(500).json({ 
-      success: false,
-      error: error.message,
-      stack: error.stack 
-    });
-  }
-});
-
-app.get('/debug/websocket', (req, res) => {
-  try {
-    const stats = getWebSocketStats();
-    res.json({
-      success: true,
-      stats,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-app.get('/debug/check-tables', async (req, res) => {
-  try {
-    const client = await db.pool.connect();
-    
-    try {
-      const tables = await client.query(`
-        SELECT table_name 
-        FROM information_schema.tables 
-        WHERE table_schema = 'public'
-        ORDER BY table_name;
-      `);
-      
-      const constraints = await client.query(`
-        SELECT
-          tc.table_name,
-          tc.constraint_name,
-          tc.constraint_type,
-          ccu.table_name AS foreign_table_name,
-          ccu.column_name AS foreign_column_name
-        FROM information_schema.table_constraints AS tc
-        JOIN information_schema.constraint_column_usage AS ccu
-          ON ccu.constraint_name = tc.constraint_name
-        WHERE tc.constraint_type = 'FOREIGN KEY'
-        ORDER BY tc.table_name;
-      `);
-      
-      res.json({
-        success: true,
-        tables: tables.rows.map(r => r.table_name),
-        foreignKeys: constraints.rows
-      });
-      
-    } finally {
-      client.release();
-    }
-    
-  } catch (error) {
-    res.status(500).json({ 
-      error: error.message 
-    });
-  }
-});
-
 // ============ WIDGET API ENDPOINTS ============
 
 app.get('/api/stores/verify', async (req, res) => {
@@ -1823,8 +1728,6 @@ app.get('/api/widget/settings', async (req, res) => {
       return res.status(404).json({ error: 'Store not found or inactive' });
     }
     
-    console.log(`📦 Widget settings loaded for store: ${storeIdentifier}`);
-    
     res.json({
       storeId: store.id,
       storeIdentifier: store.store_identifier,
@@ -1861,8 +1764,6 @@ app.get('/api/widget/session', async (req, res) => {
 
     const { generateWidgetToken } = require('./auth');
     const token = generateWidgetToken(storeRecord);
-
-    console.log(`🔑 WebSocket token generated for store: ${store}`);
 
     res.json({
       token,
@@ -1975,6 +1876,7 @@ app.use('/shopify', shopifyAppRoutes);
 
 // ============ FILE UPLOAD ROUTES ============
 app.use('/api/files', fileRoutes);
+
 // ============ STORE ENDPOINTS ============
 
 app.get('/api/stores', authenticateToken, async (req, res) => {
@@ -2001,38 +1903,29 @@ app.get('/api/customer-context/:storeId/:email', authenticateToken, async (req, 
   }
 });
 
-// ============ NEW: CUSTOMER & ORDER LOOKUP ENDPOINTS ============
+// ============ CUSTOMER & ORDER LOOKUP ENDPOINTS ============
 
-// Customer Lookup - Get customer information by email
 app.get('/api/customers/lookup', async (req, res) => {
   try {
     const { store: storeIdentifier, email } = req.query;
-    
-    console.log('🔍 [Customer Lookup] Request:', { storeIdentifier, email });
     
     if (!storeIdentifier || !email) {
       return res.status(400).json({ error: 'store and email parameters required' });
     }
     
-    // Get store
     const store = await db.getStoreByIdentifier(storeIdentifier);
     if (!store || !store.is_active) {
       return res.status(404).json({ error: 'Store not found or inactive' });
     }
     
-    // Get customer data from Shopify
     const customerContext = await shopify.getCustomerContext(store, email);
     
     if (!customerContext || !customerContext.customer) {
-      console.log('⚠️ [Customer Lookup] Customer not found');
       return res.status(404).json({ error: 'Customer not found' });
     }
     
     const customer = customerContext.customer;
     
-    console.log('✅ [Customer Lookup] Customer found:', customer.email);
-    
-    // Return customer data
     res.json({
       id: customer.id,
       name: customer.name || `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
@@ -2046,7 +1939,7 @@ app.get('/api/customers/lookup', async (req, res) => {
       note: customer.note
     });
   } catch (error) {
-    console.error('❌ [Customer Lookup] Error:', error);
+    console.error('Customer lookup error:', error);
     res.status(500).json({ 
       error: 'Failed to fetch customer data',
       message: error.message 
@@ -2054,34 +1947,25 @@ app.get('/api/customers/lookup', async (req, res) => {
   }
 });
 
-// Customer Orders - Get customer's order history
 app.get('/api/customers/orders', async (req, res) => {
   try {
     const { store: storeIdentifier, email } = req.query;
-    
-    console.log('🔍 [Customer Orders] Request:', { storeIdentifier, email });
     
     if (!storeIdentifier || !email) {
       return res.status(400).json({ error: 'store and email parameters required' });
     }
     
-    // Get store
     const store = await db.getStoreByIdentifier(storeIdentifier);
     if (!store || !store.is_active) {
       return res.status(404).json({ error: 'Store not found or inactive' });
     }
     
-    // Get customer context (includes orders)
     const customerContext = await shopify.getCustomerContext(store, email);
     
     if (!customerContext || !customerContext.orders) {
-      console.log('⚠️ [Customer Orders] No orders found');
-      return res.json([]); // Return empty array instead of 404
+      return res.json([]);
     }
     
-    console.log('✅ [Customer Orders] Found', customerContext.orders.length, 'orders');
-    
-    // Format orders for the widget
     const formattedOrders = customerContext.orders.map(order => ({
       id: order.id,
       orderNumber: order.order_number || order.name,
@@ -2100,12 +1984,11 @@ app.get('/api/customers/orders', async (req, res) => {
       trackingUrl: order.tracking_url
     }));
     
-    // Sort by date (most recent first)
     formattedOrders.sort((a, b) => new Date(b.orderDate) - new Date(a.orderDate));
     
     res.json(formattedOrders);
   } catch (error) {
-    console.error('❌ [Customer Orders] Error:', error);
+    console.error('Customer orders error:', error);
     res.status(500).json({ 
       error: 'Failed to fetch orders',
       message: error.message 
@@ -2113,7 +1996,6 @@ app.get('/api/customers/orders', async (req, res) => {
   }
 });
 
-// Customer Cart - Get customer's current cart
 app.get('/api/customers/cart', async (req, res) => {
   try {
     const { store: storeIdentifier, email } = req.query;
@@ -2127,7 +2009,6 @@ app.get('/api/customers/cart', async (req, res) => {
       return res.status(404).json({ error: 'Store not found or inactive' });
     }
     
-    // Return empty cart for now (implement Shopify cart API later)
     res.json({
       subtotal: 0,
       items: [],
@@ -2135,15 +2016,13 @@ app.get('/api/customers/cart', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('❌ [Customer Cart] Error:', error);
+    console.error('Customer cart error:', error);
     res.status(500).json({ 
       error: 'Failed to fetch cart',
       message: error.message 
     });
   }
 });
-
-// ============ END OF CUSTOMER & ORDER ENDPOINTS ============
 
 app.post('/api/stores/:storeId/webhooks', authenticateToken, async (req, res) => {
   try {
@@ -2183,23 +2062,16 @@ app.get('/api/conversations', authenticateToken, async (req, res) => {
 
 app.get('/api/conversations/:id', authenticateToken, async (req, res) => {
   try {
-    console.log('📖 Fetching conversation:', req.params.id);
-
     const conversationId = parseInt(req.params.id);
     const conversation = await db.getConversation(conversationId);
 
     if (!conversation) {
-      console.log('❌ Conversation not found:', req.params.id);
       return res.status(404).json({ error: 'Conversation not found' });
     }
 
-    // ✅ mark as read when agent opens conversation
-    // await db.markConversationRead(conversationId);
-
-    console.log('✅ Conversation found:', conversation.id);
     res.json(snakeToCamel(conversation));
   } catch (error) {
-    console.error('❌ Error fetching conversation:', error);
+    console.error('Error fetching conversation:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -2208,19 +2080,14 @@ app.post('/api/conversations', async (req, res) => {
   try {
     const { storeIdentifier, customerEmail, customerName, initialMessage } = req.body;
     
-    console.log('📝 Creating conversation:', { storeIdentifier, customerEmail, customerName });
-    
     if (!storeIdentifier || !customerEmail) {
       return res.status(400).json({ error: 'storeIdentifier and customerEmail required' });
     }
     
     const store = await db.getStoreByIdentifier(storeIdentifier);
     if (!store) {
-      console.log('❌ Store not found:', storeIdentifier);
       return res.status(404).json({ error: 'Store not found' });
     }
-    
-    console.log('✅ Store found:', store.id, store.shop_domain);
     
     const conversation = await db.saveConversation({
       store_id: store.id,
@@ -2231,10 +2098,7 @@ app.post('/api/conversations', async (req, res) => {
       priority: 'normal'
     });
     
-    console.log('✅ Conversation created:', conversation.id);
-    
     if (initialMessage) {
-      console.log('💬 Saving initial message...');
       const message = await db.saveMessage({
         conversation_id: conversation.id,
         store_id: store.id,
@@ -2242,12 +2106,9 @@ app.post('/api/conversations', async (req, res) => {
         sender_name: customerName || customerEmail,
         content: initialMessage
       });
-      console.log('✅ Initial message saved:', message.id);
       
-      // Broadcast initial message via WebSocket
       const camelMessage = snakeToCamel(message);
       
-      console.log('📡 Broadcasting initial message via WebSocket...');
       sendToConversation(conversation.id, {
         type: 'new_message',
         message: camelMessage
@@ -2259,23 +2120,18 @@ app.post('/api/conversations', async (req, res) => {
         conversationId: conversation.id,
         storeId: store.id
       });
-      console.log('✅ Initial message broadcast complete');
     }
     
-    // Broadcast new conversation to agents
-    console.log('📡 Broadcasting new conversation to agents...');
     broadcastToAgents({
       type: 'new_conversation',
       conversation: snakeToCamel(conversation),
       storeId: store.id,
       storeIdentifier
     });
-    console.log('✅ Conversation broadcast complete');
     
     res.json(snakeToCamel(conversation));
   } catch (error) {
-    console.error('❌ Create conversation error:', error);
-    console.error('Error stack:', error.stack);
+    console.error('Create conversation error:', error);
     res.status(500).json({ 
       error: error.message,
       details: process.env.NODE_ENV === 'development' ? error.stack : undefined
@@ -2292,16 +2148,12 @@ app.put('/api/conversations/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// ✅ NEW endpoint: mark read manually
 app.put('/api/conversations/:id/read', authenticateToken, async (req, res) => {
   try {
     const conversationId = parseInt(req.params.id);
     
-    // ✅ Mark as read
     await db.markConversationRead(conversationId);
-    console.log('✅ Manually marked conversation as read');
     
-    // ✅ Broadcast to all agents
     const updatedConversation = await db.getConversation(conversationId);
     broadcastToAgents({
       type: 'conversation_read',
@@ -2311,11 +2163,10 @@ app.put('/api/conversations/:id/read', authenticateToken, async (req, res) => {
     
     res.json({ success: true });
   } catch (error) {
-    console.error('❌ Error marking conversation as read:', error);
+    console.error('Error marking conversation as read:', error);
     res.status(500).json({ error: error.message });
   }
 });
-
 
 app.put('/api/conversations/:id/close', authenticateToken, async (req, res) => {
   try {
@@ -2330,16 +2181,11 @@ app.put('/api/conversations/:id/close', authenticateToken, async (req, res) => {
 
 app.get('/api/conversations/:id/messages', authenticateToken, async (req, res) => {
   try {
-    console.log('📖 Fetching messages for conversation:', req.params.id);
-
     const conversationId = parseInt(req.params.id);
     const messages = await db.getMessages(conversationId);
 
-    // ✅ UNCOMMENT THIS - Mark as read when agent loads messages
     await db.markConversationRead(conversationId);
-    console.log('✅ Conversation marked as read');
     
-    // ✅ Broadcast updated conversation to all agents
     const updatedConversation = await db.getConversation(conversationId);
     broadcastToAgents({
       type: 'conversation_read',
@@ -2347,21 +2193,16 @@ app.get('/api/conversations/:id/messages', authenticateToken, async (req, res) =
       conversation: snakeToCamel(updatedConversation)
     });
 
-    console.log(`✅ Found ${messages.length} messages`);
     res.json(messages.map(snakeToCamel));
   } catch (error) {
-    console.error('❌ Error fetching messages:', error);
+    console.error('Error fetching messages:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-
-// Agent sends message (optimized)
 app.post('/api/messages', authenticateToken, async (req, res) => {
   try {
     const { conversationId, senderType, senderName, content, storeId, fileData } = req.body;
-    
-    console.log('⚡ INSTANT MESSAGE - Broadcasting immediately');
     
     if (!conversationId || !senderType) {
       return res.status(400).json({ error: 'Missing required fields' });
@@ -2371,7 +2212,6 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Message must have text or a file attachment' });
     }
     
-    // Create temporary message
     const timestamp = new Date();
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     
@@ -2387,9 +2227,6 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
       pending: true
     };
     
-    // 🔥 BROADCAST IMMEDIATELY
-    console.log('📡 Broadcasting agent message INSTANTLY...');
-    
     sendToConversation(conversationId, {
       type: 'new_message',
       message: snakeToCamel(tempMessage)
@@ -2402,12 +2239,8 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
       storeId
     });
     
-    console.log('✅ Agent message broadcast INSTANTLY');
-    
-    // Return immediately
     res.json(snakeToCamel(tempMessage));
     
-    // Save to database in background
     setImmediate(async () => {
       try {
         const savedMessage = await db.saveMessage({
@@ -2420,9 +2253,6 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
           sent_at: timestamp
         });
         
-        console.log('✅ Agent message saved:', savedMessage.id);
-        
-        // Send confirmation
         sendToConversation(conversationId, {
           type: 'message_confirmed',
           tempId: tempId,
@@ -2438,7 +2268,7 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
         });
         
       } catch (error) {
-        console.error('❌ Failed to save agent message:', error);
+        console.error('Failed to save agent message:', error);
         
         sendToConversation(conversationId, {
           type: 'message_failed',
@@ -2448,54 +2278,37 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
     });
     
   } catch (error) {
-    console.error('❌ Send message error:', error);
+    console.error('Send message error:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// ============================================
-// UPDATED: Widget Messages Endpoint
-// Replace your existing app.post('/api/widget/messages')
-// with this complete version
-// ============================================
-
 app.post('/api/widget/messages', async (req, res) => {
   try {
-    // ✅ ADD fileData to destructuring
     const { conversationId, customerEmail, customerName, content, storeIdentifier, fileData } = req.body;
     
-    console.log('📨 Widget message received:', { conversationId, customerEmail });
-    
-    // ✅ UPDATED VALIDATION - Don't require content
     if (!conversationId) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
     
-    // ✅ Require either content OR fileData
     if (!content && !fileData) {
       return res.status(400).json({ error: 'Message must have text or a file attachment' });
     }
     
-    // Get store
     const store = await db.getStoreByIdentifier(storeIdentifier);
     if (!store) {
       return res.status(404).json({ error: 'Store not found' });
     }
     
-    // Check if conversation exists
     const conversation = await db.getConversation(conversationId);
     
     if (!conversation) {
-      console.log(`❌ Conversation ${conversationId} not found (database cleared?)`);
       return res.status(404).json({ 
         error: 'conversation_not_found',
         message: 'This conversation no longer exists'
       });
     }
     
-    console.log('✅ Conversation exists, proceeding...');
-    
-    // Create temporary message
     const timestamp = new Date();
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     
@@ -2505,71 +2318,50 @@ app.post('/api/widget/messages', async (req, res) => {
       storeId: store.id,
       senderType: 'customer',
       senderName: customerName || customerEmail,
-      content: content || '', // ✅ Default to empty string
-      fileData: fileData, // ✅ ADD fileData
+      content: content || '',
+      fileData: fileData,
       createdAt: timestamp,
       pending: true
     };
-    
-    // Broadcast immediately
-    console.log('📡 Broadcasting message INSTANTLY...');
     
     sendToConversation(conversationId, {
       type: 'new_message',
       message: snakeToCamel(tempMessage)
     });
     
-    // ✅ CRITICAL FIX: Don't broadcast to agents yet - wait for save
-    
-    console.log('✅ Message broadcast to customer');
-    
-    // Return immediate response
     res.json(snakeToCamel(tempMessage));
     
-    // Save to database in background
     setImmediate(async () => {
       try {
-        // ✅ Save message (this increments unread_count via saveMessage)
         const savedMessage = await db.saveMessage({
           conversation_id: conversationId,
           store_id: store.id,
           sender_type: 'customer',
           sender_name: customerName || customerEmail,
-          content: content || '', // ✅ Default to empty string
-          file_data: fileData ? JSON.stringify(fileData) : null // ✅ ADD file_data
+          content: content || '',
+          file_data: fileData ? JSON.stringify(fileData) : null
         });
         
-        console.log('✅ Message saved to database:', savedMessage.id);
-        
-        // ✅ GET UPDATED CONVERSATION (with incremented unread_count)
         const updatedConversation = await db.getConversation(conversationId);
-        console.log('📊 Updated conversation state:', {
-          id: updatedConversation.id,
-          unread_count: updatedConversation.unread_count
-        });
         
         const confirmedMessage = snakeToCamel(savedMessage);
         
-        // Send confirmation to customer
         sendToConversation(conversationId, {
           type: 'message_confirmed',
           tempId: tempId,
           message: confirmedMessage
         });
         
-        // ✅ CRITICAL FIX: Broadcast to agents WITH updated conversation
         broadcastToAgents({
           type: 'new_message',
           message: confirmedMessage,
           conversationId,
           storeId: store.id,
-          conversation: snakeToCamel(updatedConversation) // ✅ THIS IS CRITICAL!
+          conversation: snakeToCamel(updatedConversation)
         });
         
-        console.log('✅ Broadcast to agents with unread_count:', updatedConversation.unread_count);
-        
       } catch (error) {
-        console.error('❌ Failed to save message:', error);
+        console.error('Failed to save message:', error);
         
         sendToConversation(conversationId, {
           type: 'message_failed',
@@ -2580,37 +2372,14 @@ app.post('/api/widget/messages', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('❌ Widget message error:', error);
+    console.error('Widget message error:', error);
     res.status(500).json({ 
       error: 'Failed to send message',
       message: error.message 
     });
   }
 });
-// ✅ ADD THIS DEBUG ENDPOINT HERE:
-app.get('/debug/conversation-state/:id', async (req, res) => {
-  try {
-    const conversationId = parseInt(req.params.id);
-    
-    // Raw database query
-    const result = await db.pool.query(
-      'SELECT id, customer_name, customer_email, unread_count, last_read_at, updated_at FROM conversations WHERE id = $1',
-      [conversationId]
-    );
-    
-    const dbRow = result.rows[0];
-    const conversationObj = await db.getConversation(conversationId);
-    
-    res.json({
-      success: true,
-      database_raw: dbRow,
-      database_function: conversationObj,
-      database_camelCase: snakeToCamel(conversationObj)
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+
 // ============ EMPLOYEE ENDPOINTS ============
 
 app.get('/api/employees', authenticateToken, async (req, res) => {
@@ -2729,20 +2498,12 @@ app.put('/api/employees/:id/status', authenticateToken, async (req, res) => {
   }
 });
 
-
 // ============ TEMPLATE ENDPOINTS ============
-// Add these endpoints after your EMPLOYEE ENDPOINTS section in server.js
 
 app.get('/api/templates', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    
-    console.log('📋 Fetching templates for user:', userId);
-    
     const templates = await db.getTemplatesByUserId(userId);
-    
-    console.log(`✅ Found ${templates.length} templates`);
-    
     res.json(templates.map(snakeToCamel));
   } catch (error) {
     console.error('Get templates error:', error);
@@ -2755,9 +2516,6 @@ app.post('/api/templates', authenticateToken, async (req, res) => {
     const userId = req.user.id;
     const { name, content } = req.body;
     
-    console.log('📝 Creating template:', { userId, name });
-    
-    // Validation
     if (!name || !content) {
       return res.status(400).json({ error: 'Name and content are required' });
     }
@@ -2772,8 +2530,6 @@ app.post('/api/templates', authenticateToken, async (req, res) => {
       content: content.trim()
     });
     
-    console.log('✅ Template created:', template.id);
-    
     res.status(201).json(snakeToCamel(template));
   } catch (error) {
     console.error('Create template error:', error);
@@ -2787,9 +2543,6 @@ app.put('/api/templates/:id', authenticateToken, async (req, res) => {
     const templateId = parseInt(req.params.id);
     const { name, content } = req.body;
     
-    console.log('✏️ Updating template:', { templateId, userId });
-    
-    // Validation
     if (!name || !content) {
       return res.status(400).json({ error: 'Name and content are required' });
     }
@@ -2798,7 +2551,6 @@ app.put('/api/templates/:id', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Template name is too long (max 255 characters)' });
     }
     
-    // Check if template exists and belongs to user
     const existingTemplate = await db.getTemplateById(templateId);
     
     if (!existingTemplate) {
@@ -2814,8 +2566,6 @@ app.put('/api/templates/:id', authenticateToken, async (req, res) => {
       content: content.trim()
     });
     
-    console.log('✅ Template updated:', template.id);
-    
     res.json(snakeToCamel(template));
   } catch (error) {
     console.error('Update template error:', error);
@@ -2828,9 +2578,6 @@ app.delete('/api/templates/:id', authenticateToken, async (req, res) => {
     const userId = req.user.id;
     const templateId = parseInt(req.params.id);
     
-    console.log('🗑️ Deleting template:', { templateId, userId });
-    
-    // Check if template exists and belongs to user
     const existingTemplate = await db.getTemplateById(templateId);
     
     if (!existingTemplate) {
@@ -2843,14 +2590,13 @@ app.delete('/api/templates/:id', authenticateToken, async (req, res) => {
     
     await db.deleteTemplate(templateId);
     
-    console.log('✅ Template deleted:', templateId);
-    
     res.json({ success: true, message: 'Template deleted successfully' });
   } catch (error) {
     console.error('Delete template error:', error);
     res.status(500).json({ error: 'Failed to delete template' });
   }
 });
+
 // ============ STATS ENDPOINTS ============
 
 app.get('/api/stats/dashboard', authenticateToken, async (req, res) => {
@@ -2874,14 +2620,10 @@ app.get('/api/stats/websocket', authenticateToken, (req, res) => {
 // ============ ERROR HANDLER ============
 
 app.use((err, req, res, next) => {
-  console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.error('❌ SERVER ERROR:', err);
-  console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.error('Error message:', err.message);
-  console.error('Error stack:', err.stack);
-  console.error('Request URL:', req.url);
-  console.error('Request method:', req.method);
-  console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.error('SERVER ERROR:', err.message);
+  console.error('Stack:', err.stack);
+  console.error('URL:', req.url);
+  console.error('Method:', req.method);
   
   res.status(500).json({ 
     error: 'Internal server error',
@@ -2934,109 +2676,6 @@ function setupKeepAlive() {
   }, 60 * 1000);
 }
 
-// Add this to server.js after your other routes
-app.get('/api/debug/bunny-config', authenticateToken, (req, res) => {
-  res.json({
-    configured: {
-      BUNNY_STORAGE_ZONE: !!process.env.BUNNY_STORAGE_ZONE,
-      BUNNY_ACCESS_KEY: !!process.env.BUNNY_ACCESS_KEY,
-      BUNNY_STORAGE_HOSTNAME: !!process.env.BUNNY_STORAGE_HOSTNAME,
-      BUNNY_CDN_URL: !!process.env.BUNNY_CDN_URL,
-    },
-    values: {
-      BUNNY_STORAGE_ZONE: process.env.BUNNY_STORAGE_ZONE || 'NOT SET',
-      BUNNY_STORAGE_HOSTNAME: process.env.BUNNY_STORAGE_HOSTNAME || 'NOT SET',
-      BUNNY_CDN_URL: process.env.BUNNY_CDN_URL || 'NOT SET',
-      BUNNY_ACCESS_KEY: process.env.BUNNY_ACCESS_KEY ? '***' + process.env.BUNNY_ACCESS_KEY.slice(-4) : 'NOT SET',
-    }
-  });
-});
-
-// Add this after your other debug endpoints
-app.get('/debug/messages/:conversationId', async (req, res) => {
-  try {
-    const conversationId = parseInt(req.params.conversationId);
-    
-    const result = await db.pool.query(
-      `SELECT 
-        id, 
-        conversation_id, 
-        sender_type, 
-        content, 
-        file_data,
-        timestamp 
-      FROM messages 
-      WHERE conversation_id = $1 
-      ORDER BY timestamp DESC 
-      LIMIT 10`,
-      [conversationId]
-    );
-    
-    res.json({
-      success: true,
-      conversationId,
-      messageCount: result.rows.length,
-      messages: result.rows.map(msg => ({
-        id: msg.id,
-        content: msg.content?.substring(0, 50),
-        hasFileData: !!msg.file_data,
-        fileDataType: typeof msg.file_data,
-        fileData: msg.file_data,
-        timestamp: msg.timestamp
-      }))
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.get('/debug/check-file-column', async (req, res) => {
-  try {
-    const result = await db.pool.query(`
-      SELECT 
-        column_name,
-        data_type,
-        is_nullable
-      FROM information_schema.columns 
-      WHERE table_name = 'messages'
-      ORDER BY ordinal_position
-    `);
-    
-    const hasFileData = result.rows.some(r => r.column_name === 'file_data');
-    
-    res.json({
-      success: true,
-      hasFileDataColumn: hasFileData,
-      allColumns: result.rows.map(r => ({
-        name: r.column_name,
-        type: r.data_type
-      }))
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Add this to server.js
-app.get('/debug/bunny-test-url', async (req, res) => {
-  try {
-    const testFileName = 'test-image.jpg';
-    const testPath = `uploads/${testFileName}`;
-    const cdnUrl = `${process.env.BUNNY_CDN_URL}/${testPath}`;
-    
-    res.json({
-      bunnyConfigured: {
-        BUNNY_CDN_URL: !!process.env.BUNNY_CDN_URL,
-        BUNNY_STORAGE_ZONE: !!process.env.BUNNY_STORAGE_ZONE,
-        BUNNY_ACCESS_KEY: !!process.env.BUNNY_ACCESS_KEY,
-      },
-      exampleCdnUrl: cdnUrl,
-      instructions: 'Try uploading a file and check if its URL matches this pattern'
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
 // ============ START SERVER ============
 
 const PORT = process.env.PORT || 3000;
@@ -3047,22 +2686,18 @@ async function startServer() {
     console.log('🔄 Initializing Multi-Store Chat Server...');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
     
-    // Step 1: Test database connection
     console.log('📡 Testing database connection...');
     await db.testConnection();
     console.log('✅ Database connection successful\n');
     
-    // Step 2: Initialize database tables (only if they don't exist)
     console.log('🗄️  Initializing database tables...');
     await db.initDatabase();
     console.log('✅ Database tables initialized\n');
     
-    // Step 3: Run database migrations (always runs, checks each migration)
     console.log('🔄 Running database migrations...');
     await db.runMigrations();
     console.log('✅ Database migrations completed\n');
     
-    // Step 4: Start the server
     server.listen(PORT, () => {
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       console.log('🚀 MULTI-STORE CHAT SERVER READY');
