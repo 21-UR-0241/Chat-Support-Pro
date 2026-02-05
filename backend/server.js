@@ -2951,6 +2951,92 @@ app.get('/api/debug/bunny-config', authenticateToken, (req, res) => {
     }
   });
 });
+
+// Add this after your other debug endpoints
+app.get('/debug/messages/:conversationId', async (req, res) => {
+  try {
+    const conversationId = parseInt(req.params.conversationId);
+    
+    const result = await db.pool.query(
+      `SELECT 
+        id, 
+        conversation_id, 
+        sender_type, 
+        content, 
+        file_data,
+        timestamp 
+      FROM messages 
+      WHERE conversation_id = $1 
+      ORDER BY timestamp DESC 
+      LIMIT 10`,
+      [conversationId]
+    );
+    
+    res.json({
+      success: true,
+      conversationId,
+      messageCount: result.rows.length,
+      messages: result.rows.map(msg => ({
+        id: msg.id,
+        content: msg.content?.substring(0, 50),
+        hasFileData: !!msg.file_data,
+        fileDataType: typeof msg.file_data,
+        fileData: msg.file_data,
+        timestamp: msg.timestamp
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/debug/check-file-column', async (req, res) => {
+  try {
+    const result = await db.pool.query(`
+      SELECT 
+        column_name,
+        data_type,
+        is_nullable
+      FROM information_schema.columns 
+      WHERE table_name = 'messages'
+      ORDER BY ordinal_position
+    `);
+    
+    const hasFileData = result.rows.some(r => r.column_name === 'file_data');
+    
+    res.json({
+      success: true,
+      hasFileDataColumn: hasFileData,
+      allColumns: result.rows.map(r => ({
+        name: r.column_name,
+        type: r.data_type
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Add this to server.js
+app.get('/debug/bunny-test-url', async (req, res) => {
+  try {
+    const testFileName = 'test-image.jpg';
+    const testPath = `uploads/${testFileName}`;
+    const cdnUrl = `${process.env.BUNNY_CDN_URL}/${testPath}`;
+    
+    res.json({
+      bunnyConfigured: {
+        BUNNY_CDN_URL: !!process.env.BUNNY_CDN_URL,
+        BUNNY_STORAGE_ZONE: !!process.env.BUNNY_STORAGE_ZONE,
+        BUNNY_ACCESS_KEY: !!process.env.BUNNY_ACCESS_KEY,
+      },
+      exampleCdnUrl: cdnUrl,
+      instructions: 'Try uploading a file and check if its URL matches this pattern'
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 // ============ START SERVER ============
 
 const PORT = process.env.PORT || 3000;
