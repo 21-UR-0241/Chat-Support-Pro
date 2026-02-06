@@ -639,9 +639,7 @@
 
 // export default App;
 
-
-
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import api from './services/api';
 import { useConversations } from './hooks/useConversations';
 import { useWebSocket } from './hooks/useWebSocket';
@@ -733,6 +731,9 @@ function DashboardContent({ employee, onLogout }) {
   // ✅ Track active notifications by conversation ID
   const activeNotificationsRef = useRef(new Map());
 
+  // ✅ Debounce ref to prevent duplicate mark-as-read API calls
+  const markAsReadTimerRef = useRef(new Map());
+
   const {
     conversations,
     loading: conversationsLoading,
@@ -741,15 +742,8 @@ function DashboardContent({ employee, onLogout }) {
     refresh: refreshConversations,
     updateConversation,
     optimisticUpdate,
+    setActiveConversationId, // ✅ NEW from useConversations
   } = useConversations(employee.id);
-
-  useEffect(() => {
-    if (conversations && conversations.length > 0) {
-      console.log('🔥 CONVERSATIONS DEBUG:', conversations);
-      console.log('🔥 FIRST CONVERSATION:', conversations[0]);
-      console.log('🔥 KEYS:', Object.keys(conversations[0]));
-    }
-  }, [conversations]);
 
   const ws = useWebSocket(employee.id);
 
@@ -759,7 +753,58 @@ function DashboardContent({ employee, onLogout }) {
     requestNotificationPermission();
   }, []);
 
-  // ✅ WebSocket event listeners with smart notification handling
+  // ─────────────────────────────────────────────────
+  // ✅ Mark conversation as read (local + backend)
+  // Uses api.markConversationRead() which has correct base URL and auth
+  // ─────────────────────────────────────────────────
+  const handleMarkAsRead = useCallback((conversationId) => {
+    console.log('👁️ [App] Marking conversation as read:', conversationId);
+
+    // 1. Instantly update local state so UI clears badges immediately
+    updateConversation(conversationId, {
+      unreadCount: 0,
+      unread_count: 0,
+      unread: 0,
+    });
+
+    // 2. Debounce the API call to avoid spamming if messages arrive rapidly
+    if (markAsReadTimerRef.current.has(conversationId)) {
+      clearTimeout(markAsReadTimerRef.current.get(conversationId));
+    }
+
+    markAsReadTimerRef.current.set(
+      conversationId,
+      setTimeout(async () => {
+        try {
+          // ✅ Uses the existing api service method with correct URL + auth
+          await api.markConversationRead(conversationId);
+          console.log('✅ [App] Server confirmed conversation read:', conversationId);
+        } catch (error) {
+          console.error('❌ [App] Failed to mark conversation as read:', error);
+        }
+        markAsReadTimerRef.current.delete(conversationId);
+      }, 300)
+    );
+  }, [updateConversation]);
+
+  // ─────────────────────────────────────────────────
+  // ✅ Select conversation + mark as read
+  // ─────────────────────────────────────────────────
+  const handleSelectConversation = useCallback((conversation) => {
+    setActiveConversation(conversation);
+
+    // ✅ Tell useConversations which conversation is active
+    // so it won't overwrite unreadCount=0 from WebSocket updates
+    setActiveConversationId(conversation.id);
+
+    // Mark as read when selecting
+    const unreadCount = conversation.unreadCount || conversation.unread_count || conversation.unread || 0;
+    if (unreadCount > 0) {
+      handleMarkAsRead(conversation.id);
+    }
+  }, [handleMarkAsRead, setActiveConversationId]);
+
+  // ✅ WebSocket event listeners
   useEffect(() => {
     if (!ws) return;
 
@@ -779,10 +824,10 @@ function DashboardContent({ employee, onLogout }) {
       if (senderType === 'agent') {
         console.log('🔕 [App] Agent message - clearing notifications for conversation:', conversationId);
         clearNotificationsForConversation(conversationId);
-        return; // Don't show notification for agent messages
+        return;
       }
 
-      // ✅ Only show notification for CUSTOMER messages AND not viewing that conversation
+      // ✅ Customer message on a conversation the admin is NOT viewing
       if (senderType === 'customer' && activeConversation?.id !== conversationId) {
         const conv = data.conversation || {};
         const customerName = conv.customerName || conv.customer_name || 'Guest';
@@ -790,8 +835,11 @@ function DashboardContent({ employee, onLogout }) {
         
         console.log('🔔 [App] Showing notification for customer message');
         showNotification(conversationId, customerName, messagePreview);
-      } else if (senderType === 'customer' && activeConversation?.id === conversationId) {
-        console.log('⏭️ [App] Customer message in active conversation - no notification needed');
+      } 
+      // ✅ Customer message on the conversation the admin IS viewing → auto mark read
+      else if (senderType === 'customer' && activeConversation?.id === conversationId) {
+        console.log('⏭️ [App] Customer message in active conversation - auto marking read');
+        handleMarkAsRead(conversationId);
       }
     });
 
@@ -820,7 +868,7 @@ function DashboardContent({ employee, onLogout }) {
       unsubscribe4();
       unsubscribe5();
     };
-  }, [ws, activeConversation]);
+  }, [ws, activeConversation, handleMarkAsRead]);
 
   useEffect(() => {
     if (activeConversation && ws) {
@@ -834,6 +882,13 @@ function DashboardContent({ employee, onLogout }) {
       };
     }
   }, [activeConversation, ws]);
+
+  // ✅ When admin closes a conversation (goes back to list), clear the active ID
+  useEffect(() => {
+    if (!activeConversation) {
+      setActiveConversationId(null);
+    }
+  }, [activeConversation, setActiveConversationId]);
 
   useEffect(() => {
     if (activeConversation) {
@@ -868,66 +923,67 @@ function DashboardContent({ employee, onLogout }) {
     }
   };
 
-const handleSendMessage = async (conversation, message, fileData) => { // ✅ Add fileData parameter
-  console.log('📤 handleSendMessage called with:', {
-    conversationId: conversation.id,
-    message,
-    fileData // ✅ Log fileData
-  });
-
-  try {
-    const storeId = conversation.shopId || conversation.shop_id || conversation.storeId || null;
-    
-    console.log('🏪 Store ID:', storeId);
-    
-    if (!storeId) {
-      console.error('❌ No store ID found in conversation:', conversation);
-      throw new Error('Store ID is missing from conversation');
-    }
-
-    // ✅ Clear notifications when agent sends a message
-    clearNotificationsForConversation(conversation.id);
-
-    // ✅ Optimistically update the conversation list
-    optimisticUpdate(conversation.id, message);
-
-    const messageData = {
+  const handleSendMessage = async (conversation, message, fileData) => {
+    console.log('📤 handleSendMessage called with:', {
       conversationId: conversation.id,
-      storeId: storeId,
-      senderType: 'agent',
-      senderName: employee.name,
-      content: message || '', // ✅ Default to empty string
-      fileData: fileData || null, // ✅ Include fileData
-    };
-
-    console.log('📨 Sending message with data:', messageData);
-
-    const sentMessage = await api.sendMessage(messageData);
-    
-    console.log('✅ Message sent successfully:', sentMessage);
-
-    // ✅ Update with actual server response (if different from optimistic)
-    if (sentMessage.createdAt) {
-      updateConversation(conversation.id, {
-        lastMessageAt: sentMessage.createdAt,
-      });
-    }
-
-    return sentMessage;
-  } catch (error) {
-    console.error('❌ Failed to send message:', error);
-    console.error('Error details:', {
-      message: error.message,
-      response: error.response,
-      stack: error.stack
+      message,
+      fileData
     });
-    
-    // ✅ On error, refresh to get correct state
-    refreshConversations();
-    
-    throw error;
-  }
-};
+
+    try {
+      const storeId = conversation.shopId || conversation.shop_id || conversation.storeId || null;
+      
+      console.log('🏪 Store ID:', storeId);
+      
+      if (!storeId) {
+        console.error('❌ No store ID found in conversation:', conversation);
+        throw new Error('Store ID is missing from conversation');
+      }
+
+      // ✅ Clear notifications when agent sends a message
+      clearNotificationsForConversation(conversation.id);
+
+      // ✅ Mark as read when agent replies
+      handleMarkAsRead(conversation.id);
+
+      // ✅ Optimistically update the conversation list
+      optimisticUpdate(conversation.id, message);
+
+      const messageData = {
+        conversationId: conversation.id,
+        storeId: storeId,
+        senderType: 'agent',
+        senderName: employee.name,
+        content: message || '',
+        fileData: fileData || null,
+      };
+
+      console.log('📨 Sending message with data:', messageData);
+
+      const sentMessage = await api.sendMessage(messageData);
+      
+      console.log('✅ Message sent successfully:', sentMessage);
+
+      if (sentMessage.createdAt) {
+        updateConversation(conversation.id, {
+          lastMessageAt: sentMessage.createdAt,
+        });
+      }
+
+      return sentMessage;
+    } catch (error) {
+      console.error('❌ Failed to send message:', error);
+      console.error('Error details:', {
+        message: error.message,
+        response: error.response,
+        stack: error.stack
+      });
+      
+      refreshConversations();
+      
+      throw error;
+    }
+  };
 
   const handleTyping = (isTyping) => {
     if (activeConversation && ws) {
@@ -972,7 +1028,7 @@ const handleSendMessage = async (conversation, message, fileData) => { // ✅ Ad
         body: messagePreview,
         icon: '/favicon.ico',
         badge: '/badge-icon.png',
-        tag: `conv-${conversationId}`, // Use conversation ID as tag
+        tag: `conv-${conversationId}`,
         requireInteraction: false,
         silent: false,
       };
@@ -990,7 +1046,7 @@ const handleSendMessage = async (conversation, message, fileData) => { // ✅ Ad
         window.focus();
         const conv = conversations.find(c => c.id === conversationId);
         if (conv) {
-          setActiveConversation(conv);
+          handleSelectConversation(conv);
         }
         notification.close();
         removeNotificationFromTracking(conversationId, notification);
@@ -1246,7 +1302,8 @@ const handleSendMessage = async (conversation, message, fileData) => { // ✅ Ad
             <ConversationList
               conversations={conversations}
               activeConversation={activeConversation}
-              onSelectConversation={setActiveConversation}
+              onSelectConversation={handleSelectConversation}
+              onMarkAsRead={handleMarkAsRead}
               filters={filters}
               onFilterChange={updateFilters}
               stores={stores}
