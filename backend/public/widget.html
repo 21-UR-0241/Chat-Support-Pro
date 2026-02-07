@@ -237,6 +237,23 @@
       cursor: pointer;
     }
 
+    .submit-button:disabled {
+      opacity: 0.7;
+      cursor: not-allowed;
+    }
+
+    .btn-spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255,255,255,0.4);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+
     .privacy-note {
       font-size: 12px;
       color: var(--text-secondary);
@@ -751,7 +768,6 @@
   </div>
 
   <div id="chat-input-container">
-
     <button id="attach-button" title="Attach file" type="button">📎</button>
     <input 
       type="file" 
@@ -1108,15 +1124,15 @@
 
         console.log('✅ [History] Token available, fetching messages...');
         
-        const url = `${API_URL}/api/conversations/${conversationId}/messages?store=${STORE_ID}`;
+        const url = `${API_URL}/api/widget/conversations/${conversationId}/messages?store=${STORE_ID}`;
         console.log('📜 [History] Fetching:', url);
         
-        const response = await fetch(url, {
+        const response = await fetchWithRetry(url, {
           headers: {
             'Authorization': `Bearer ${wsToken}`,
             'Content-Type': 'application/json'
           }
-        });
+        }, 15000, 1);
 
         console.log('📡 [History] Response status:', response.status);
 
@@ -1270,8 +1286,15 @@
       
       console.log('✅ [Email] Saved:', customerEmail);
       
-      await loadCustomerData();
-      await showChatInterface();
+      // Show loading state on button
+      const submitBtn = emailForm.querySelector('.submit-button');
+      const originalText = submitBtn.textContent;
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="btn-spinner"></span> Connecting...';
+      
+      // Show chat interface immediately, load customer data in background
+      showChatInterface();
+      loadCustomerData();
     });
 
     async function loadCustomerData() {
@@ -1314,7 +1337,7 @@
       }
     }
 
-    async function fetchWithTimeout(url, options = {}, timeout = 10000) {
+    async function fetchWithTimeout(url, options = {}, timeout = 15000) {
       const controller = new AbortController();
       const id = setTimeout(() => controller.abort(), timeout);
       
@@ -1334,6 +1357,20 @@
       }
     }
 
+    async function fetchWithRetry(url, options = {}, timeout = 15000, retries = 2) {
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+          // First attempt gets extra time for cold starts
+          const attemptTimeout = attempt === 0 ? timeout + 15000 : timeout;
+          return await fetchWithTimeout(url, options, attemptTimeout);
+        } catch (error) {
+          console.warn(`⚠️ Attempt ${attempt + 1}/${retries + 1} failed:`, error.message);
+          if (attempt === retries) throw error;
+          await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+        }
+      }
+    }
+
     async function ensureFreshToken(forceRefresh = false) {
       const now = Date.now();
       
@@ -1344,10 +1381,11 @@
       
       try {
         console.log('🔄 Refreshing token...');
-        const response = await fetchWithTimeout(
+        const response = await fetchWithRetry(
           `${API_URL}/api/widget/session?store=${STORE_ID}${conversationId ? `&conversationId=${conversationId}` : ''}`,
           {},
-          5000
+          10000,
+          1
         );
         
         if (response.ok) {
@@ -1372,7 +1410,7 @@
         const response = await fetchWithTimeout(
           `${API_URL}/api/customers/lookup?store=${STORE_ID}&email=${encodeURIComponent(email)}`,
           {},
-          5000
+          12000
         );
         
         if (response.ok) {
@@ -1393,7 +1431,7 @@
         const response = await fetchWithTimeout(
           `${API_URL}/api/customers/orders?store=${STORE_ID}&email=${encodeURIComponent(email)}`,
           {},
-          5000
+          12000
         );
         
         if (response.ok) {
@@ -1421,7 +1459,7 @@
         const response = await fetchWithTimeout(
           `${API_URL}/api/customers/cart?store=${STORE_ID}&email=${encodeURIComponent(email)}`,
           {},
-          5000
+          12000
         );
         
         if (response.ok) {
@@ -1484,7 +1522,7 @@
 
     async function loadSettings() {
       try {
-        const response = await fetchWithTimeout(`${API_URL}/api/widget/settings?store=${STORE_ID}`, {}, 8000);
+        const response = await fetchWithRetry(`${API_URL}/api/widget/settings?store=${STORE_ID}`, {}, 15000, 2);
         
         if (response.ok) {
           storeSettings = await response.json();
@@ -1814,7 +1852,7 @@
         if (!conversationId) {
           await ensureFreshToken(true);
           
-          const response = await fetchWithTimeout(`${API_URL}/api/conversations`, {
+          const response = await fetchWithRetry(`${API_URL}/api/conversations`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1829,7 +1867,7 @@
               source: messageSource || 'website',
               fileData: fileData
             })
-          }, 8000);
+          }, 15000, 2);
 
           if (!response.ok) {
             throw new Error('Failed to create conversation');
@@ -1841,8 +1879,6 @@
           localStorage.setItem(`chat_conv_${STORE_ID}`, conversationId);
           
           updateMessageStatus(tempId, 'confirmed', { id: tempId });
-          
-          await ensureFreshToken(true);
           
           if (wsToken && !ws) {
             connectWebSocket().catch(err => console.warn('WS failed:', err));
@@ -1861,7 +1897,7 @@
         } else {
           await ensureFreshToken(false);
           
-          const response = await fetchWithTimeout(`${API_URL}/api/widget/messages`, {
+          const response = await fetchWithRetry(`${API_URL}/api/widget/messages`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1877,7 +1913,7 @@
               source: messageSource || 'website',
               fileData: fileData
             })
-          }, 8000);
+          }, 15000, 2);
 
           if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
@@ -1952,7 +1988,7 @@
         updateMessageStatus(tempId, 'failed');
         
         const errorMsg = error.message === 'Request timeout' 
-          ? 'Request timed out. Please try again.'
+          ? 'Connection is slow. Please try sending again.'
           : 'Failed to send. Please try again.';
         
         addMessage('system', errorMsg, 'System');
@@ -2055,13 +2091,12 @@
     init();
   </script>
 </body>
-</html>
+</html> -->
 
 
 
 
 
- -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2076,10 +2111,10 @@
     }
 
     :root {
-      --primary-color: #4a5568;
-      --primary-dark: #2d3748;
-      --primary-light: #718096;
-      --success-color: #10b981;
+      --primary-color: #008060;
+      --primary-dark: #004c3f;
+      --primary-light: #00a47c;
+      --success-color: #008060;
       --bg-color: #f7fafc;
       --text-color: #1a202c;
       --text-secondary: #718096;
@@ -2097,28 +2132,33 @@
     }
 
     #chat-header {
-      background: var(--white);
-      color: var(--text-color);
+      background: var(--primary-color);
+      color: var(--white);
       padding: 16px 20px;
       display: flex;
       align-items: center;
       gap: 12px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-      border-bottom: 1px solid var(--border-color);
+      box-shadow: 0 2px 8px rgba(0,128,96,0.25);
+      border-bottom: none;
       flex-shrink: 0;
     }
 
     #chat-header .avatar {
       width: 40px;
       height: 40px;
-      border-radius: 8px;
-      background: var(--primary-color);
+      border-radius: 50%;
+      background: rgba(255,255,255,0.2);
       color: white;
       display: flex;
       align-items: center;
       justify-content: center;
       font-size: 16px;
       font-weight: 600;
+    }
+
+    #chat-header .avatar svg {
+      width: 22px;
+      height: 22px;
     }
 
     #chat-header .info {
@@ -2129,11 +2169,12 @@
       font-size: 15px;
       font-weight: 600;
       margin-bottom: 2px;
+      color: var(--white);
     }
 
     #chat-header .info p {
       font-size: 12px;
-      color: var(--text-secondary);
+      color: rgba(255,255,255,0.8);
     }
 
     .status-indicator {
@@ -2141,7 +2182,7 @@
       width: 8px;
       height: 8px;
       border-radius: 50%;
-      background: var(--success-color);
+      background: #6fe8b7;
       margin-right: 6px;
       animation: pulse 2s infinite;
     }
@@ -2220,12 +2261,12 @@
       width: 64px;
       height: 64px;
       margin: 0 auto 20px;
-      background: var(--bg-color);
-      border-radius: 12px;
+      background: #e6f5f0;
+      border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
-      border: 2px solid var(--border-color);
+      border: 2px solid #b8e6d4;
     }
 
     #email-collection .icon svg {
@@ -2271,6 +2312,11 @@
       border-radius: 8px;
       font-size: 15px;
       outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .form-group input:focus {
+      border-color: var(--primary-color);
     }
 
     .form-group input.error {
@@ -2298,6 +2344,11 @@
       font-size: 15px;
       font-weight: 600;
       cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .submit-button:hover {
+      background: var(--primary-dark);
     }
 
     .submit-button:disabled {
@@ -2338,12 +2389,12 @@
       width: 48px;
       height: 48px;
       margin: 0 auto 16px;
-      background: var(--bg-color);
-      border-radius: 12px;
+      background: #e6f5f0;
+      border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
-      border: 2px solid var(--border-color);
+      border: 2px solid #b8e6d4;
     }
 
     #welcome-message .welcome-icon svg {
@@ -2391,7 +2442,7 @@
     .message .avatar {
       width: 32px;
       height: 32px;
-      border-radius: 6px;
+      border-radius: 50%;
       background: var(--primary-light);
       color: white;
       display: flex;
@@ -2686,12 +2737,17 @@
       resize: none;
       max-height: 120px;
       font-family: inherit;
+      transition: border-color 0.2s;
+    }
+
+    #chat-input:focus {
+      border-color: var(--primary-color);
     }
 
     #send-button {
       width: 44px;
       height: 44px;
-      border-radius: 8px;
+      border-radius: 50%;
       background: var(--primary-color);
       border: none;
       color: white;
@@ -2761,7 +2817,11 @@
 </head>
 <body>
   <div id="chat-header">
-    <div class="avatar" id="header-avatar">CS</div>
+    <div class="avatar" id="header-avatar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+      </svg>
+    </div>
     <div class="info">
       <h3 id="brand-name">Chat Support</h3>
       <p id="status">
@@ -2812,7 +2872,7 @@
     <div id="welcome-message">
       <div class="welcome-icon">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+          <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
         </svg>
       </div>
       <h2>Welcome!</h2>
@@ -3594,7 +3654,6 @@
           storeSettings = await response.json();
           
           brandName.textContent = storeSettings.brandName || 'Chat Support';
-          headerAvatar.textContent = getInitials(storeSettings.brandName || 'Chat Support');
           
           if (storeSettings.primaryColor) {
             document.documentElement.style.setProperty('--primary-color', storeSettings.primaryColor);
