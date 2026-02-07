@@ -1216,8 +1216,19 @@ function ChatWindow({
   // ============ WEBSOCKET IMPLEMENTATION ============
 
   const getWsUrl = () => {
-    const baseUrl = api.getBaseUrl ? api.getBaseUrl() : (process.env.REACT_APP_API_URL || window.location.origin);
-    return baseUrl.replace(/^http/, 'ws') + '/ws';
+    // api.baseUrl is set from VITE_API_URL in ApiService constructor
+    // In dev it's empty (Vite proxy), in prod it's the full backend URL
+    let baseUrl = api.baseUrl || import.meta.env.VITE_API_URL || '';
+    
+    // If still empty (dev mode), use current origin
+    if (!baseUrl) {
+      baseUrl = window.location.origin;
+    }
+    
+    baseUrl = baseUrl.replace(/\/$/, '');
+    const wsUrl = baseUrl.replace(/^http/, 'ws') + '/ws';
+    console.log('🔌 [WS] URL:', wsUrl);
+    return wsUrl;
   };
 
   const connectWebSocket = () => {
@@ -1419,31 +1430,42 @@ function ChatWindow({
     const msgId = message.id;
     const convId = message.conversationId || message.conversation_id;
 
+    console.log('📨 [WS] Incoming message:', {
+      id: msgId,
+      convId,
+      currentConvId: conversation?.id,
+      senderType: message.senderType,
+      senderName: message.senderName,
+      content: (message.content || '').substring(0, 50)
+    });
+
     // Only handle messages for the current conversation
-    if (convId && convId !== parseInt(conversation?.id)) {
-      // Message is for a different conversation — show notification
+    if (convId && String(convId) !== String(conversation?.id)) {
+      console.log('📨 [WS] Message for different conversation, showing notification');
       showNotification(message);
       return;
     }
 
-    // Skip if already displayed
-    if (msgId && displayedMessageIds.current.has(msgId)) {
+    // Skip if already displayed (by real ID, not temp ID)
+    if (msgId && !String(msgId).startsWith('temp-') && displayedMessageIds.current.has(msgId)) {
+      console.log('📨 [WS] Skipping duplicate message:', msgId);
       return;
     }
 
     // Skip our own agent messages (we already show them optimistically)
     if (message.senderType === 'agent' && message.senderName === employeeName) {
+      console.log('📨 [WS] Skipping own agent message');
       if (msgId) displayedMessageIds.current.add(msgId);
       return;
     }
 
     if (msgId) displayedMessageIds.current.add(msgId);
 
-    console.log('📨 [WS] New message from', message.senderType, ':', (message.content || '').substring(0, 50));
+    console.log('✅ [WS] Adding message to chat from', message.senderType);
 
     setMessages(prev => {
       // Double-check it's not already in the list
-      if (prev.some(m => m.id === msgId)) return prev;
+      if (prev.some(m => m.id === msgId && !String(msgId).startsWith('temp-'))) return prev;
       return [...prev, {
         ...message,
         sending: false,
