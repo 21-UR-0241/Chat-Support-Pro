@@ -25,36 +25,36 @@
         position: fixed;
         bottom: 80px;
         right: 20px;
-        height: 48px;
-        border-radius: 24px;
-        background: #008060;
+        height: 52px;
+        border-radius: 26px;
+        background: #3bbe28;
         border: none;
         cursor: pointer;
-        box-shadow: 0 4px 12px rgba(0, 128, 96, 0.35);
+        box-shadow: 0 4px 14px rgba(59, 190, 40, 0.4);
         display: flex;
         align-items: center;
-        gap: 6px;
-        padding: 0 18px 0 14px;
+        gap: 7px;
+        padding: 0 20px 0 15px;
         z-index: 9999;
         transition: transform 0.2s, box-shadow 0.2s, background 0.2s;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       }
       #chat-widget-button:hover {
         transform: scale(1.03);
-        box-shadow: 0 6px 18px rgba(0, 128, 96, 0.45);
-        background: #006e52;
+        box-shadow: 0 6px 20px rgba(59, 190, 40, 0.5);
+        background: #33a822;
       }
       #chat-widget-button .btn-icon {
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 24px;
-        height: 24px;
+        width: 28px;
+        height: 28px;
       }
       #chat-widget-button .btn-label {
         color: white;
-        font-size: 15px;
-        font-weight: 600;
+        font-size: 16px;
+        font-weight: 700;
         letter-spacing: 0.01em;
         line-height: 1;
       }
@@ -77,15 +77,15 @@
         display: none;
       }
       #chat-widget-button.active {
-        width: 48px;
-        height: 48px;
+        width: 52px;
+        height: 52px;
         padding: 0;
         justify-content: center;
         border-radius: 50%;
       }
       #chat-widget-iframe {
         position: fixed;
-        bottom: 140px;
+        bottom: 144px;
         right: 20px;
         width: 380px;
         height: 560px;
@@ -126,15 +126,15 @@
     <button id="chat-widget-button" aria-label="Chat with us">
       <span class="btn-icon">
         <span class="icon-open">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="white" xmlns="http://www.w3.org/2000/svg">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="white" xmlns="http://www.w3.org/2000/svg">
             <path d="M2 6C2 4.9 2.9 4 4 4H20C21.1 4 22 4.9 22 6V16C22 17.1 21.1 18 20 18H6L2 22V6Z"/>
-            <circle cx="8" cy="11.5" r="1.2" fill="#008060"/>
-            <circle cx="12" cy="11.5" r="1.2" fill="#008060"/>
-            <circle cx="16" cy="11.5" r="1.2" fill="#008060"/>
+            <circle cx="8" cy="11.5" r="1.3" fill="#3bbe28"/>
+            <circle cx="12" cy="11.5" r="1.3" fill="#3bbe28"/>
+            <circle cx="16" cy="11.5" r="1.3" fill="#3bbe28"/>
           </svg>
         </span>
         <span class="icon-close">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <line x1="18" y1="6" x2="6" y2="18"></line>
             <line x1="6" y1="6" x2="18" y2="18"></line>
           </svg>
