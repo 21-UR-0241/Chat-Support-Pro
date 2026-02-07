@@ -23,8 +23,8 @@
     <style>
       #chat-widget-button {
         position: fixed;
-        bottom: 20px;
-        left: 20px;
+        bottom: 80px;
+        right: 20px;
         height: 48px;
         border-radius: 24px;
         background: #008060;
@@ -85,8 +85,8 @@
       }
       #chat-widget-iframe {
         position: fixed;
-        bottom: 80px;
-        left: 20px;
+        bottom: 140px;
+        right: 20px;
         width: 380px;
         height: 560px;
         border: none;
@@ -109,13 +109,13 @@
           width: 100vw;
           height: 100vh;
           bottom: 0;
-          left: 0;
+          right: 0;
           border-radius: 0;
           transform: none;
         }
         #chat-widget-button.active {
           bottom: 16px;
-          left: 16px;
+          right: 16px;
           z-index: 10000;
           background: rgba(0, 0, 0, 0.5);
           box-shadow: none;
