@@ -1,9 +1,10 @@
-<!-- <!DOCTYPE html>
+<!-- 
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chat Widget - Fixed</title>
+  <title>Chat Widget</title>
   <style>
     * {
       margin: 0;
@@ -356,6 +357,62 @@
       white-space: pre-wrap;
     }
 
+    /* FILE ATTACHMENT STYLES */
+    .message .file-attachment {
+      margin-top: 8px;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .message .file-attachment img {
+      max-width: 100%;
+      max-height: 300px;
+      display: block;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+
+    .message .file-attachment img:hover {
+      opacity: 0.9;
+    }
+
+    .message .file-attachment.file-doc {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px;
+      background: rgba(0, 0, 0, 0.05);
+      border-radius: 8px;
+    }
+
+    .message.customer .file-attachment.file-doc {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .message .file-icon {
+      font-size: 24px;
+    }
+
+    .message .file-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .message .file-name {
+      font-size: 13px;
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .message .file-size {
+      font-size: 11px;
+      opacity: 0.7;
+      margin-top: 2px;
+    }
+
     .message .time {
       font-size: 11px;
       color: var(--text-secondary);
@@ -424,6 +481,84 @@
       }
     }
 
+    /* FILE PREVIEW STYLES */
+    #file-preview {
+      display: none;
+      padding: 12px 20px;
+      background: #f5f6f6;
+      border-top: 1px solid var(--border-color);
+      flex-shrink: 0;
+    }
+
+    #file-preview.visible {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    #file-preview .preview-image {
+      width: 60px;
+      height: 60px;
+      border-radius: 8px;
+      object-fit: cover;
+    }
+
+    #file-preview .preview-file-icon {
+      width: 60px;
+      height: 60px;
+      background: var(--primary-color);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      color: white;
+    }
+
+    #file-preview .preview-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    #file-preview .preview-name {
+      font-size: 14px;
+      font-weight: 500;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #file-preview .preview-size {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-top: 2px;
+    }
+
+    #file-preview .preview-progress {
+      font-size: 12px;
+      color: var(--success-color);
+      margin-top: 2px;
+      font-weight: 600;
+    }
+
+    #file-preview .remove-file-btn {
+      background: none;
+      border: none;
+      font-size: 20px;
+      cursor: pointer;
+      color: var(--text-secondary);
+      padding: 4px 8px;
+    }
+
+    #file-preview .remove-file-btn:hover {
+      color: #dc2626;
+    }
+
+    #file-preview .remove-file-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
     #chat-input-container {
       padding: 16px 20px;
       background: white;
@@ -437,6 +572,30 @@
       display: flex;
     }
 
+    #attach-button {
+      width: 44px;
+      height: 44px;
+      border-radius: 8px;
+      background: transparent;
+      border: 1px solid var(--border-color);
+      color: var(--text-color);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      transition: background 0.2s;
+    }
+
+    #attach-button:hover {
+      background: var(--bg-color);
+    }
+
+    #attach-button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
     #chat-input {
       flex: 1;
       padding: 12px 16px;
@@ -446,6 +605,7 @@
       outline: none;
       resize: none;
       max-height: 120px;
+      font-family: inherit;
     }
 
     #send-button {
@@ -459,11 +619,63 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      transition: background 0.2s;
+    }
+
+    #send-button:hover:not(:disabled) {
+      background: var(--primary-dark);
     }
 
     #send-button:disabled {
       background: #cbd5e0;
       cursor: not-allowed;
+    }
+
+    /* IMAGE LIGHTBOX */
+    #image-lightbox {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.9);
+      z-index: 10000;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    #image-lightbox.visible {
+      display: flex;
+    }
+
+    #image-lightbox img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+
+    #image-lightbox .close-lightbox {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: rgba(255, 255, 255, 0.2);
+      border: none;
+      color: white;
+      font-size: 30px;
+      cursor: pointer;
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s;
+    }
+
+    #image-lightbox .close-lightbox:hover {
+      background: rgba(255, 255, 255, 0.3);
     }
   </style>
 </head>
@@ -528,18 +740,43 @@
     </div>
   </div>
 
+  <div id="file-preview">
+    <div id="preview-content"></div>
+    <div class="preview-info">
+      <div class="preview-name" id="preview-name"></div>
+      <div class="preview-size" id="preview-size"></div>
+      <div class="preview-progress" id="preview-progress"></div>
+    </div>
+    <button id="remove-file-btn" class="remove-file-btn" type="button">✕</button>
+  </div>
+
   <div id="chat-input-container">
+
+    <button id="attach-button" title="Attach file" type="button">📎</button>
+    <input 
+      type="file" 
+      id="file-input" 
+      accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx" 
+      style="display: none;"
+    >
+    
     <textarea 
       id="chat-input" 
       placeholder="Type your message..."
       rows="1"
     ></textarea>
-    <button id="send-button" disabled>
+    
+    <button id="send-button" disabled type="button">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <line x1="22" y1="2" x2="11" y2="13"></line>
         <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
       </svg>
     </button>
+  </div>
+
+  <div id="image-lightbox">
+    <button class="close-lightbox" type="button">✕</button>
+    <img id="lightbox-image" src="" alt="Full size image">
   </div>
 
   <script>
@@ -569,6 +806,11 @@
     let typingDebounceTimer = null;
     let messageSource = null;
     let historyLoaded = false;
+    
+    // FILE UPLOAD VARIABLES
+    let selectedFile = null;
+    let uploading = false;
+    let uploadProgress = 0;
 
     const chatMessages = document.getElementById('chat-messages');
     const chatInput = document.getElementById('chat-input');
@@ -581,9 +823,171 @@
     const statusIndicator = document.getElementById('status-indicator');
     const brandName = document.getElementById('brand-name');
     const headerAvatar = document.getElementById('header-avatar');
+    
+    // FILE ELEMENTS
+    const attachButton = document.getElementById('attach-button');
+    const fileInput = document.getElementById('file-input');
+    const filePreview = document.getElementById('file-preview');
+    const previewContent = document.getElementById('preview-content');
+    const previewName = document.getElementById('preview-name');
+    const previewSize = document.getElementById('preview-size');
+    const previewProgress = document.getElementById('preview-progress');
+    const removeFileBtn = document.getElementById('remove-file-btn');
+    const imageLightbox = document.getElementById('image-lightbox');
+    const lightboxImage = document.getElementById('lightbox-image');
 
     if (!STORE_ID) {
       console.error('[Widget] No store ID');
+    }
+
+    // FILE HANDLING FUNCTIONS
+    function formatFileSize(bytes) {
+      if (bytes === 0) return '0 Bytes';
+      const k = 1024;
+      const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+    }
+
+    attachButton.addEventListener('click', () => {
+      fileInput.click();
+    });
+
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      // Validate file size (max 10MB)
+      const maxSize = 10 * 1024 * 1024;
+      if (file.size > maxSize) {
+        alert('File size must be less than 10MB');
+        fileInput.value = '';
+        return;
+      }
+
+      selectedFile = file;
+      showFilePreview(file);
+    });
+
+    function showFilePreview(file) {
+      filePreview.classList.add('visible');
+      previewName.textContent = file.name;
+      previewSize.textContent = formatFileSize(file.size);
+      previewProgress.textContent = '';
+
+      // Create preview
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          previewContent.innerHTML = `<img src="${e.target.result}" class="preview-image" alt="Preview">`;
+        };
+        reader.readAsDataURL(file);
+      } else {
+        previewContent.innerHTML = `<div class="preview-file-icon">📎</div>`;
+      }
+
+      updateSendButton();
+    }
+
+    removeFileBtn.addEventListener('click', () => {
+      removeFile();
+    });
+
+    function removeFile() {
+      selectedFile = null;
+      filePreview.classList.remove('visible');
+      fileInput.value = '';
+      previewContent.innerHTML = '';
+      previewName.textContent = '';
+      previewSize.textContent = '';
+      previewProgress.textContent = '';
+      updateSendButton();
+    }
+
+    function updateSendButton() {
+      sendButton.disabled = !chatInput.value.trim() && !selectedFile;
+    }
+
+    async function uploadFileToBunny(file) {
+      try {
+        uploading = true;
+        uploadProgress = 0;
+
+        console.log('📤 Uploading file to Bunny.net:', file.name);
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const xhr = new XMLHttpRequest();
+
+        xhr.upload.addEventListener('progress', (e) => {
+          if (e.lengthComputable) {
+            uploadProgress = Math.round((e.loaded * 100) / e.total);
+            previewProgress.textContent = `${uploadProgress}%`;
+          }
+        });
+
+        const uploadPromise = new Promise((resolve, reject) => {
+          xhr.addEventListener('load', () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              resolve(JSON.parse(xhr.responseText));
+            } else {
+              reject(new Error(`Upload failed: ${xhr.status}`));
+            }
+          });
+
+          xhr.addEventListener('error', () => {
+            reject(new Error('Upload failed'));
+          });
+
+          xhr.open('POST', `${API_URL}/api/files/upload`);
+          xhr.send(formData);
+        });
+
+        const response = await uploadPromise;
+
+        console.log('✅ File uploaded successfully:', response);
+        return response;
+      } catch (error) {
+        console.error('❌ File upload failed:', error);
+        throw error;
+      } finally {
+        uploading = false;
+        uploadProgress = 0;
+        previewProgress.textContent = '';
+      }
+    }
+
+    // IMAGE LIGHTBOX
+    function openImageLightbox(imageUrl) {
+      lightboxImage.src = imageUrl;
+      imageLightbox.classList.add('visible');
+    }
+
+    imageLightbox.addEventListener('click', (e) => {
+      if (e.target === imageLightbox || e.target.classList.contains('close-lightbox')) {
+        imageLightbox.classList.remove('visible');
+      }
+    });
+
+    function createFileAttachmentHtml(fileData) {
+      if (!fileData || !fileData.url) return '';
+
+      const isImage = fileData.type && fileData.type.startsWith('image/');
+
+      if (isImage) {
+        return `<div class="file-attachment"><img src="${escapeHtml(fileData.url)}" alt="${escapeHtml(fileData.name || 'Image')}"></div>`;
+      } else {
+        return `
+          <div class="file-attachment file-doc">
+            <div class="file-icon">📎</div>
+            <div class="file-info">
+              <div class="file-name">${escapeHtml(fileData.name || 'File')}</div>
+              ${fileData.size ? `<div class="file-size">${formatFileSize(fileData.size)}</div>` : ''}
+            </div>
+          </div>
+        `;
+      }
     }
 
     function detectMessageSource() {
@@ -682,7 +1086,6 @@
       return null;
     }
 
-    // ✅ FIXED: Load conversation history WITH TOKEN
     async function loadConversationHistory() {
       if (!conversationId || historyLoaded) {
         console.log('ℹ️ [History] Skip - no ID or already loaded');
@@ -694,7 +1097,6 @@
         
         showLoadingHistory();
         
-        // ✅ CRITICAL FIX: Get token first!
         await ensureFreshToken(false);
         
         if (!wsToken) {
@@ -706,7 +1108,6 @@
 
         console.log('✅ [History] Token available, fetching messages...');
         
-        // ✅ FIX: Include Authorization header
         const url = `${API_URL}/api/conversations/${conversationId}/messages?store=${STORE_ID}`;
         console.log('📜 [History] Fetching:', url);
         
@@ -730,7 +1131,6 @@
             wsToken = null;
             tokenLastRefreshed = null;
             await ensureFreshToken(true);
-            // Retry with new token
             return loadConversationHistory();
           } else {
             console.error('❌ [History] HTTP', response.status);
@@ -782,7 +1182,8 @@
         senderType: msg.senderType || msg.sender_type || msg.type || 'agent',
         senderName: msg.senderName || msg.sender_name || msg.sender || 'Support',
         content: msg.content || msg.message || msg.text || '',
-        timestamp: msg.createdAt || msg.created_at || msg.timestamp || new Date().toISOString()
+        timestamp: msg.createdAt || msg.created_at || msg.timestamp || new Date().toISOString(),
+        fileData: msg.fileData || msg.file_data || null
       };
 
       if (displayedMessageIds.has(message.id)) {
@@ -804,16 +1205,32 @@
         ? `<div class="sender-name">${escapeHtml(message.senderName)}</div>` 
         : '';
       
+      // HANDLE FILE ATTACHMENTS
+      let fileAttachmentHtml = '';
+      if (message.fileData) {
+        const fileData = typeof message.fileData === 'string' ? JSON.parse(message.fileData) : message.fileData;
+        fileAttachmentHtml = createFileAttachmentHtml(fileData);
+      }
+
       messageDiv.innerHTML = `
         <div class="avatar">${avatarText}</div>
         <div class="bubble">
           ${senderName}
-          <div class="text">${escapeHtml(message.content)}</div>
+          ${message.content ? `<div class="text">${escapeHtml(message.content)}</div>` : ''}
+          ${fileAttachmentHtml}
           <div class="time">${time}</div>
         </div>
       `;
       
       chatMessages.appendChild(messageDiv);
+
+      // ADD CLICK HANDLER FOR IMAGES
+      const imgElement = messageDiv.querySelector('.file-attachment img');
+      if (imgElement) {
+        imgElement.addEventListener('click', () => {
+          openImageLightbox(imgElement.src);
+        });
+      }
     }
 
     function showLoadingHistory() {
@@ -879,10 +1296,9 @@
       emailCollection.classList.remove('visible');
       chatInputContainer.classList.add('visible');
       
-      // ✅ CRITICAL: Ensure token before loading history
       if (conversationId && !historyLoaded) {
         console.log('📜 [UI] Loading history...');
-        await ensureFreshToken(true); // Get token first
+        await ensureFreshToken(true);
         await loadConversationHistory();
       } else {
         console.log('📜 [UI] Show welcome');
@@ -1236,7 +1652,8 @@
         senderName: message.senderName || message.sender_name,
         content: message.content,
         conversationId: message.conversationId || message.conversation_id,
-        pending: message.pending
+        pending: message.pending,
+        fileData: message.fileData || message.file_data || null
       };
       
       if (msg.conversationId && msg.conversationId !== parseInt(conversationId)) {
@@ -1260,7 +1677,8 @@
         msg.content,
         msg.senderName || 'Support',
         msg.id,
-        msg.pending
+        msg.pending,
+        msg.fileData
       );
     }
 
@@ -1281,7 +1699,7 @@
 
     function setupEventListeners() {
       chatInput.addEventListener('input', () => {
-        sendButton.disabled = !chatInput.value.trim();
+        updateSendButton();
         autoResizeTextarea();
         
         clearTimeout(typingDebounceTimer);
@@ -1313,7 +1731,7 @@
       chatInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
-          if (chatInput.value.trim()) {
+          if (chatInput.value.trim() || selectedFile) {
             sendMessage();
           }
         }
@@ -1329,7 +1747,14 @@
 
     async function sendMessage() {
       const message = chatInput.value.trim();
-      if (!message) return;
+      
+      // Allow sending if there's either text OR file
+      if (!message && !selectedFile) return;
+
+      if (uploading) {
+        console.log('⚠️ Upload in progress, please wait...');
+        return;
+      }
 
       clearTimeout(typingTimeout);
       clearTimeout(typingDebounceTimer);
@@ -1345,13 +1770,41 @@
 
       chatInput.disabled = true;
       sendButton.disabled = true;
+      attachButton.disabled = true;
+      removeFileBtn.disabled = true;
 
       const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-      addMessage('customer', message, customerName || 'You', tempId, true);
+      // UPLOAD FILE FIRST IF PRESENT
+      let fileData = null;
+      if (selectedFile) {
+        try {
+          const uploadResult = await uploadFileToBunny(selectedFile);
+          fileData = {
+            url: uploadResult.url,
+            name: selectedFile.name,
+            type: selectedFile.type,
+            size: selectedFile.size
+          };
+          console.log('✅ File uploaded:', fileData);
+        } catch (error) {
+          console.error('❌ File upload failed:', error);
+          addMessage('system', 'Failed to upload file. Please try again.', 'System');
+          
+          chatInput.disabled = false;
+          sendButton.disabled = false;
+          attachButton.disabled = false;
+          removeFileBtn.disabled = false;
+          return;
+        }
+      }
+
+      // ADD MESSAGE WITH FILE
+      addMessage('customer', message, customerName || 'You', tempId, true, fileData);
       
       chatInput.value = '';
       chatInput.style.height = 'auto';
+      removeFile();
 
       if (welcomeMessage.style.display !== 'none') {
         welcomeMessage.style.display = 'none';
@@ -1368,12 +1821,13 @@
               storeIdentifier: STORE_ID,
               customerEmail: customerEmail,
               customerName: customerName,
-              initialMessage: message,
+              initialMessage: message || (fileData ? `📎 ${fileData.name}` : ''),
               customerData: customerData,
               hasOrders: customerOrders.length > 0,
               orderCount: customerOrders.length,
               cartSubtotal: customerCart?.subtotal || 0,
-              source: messageSource || 'website'
+              source: messageSource || 'website',
+              fileData: fileData
             })
           }, 8000);
 
@@ -1414,13 +1868,14 @@
               conversationId: parseInt(conversationId),
               customerEmail: customerEmail,
               customerName: customerName,
-              content: message,
+              content: message || '',
               storeIdentifier: STORE_ID,
               tempId: tempId,
               customerData: customerData,
               hasOrders: customerOrders.length > 0,
               cartSubtotal: customerCart?.subtotal || 0,
-              source: messageSource || 'website'
+              source: messageSource || 'website',
+              fileData: fileData
             })
           }, 8000);
 
@@ -1463,6 +1918,7 @@
               chatInput.value = message;
               chatInput.disabled = false;
               sendButton.disabled = false;
+              attachButton.disabled = false;
               
               return sendMessage();
             } else {
@@ -1481,6 +1937,8 @@
 
         chatInput.disabled = false;
         sendButton.disabled = false;
+        attachButton.disabled = false;
+        removeFileBtn.disabled = false;
         chatInput.focus();
         
       } catch (error) {
@@ -1501,11 +1959,13 @@
         
         chatInput.disabled = false;
         sendButton.disabled = false;
+        attachButton.disabled = false;
+        removeFileBtn.disabled = false;
         chatInput.focus();
       }
     }
 
-    function addMessage(type, text, sender, messageId = null, pending = false) {
+    function addMessage(type, text, sender, messageId = null, pending = false, fileData = null) {
       const messageDiv = document.createElement('div');
       messageDiv.className = `message ${type}`;
       if (pending) {
@@ -1525,17 +1985,32 @@
       const senderName = type !== 'system' && sender ? 
         `<div class="sender-name">${escapeHtml(sender)}</div>` : '';
       
+      // HANDLE FILE ATTACHMENTS
+      let fileAttachmentHtml = '';
+      if (fileData) {
+        fileAttachmentHtml = createFileAttachmentHtml(fileData);
+      }
+
       messageDiv.innerHTML = `
         <div class="avatar">${avatarText}</div>
         <div class="bubble">
           ${senderName}
-          <div class="text">${escapeHtml(text)}</div>
+          ${text ? `<div class="text">${escapeHtml(text)}</div>` : ''}
+          ${fileAttachmentHtml}
           <div class="time">${time}</div>
         </div>
       `;
       
       chatMessages.appendChild(messageDiv);
       chatMessages.scrollTop = chatMessages.scrollHeight;
+
+      // ADD CLICK HANDLER FOR IMAGES
+      const imgElement = messageDiv.querySelector('.file-attachment img');
+      if (imgElement) {
+        imgElement.addEventListener('click', () => {
+          openImageLightbox(imgElement.src);
+        });
+      }
       
       return messageDiv;
     }
@@ -1580,7 +2055,16 @@
     init();
   </script>
 </body>
-</html> -->
+</html>
+
+
+
+
+
+ -->
+
+
+
 
 
 
@@ -3429,8 +3913,6 @@
           localStorage.setItem(`chat_conv_${STORE_ID}`, conversationId);
           
           updateMessageStatus(tempId, 'confirmed', { id: tempId });
-          
-          await ensureFreshToken(true);
           
           if (wsToken && !ws) {
             connectWebSocket().catch(err => console.warn('WS failed:', err));
