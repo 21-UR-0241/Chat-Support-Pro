@@ -2094,8 +2094,6 @@
 </html> -->
 
 
-
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -3654,9 +3652,11 @@
           
           brandName.textContent = storeSettings.brandName || 'Chat Support';
           
-          if (storeSettings.primaryColor) {
-            document.documentElement.style.setProperty('--primary-color', storeSettings.primaryColor);
-          }
+          // Force bright green theme - ignore server primaryColor
+          document.documentElement.style.setProperty('--primary-color', '#3bbe28');
+          document.documentElement.style.setProperty('--primary-dark', '#2fa01e');
+          document.documentElement.style.setProperty('--primary-light', '#4cd938');
+          document.documentElement.style.setProperty('--success-color', '#3bbe28');
           
           if (storeSettings.widgetSettings?.greeting) {
             welcomeMessage.querySelector('p').innerHTML = storeSettings.widgetSettings.greeting;
