@@ -1245,6 +1245,8 @@
 
 // module.exports = { app, server };
 
+
+
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -2489,13 +2491,14 @@ function setupKeepAlive() {
   }
 
   const APP_URL = process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`;
+  const httpModule = APP_URL.startsWith('https') ? require('https') : http;
   
   console.log('⏰ Keep-alive enabled - pinging every 5 minutes');
   
   setInterval(() => {
     const now = new Date().toISOString();
     
-    http.get(`${APP_URL}/health`, (res) => {
+    httpModule.get(`${APP_URL}/health`, (res) => {
       let data = '';
       
       res.on('data', (chunk) => {
@@ -2517,7 +2520,7 @@ function setupKeepAlive() {
   
   setTimeout(() => {
     console.log('⏰ Running initial keep-alive ping...');
-    http.get(`${APP_URL}/health`, (res) => {
+    httpModule.get(`${APP_URL}/health`, (res) => {
       console.log(`⏰ Initial ping: ${res.statusCode}`);
     }).on('error', (err) => {
       console.error('❌ Initial ping error:', err.message);
