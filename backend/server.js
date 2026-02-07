@@ -2059,11 +2059,17 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
       pending: true
     };
     
-    // Send to customer widget via conversation channel
-    // (the sending agent already has it optimistically)
+    // Broadcast through BOTH channels for reliable delivery
     sendToConversation(conversationId, {
       type: 'new_message',
       message: snakeToCamel(tempMessage)
+    });
+    
+    broadcastToAgents({
+      type: 'new_message',
+      message: snakeToCamel(tempMessage),
+      conversationId,
+      storeId
     });
     
     // Respond to admin IMMEDIATELY
@@ -2155,8 +2161,13 @@ app.post('/api/widget/messages', async (req, res) => {
       pending: true
     };
     
-    // Broadcast to agents ONLY (customer already has it from HTTP response)
-    // broadcastToAgents covers agents in AND outside the conversation
+    // Broadcast through BOTH channels for reliable delivery
+    // Client-side dedup prevents duplicates
+    sendToConversation(conversationId, {
+      type: 'new_message',
+      message: snakeToCamel(tempMessage)
+    });
+    
     broadcastToAgents({
       type: 'new_message',
       message: snakeToCamel(tempMessage),
