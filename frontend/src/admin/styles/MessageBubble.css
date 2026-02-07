@@ -218,8 +218,8 @@
   width: 0;
   height: 0;
   border-style: solid;
-  border-width: 0 10px 13px 0;
-  border-color: transparent #d9fdd3 transparent transparent;
+  border-width: 13px 10px 0 0;
+  border-color: #d9fdd3 transparent transparent transparent;
 }
 
 /* Links */
@@ -317,7 +317,7 @@
     border-color: transparent transparent #1f2c33 transparent;
   }
   
-  .dark-mode .message-bubble.agent::before {
-    border-color: transparent #005c4b transparent transparent;
-  }
+.dark-mode .message-bubble.agent::before {
+  border-color: #005c4b transparent transparent transparent;
+}
 }
