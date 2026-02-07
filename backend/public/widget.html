@@ -2093,7 +2093,6 @@
 </body>
 </html> -->
 
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2309,11 +2308,6 @@
       border-radius: 8px;
       font-size: 15px;
       outline: none;
-      transition: border-color 0.2s;
-    }
-
-    .form-group input:focus {
-      border-color: var(--primary-color);
     }
 
     .form-group input.error {
@@ -2341,11 +2335,6 @@
       font-size: 15px;
       font-weight: 600;
       cursor: pointer;
-      transition: background 0.2s;
-    }
-
-    .submit-button:hover {
-      background: var(--primary-dark);
     }
 
     .submit-button:disabled {
@@ -2439,7 +2428,7 @@
     .message .avatar {
       width: 32px;
       height: 32px;
-      border-radius: 50%;
+      border-radius: 6px;
       background: var(--primary-light);
       color: white;
       display: flex;
@@ -2734,17 +2723,12 @@
       resize: none;
       max-height: 120px;
       font-family: inherit;
-      transition: border-color 0.2s;
-    }
-
-    #chat-input:focus {
-      border-color: var(--primary-color);
     }
 
     #send-button {
       width: 44px;
       height: 44px;
-      border-radius: 50%;
+      border-radius: 8px;
       background: var(--primary-color);
       border: none;
       color: white;
@@ -2869,7 +2853,7 @@
     <div id="welcome-message">
       <div class="welcome-icon">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
         </svg>
       </div>
       <h2>Welcome!</h2>
@@ -3235,42 +3219,25 @@
         console.log('📜 [History] Loading for conversation:', conversationId);
         
         showLoadingHistory();
-        
-        await ensureFreshToken(false);
-        
-        if (!wsToken) {
-          console.error('❌ [History] No token available');
-          hideLoadingHistory();
-          welcomeMessage.classList.add('visible');
-          return;
-        }
 
-        console.log('✅ [History] Token available, fetching messages...');
-        
+        // No token needed - endpoint validates by store ID
         const url = `${API_URL}/api/widget/conversations/${conversationId}/messages?store=${STORE_ID}`;
         console.log('📜 [History] Fetching:', url);
         
         const response = await fetchWithRetry(url, {
           headers: {
-            'Authorization': `Bearer ${wsToken}`,
             'Content-Type': 'application/json'
           }
-        }, 15000, 1);
+        }, 15000, 2);
 
         console.log('📡 [History] Response status:', response.status);
 
         if (!response.ok) {
           if (response.status === 404) {
-            console.warn('⚠️ [History] Conversation not found');
+            console.warn('⚠️ [History] Conversation not found - clearing stored ID');
             localStorage.removeItem(`chat_conv_${STORE_ID}`);
             conversationId = null;
             historyLoaded = false;
-          } else if (response.status === 401) {
-            console.error('❌ [History] Unauthorized - token might be invalid');
-            wsToken = null;
-            tokenLastRefreshed = null;
-            await ensureFreshToken(true);
-            return loadConversationHistory();
           } else {
             console.error('❌ [History] HTTP', response.status);
           }
@@ -3281,7 +3248,7 @@
         }
 
         const data = await response.json();
-        console.log('📦 [History] Data received:', data);
+        console.log('📦 [History] Data received, length:', Array.isArray(data) ? data.length : 'not array');
         
         let messages = Array.isArray(data) ? data : (data.messages || data.data || []);
         
@@ -3444,8 +3411,10 @@
       
       if (conversationId && !historyLoaded) {
         console.log('📜 [UI] Loading history...');
-        await ensureFreshToken(true);
+        // Load history first (no token needed for history endpoint)
         await loadConversationHistory();
+        // Then get token for WebSocket connection
+        await ensureFreshToken(true);
       } else {
         console.log('📜 [UI] Show welcome');
         welcomeMessage.classList.add('visible');
@@ -3455,6 +3424,19 @@
       
       if (conversationId && wsToken) {
         setTimeout(() => connectWebSocket(), 500);
+      } else if (conversationId) {
+        // Try to get token and connect even if ensureFreshToken failed above
+        updateStatus('connecting', 'Connecting...');
+        try {
+          await ensureFreshToken(true);
+          if (wsToken) {
+            connectWebSocket();
+          } else {
+            updateStatus('online', "We're online");
+          }
+        } catch (e) {
+          updateStatus('online', "We're online");
+        }
       } else {
         updateStatus('online', "We're online");
       }
