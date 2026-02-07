@@ -2063,10 +2063,6 @@
 
  -->
 
-
-
-
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -3195,7 +3191,7 @@
 
         console.log('✅ [History] Token available, fetching messages...');
         
-        const url = `${API_URL}/api/conversations/${conversationId}/messages?store=${STORE_ID}`;
+        const url = `${API_URL}/api/widget/conversations/${conversationId}/messages?store=${STORE_ID}`;
         console.log('📜 [History] Fetching:', url);
         
         const response = await fetch(url, {
@@ -3408,7 +3404,7 @@
       }
     }
 
-    async function fetchWithTimeout(url, options = {}, timeout = 10000) {
+    async function fetchWithTimeout(url, options = {}, timeout = 15000) {
       const controller = new AbortController();
       const id = setTimeout(() => controller.abort(), timeout);
       
@@ -3428,6 +3424,18 @@
       }
     }
 
+    async function fetchWithRetry(url, options = {}, timeout = 15000, retries = 2) {
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+          return await fetchWithTimeout(url, options, timeout);
+        } catch (error) {
+          console.warn(`⚠️ Attempt ${attempt + 1}/${retries + 1} failed:`, error.message);
+          if (attempt === retries) throw error;
+          await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+        }
+      }
+    }
+
     async function ensureFreshToken(forceRefresh = false) {
       const now = Date.now();
       
@@ -3441,7 +3449,7 @@
         const response = await fetchWithTimeout(
           `${API_URL}/api/widget/session?store=${STORE_ID}${conversationId ? `&conversationId=${conversationId}` : ''}`,
           {},
-          5000
+          10000
         );
         
         if (response.ok) {
@@ -3908,7 +3916,7 @@
         if (!conversationId) {
           await ensureFreshToken(true);
           
-          const response = await fetchWithTimeout(`${API_URL}/api/conversations`, {
+          const response = await fetchWithRetry(`${API_URL}/api/conversations`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -3923,7 +3931,7 @@
               source: messageSource || 'website',
               fileData: fileData
             })
-          }, 8000);
+          }, 15000, 2);
 
           if (!response.ok) {
             throw new Error('Failed to create conversation');
@@ -3953,7 +3961,7 @@
         } else {
           await ensureFreshToken(false);
           
-          const response = await fetchWithTimeout(`${API_URL}/api/widget/messages`, {
+          const response = await fetchWithRetry(`${API_URL}/api/widget/messages`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -3969,7 +3977,7 @@
               source: messageSource || 'website',
               fileData: fileData
             })
-          }, 8000);
+          }, 15000, 2);
 
           if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
