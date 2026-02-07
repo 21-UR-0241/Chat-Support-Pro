@@ -964,7 +964,6 @@
 // }
 
 // export default ChatWindow;
-
 import React, { useState, useEffect, useRef } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import api from "../services/api";
@@ -1430,42 +1429,28 @@ function ChatWindow({
     const msgId = message.id;
     const convId = message.conversationId || message.conversation_id;
 
-    console.log('📨 [WS] Incoming message:', {
-      id: msgId,
-      convId,
-      currentConvId: conversation?.id,
-      senderType: message.senderType,
-      senderName: message.senderName,
-      content: (message.content || '').substring(0, 50)
-    });
-
     // Only handle messages for the current conversation
     if (convId && String(convId) !== String(conversation?.id)) {
-      console.log('📨 [WS] Message for different conversation, showing notification');
       showNotification(message);
       return;
     }
 
-    // Skip if already displayed (by real ID, not temp ID)
-    if (msgId && !String(msgId).startsWith('temp-') && displayedMessageIds.current.has(msgId)) {
-      console.log('📨 [WS] Skipping duplicate message:', msgId);
+    // Skip if already displayed (including temp IDs)
+    if (msgId && displayedMessageIds.current.has(String(msgId))) {
       return;
     }
 
     // Skip our own agent messages (we already show them optimistically)
     if (message.senderType === 'agent' && message.senderName === employeeName) {
-      console.log('📨 [WS] Skipping own agent message');
-      if (msgId) displayedMessageIds.current.add(msgId);
+      if (msgId) displayedMessageIds.current.add(String(msgId));
       return;
     }
 
-    if (msgId) displayedMessageIds.current.add(msgId);
-
-    console.log('✅ [WS] Adding message to chat from', message.senderType);
+    if (msgId) displayedMessageIds.current.add(String(msgId));
 
     setMessages(prev => {
       // Double-check it's not already in the list
-      if (prev.some(m => m.id === msgId && !String(msgId).startsWith('temp-'))) return prev;
+      if (prev.some(m => String(m.id) === String(msgId))) return prev;
       return [...prev, {
         ...message,
         sending: false,

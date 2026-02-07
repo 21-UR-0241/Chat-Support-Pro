@@ -1246,7 +1246,6 @@
 // module.exports = { app, server };
 
 
-
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -1910,11 +1909,7 @@ app.post('/api/conversations', async (req, res) => {
           
           const camelMessage = snakeToCamel(message);
           
-          sendToConversation(conversation.id, {
-            type: 'new_message',
-            message: camelMessage
-          });
-          
+          // Only broadcastToAgents - no one has joined the conversation yet
           broadcastToAgents({
             type: 'new_message',
             message: camelMessage,
@@ -2064,17 +2059,11 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
       pending: true
     };
     
-    // Broadcast to conversation participants IMMEDIATELY
+    // Send to customer widget via conversation channel
+    // (the sending agent already has it optimistically)
     sendToConversation(conversationId, {
       type: 'new_message',
       message: snakeToCamel(tempMessage)
-    });
-    
-    broadcastToAgents({
-      type: 'new_message',
-      message: snakeToCamel(tempMessage),
-      conversationId,
-      storeId
     });
     
     // Respond to admin IMMEDIATELY
@@ -2093,12 +2082,14 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
           sent_at: timestamp
         });
         
+        // Confirm to customer widget (update temp → real ID)
         sendToConversation(conversationId, {
           type: 'message_confirmed',
           tempId: tempId,
           message: snakeToCamel(savedMessage)
         });
         
+        // Confirm to all agents (update temp → real ID, update sidebar)
         broadcastToAgents({
           type: 'message_confirmed',
           tempId: tempId,
@@ -2164,12 +2155,8 @@ app.post('/api/widget/messages', async (req, res) => {
       pending: true
     };
     
-    // Broadcast to agents and conversation participants IMMEDIATELY
-    sendToConversation(conversationId, {
-      type: 'new_message',
-      message: snakeToCamel(tempMessage)
-    });
-    
+    // Broadcast to agents ONLY (customer already has it from HTTP response)
+    // broadcastToAgents covers agents in AND outside the conversation
     broadcastToAgents({
       type: 'new_message',
       message: snakeToCamel(tempMessage),
@@ -2196,14 +2183,17 @@ app.post('/api/widget/messages', async (req, res) => {
         
         const confirmedMessage = snakeToCamel(savedMessage);
         
+        // Confirm to customer widget
         sendToConversation(conversationId, {
           type: 'message_confirmed',
           tempId: tempId,
           message: confirmedMessage
         });
         
+        // Confirm to agents (update temp ID → real ID)
         broadcastToAgents({
-          type: 'new_message',
+          type: 'message_confirmed',
+          tempId: tempId,
           message: confirmedMessage,
           conversationId,
           storeId: store.id,
