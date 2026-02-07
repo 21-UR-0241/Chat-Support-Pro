@@ -2092,7 +2092,6 @@
   </script>
 </body>
 </html> -->
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2473,6 +2472,28 @@
       word-wrap: break-word;
       white-space: pre-wrap;
     }
+
+    /* DEBUG PANEL - triple-tap header to toggle */
+    #debug-panel {
+      display: none;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      max-height: 40vh;
+      background: rgba(0,0,0,0.9);
+      color: #0f0;
+      font-family: monospace;
+      font-size: 11px;
+      overflow-y: auto;
+      z-index: 9999;
+      padding: 8px;
+    }
+    #debug-panel.visible { display: block; }
+    #debug-panel .log-line { margin: 2px 0; }
+    #debug-panel .log-error { color: #f55; }
+    #debug-panel .log-warn { color: #ff0; }
+    #debug-panel .log-ok { color: #0f0; }
 
     /* FILE ATTACHMENT STYLES */
     .message .file-attachment {
@@ -2902,7 +2923,40 @@
     <img id="lightbox-image" src="" alt="Full size image">
   </div>
 
+  <!-- DEBUG PANEL - triple-tap header to toggle -->
+  <div id="debug-panel"></div>
+
   <script>
+    // ============ DEBUG UTILITIES ============
+    const debugPanel = document.getElementById('debug-panel');
+    const debugLogs = [];
+    
+    function dbg(msg, level = 'info') {
+      const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const line = `[${time}] ${msg}`;
+      debugLogs.push({ line, level });
+      console.log(msg);
+      
+      const div = document.createElement('div');
+      div.className = `log-line ${level === 'error' ? 'log-error' : level === 'warn' ? 'log-warn' : 'log-ok'}`;
+      div.textContent = line;
+      debugPanel.appendChild(div);
+      debugPanel.scrollTop = debugPanel.scrollHeight;
+    }
+    
+    // Triple-tap header to toggle debug panel
+    let headerTapCount = 0;
+    let headerTapTimer = null;
+    document.getElementById('chat-header').addEventListener('click', () => {
+      headerTapCount++;
+      clearTimeout(headerTapTimer);
+      headerTapTimer = setTimeout(() => { headerTapCount = 0; }, 600);
+      if (headerTapCount >= 3) {
+        debugPanel.classList.toggle('visible');
+        headerTapCount = 0;
+      }
+    });
+
     console.log('🚀 [Widget] Starting...');
 
     const urlParams = new URLSearchParams(window.location.search);
@@ -3210,36 +3264,57 @@
     }
 
     async function loadConversationHistory() {
-      if (!conversationId || historyLoaded) {
-        console.log('ℹ️ [History] Skip - no ID or already loaded');
+      dbg(`[History] Start - convId=${conversationId}, historyLoaded=${historyLoaded}, STORE_ID=${STORE_ID}`);
+      
+      if (!conversationId) {
+        dbg('[History] SKIP: no conversationId', 'warn');
+        return;
+      }
+      if (historyLoaded) {
+        dbg('[History] SKIP: already loaded', 'warn');
+        return;
+      }
+      if (!STORE_ID) {
+        dbg('[History] SKIP: no STORE_ID', 'error');
+        welcomeMessage.classList.add('visible');
         return;
       }
 
       try {
-        console.log('📜 [History] Loading for conversation:', conversationId);
-        
         showLoadingHistory();
 
-        // No token needed - endpoint validates by store ID
         const url = `${API_URL}/api/widget/conversations/${conversationId}/messages?store=${STORE_ID}`;
-        console.log('📜 [History] Fetching:', url);
-        
-        const response = await fetchWithRetry(url, {
-          headers: {
-            'Content-Type': 'application/json'
-          }
-        }, 15000, 2);
+        dbg(`[History] Fetching: ${url}`);
 
-        console.log('📡 [History] Response status:', response.status);
+        let response;
+        try {
+          response = await fetchWithRetry(url, {
+            headers: { 'Content-Type': 'application/json' }
+          }, 20000, 2);
+        } catch (fetchErr) {
+          dbg(`[History] Fetch FAILED: ${fetchErr.message}`, 'error');
+          hideLoadingHistory();
+          welcomeMessage.classList.add('visible');
+          return;
+        }
+
+        dbg(`[History] Response: status=${response.status}, ok=${response.ok}`);
 
         if (!response.ok) {
+          let errorBody = '';
+          try { errorBody = await response.text(); } catch (e) {}
+          dbg(`[History] Error body: ${errorBody}`, 'error');
+          
           if (response.status === 404) {
-            console.warn('⚠️ [History] Conversation not found - clearing stored ID');
+            dbg('[History] 404 - clearing stored conversation ID', 'warn');
             localStorage.removeItem(`chat_conv_${STORE_ID}`);
             conversationId = null;
-            historyLoaded = false;
-          } else {
-            console.error('❌ [History] HTTP', response.status);
+          } else if (response.status === 403) {
+            dbg('[History] 403 - store mismatch, clearing stored conversation ID', 'warn');
+            localStorage.removeItem(`chat_conv_${STORE_ID}`);
+            conversationId = null;
+          } else if (response.status === 400) {
+            dbg('[History] 400 - bad request (missing store param?)', 'error');
           }
           
           hideLoadingHistory();
@@ -3247,12 +3322,27 @@
           return;
         }
 
-        const data = await response.json();
-        console.log('📦 [History] Data received, length:', Array.isArray(data) ? data.length : 'not array');
+        let data;
+        try {
+          const rawText = await response.text();
+          dbg(`[History] Raw response length: ${rawText.length} chars`);
+          data = JSON.parse(rawText);
+        } catch (parseErr) {
+          dbg(`[History] JSON parse FAILED: ${parseErr.message}`, 'error');
+          hideLoadingHistory();
+          welcomeMessage.classList.add('visible');
+          return;
+        }
+
+        dbg(`[History] Data type: ${typeof data}, isArray: ${Array.isArray(data)}`);
         
         let messages = Array.isArray(data) ? data : (data.messages || data.data || []);
         
-        console.log('✅ [History] Parsed', messages.length, 'messages');
+        dbg(`[History] Messages count: ${messages.length}`);
+        
+        if (messages.length > 0) {
+          dbg(`[History] First msg: id=${messages[0].id}, type=${messages[0].senderType || messages[0].sender_type}, content="${(messages[0].content || '').substring(0, 40)}"`);
+        }
 
         hideLoadingHistory();
         
@@ -3260,23 +3350,23 @@
           welcomeMessage.style.display = 'none';
           
           messages.forEach((msg, index) => {
-            console.log(`📝 [History] Message ${index + 1}:`, msg.senderType, '-', (msg.content || '').substring(0, 30));
             displayHistoryMessage(msg);
           });
           
           historyLoaded = true;
+          dbg(`[History] ✅ Rendered ${messages.length} messages`);
           
           setTimeout(() => {
             chatMessages.scrollTop = chatMessages.scrollHeight;
-            console.log('📜 [History] Scrolled to bottom');
           }, 100);
         } else {
-          console.log('ℹ️ [History] No messages');
+          dbg('[History] No messages returned - showing welcome', 'warn');
           welcomeMessage.classList.add('visible');
         }
 
       } catch (error) {
-        console.error('❌ [History] Error:', error);
+        dbg(`[History] UNCAUGHT ERROR: ${error.message}`, 'error');
+        dbg(`[History] Stack: ${error.stack}`, 'error');
         hideLoadingHistory();
         welcomeMessage.classList.add('visible');
       }
@@ -3293,10 +3383,13 @@
       };
 
       if (displayedMessageIds.has(message.id)) {
+        dbg(`[History] SKIP duplicate id=${message.id}`, 'warn');
         return;
       }
 
       displayedMessageIds.add(message.id);
+      dbg(`[History] Rendering: id=${message.id}, type=${message.senderType}, content="${(message.content || '').substring(0, 30)}"`);
+
 
       const messageDiv = document.createElement('div');
       messageDiv.className = `message ${message.senderType} history`;
@@ -3404,37 +3497,40 @@
     }
 
     async function showChatInterface() {
-      console.log('🎨 [UI] Show interface');
+      dbg(`[UI] showChatInterface - convId=${conversationId}, historyLoaded=${historyLoaded}`);
       
       emailCollection.classList.remove('visible');
       chatInputContainer.classList.add('visible');
       
       if (conversationId && !historyLoaded) {
-        console.log('📜 [UI] Loading history...');
-        // Load history first (no token needed for history endpoint)
+        dbg('[UI] Loading history (no token needed)...');
         await loadConversationHistory();
-        // Then get token for WebSocket connection
+        dbg('[UI] History load complete. Getting token for WS...');
         await ensureFreshToken(true);
       } else {
-        console.log('📜 [UI] Show welcome');
+        dbg('[UI] No conversationId or already loaded - showing welcome');
         welcomeMessage.classList.add('visible');
       }
       
       chatInput.focus();
       
       if (conversationId && wsToken) {
+        dbg('[UI] Connecting WebSocket...');
         setTimeout(() => connectWebSocket(), 500);
       } else if (conversationId) {
-        // Try to get token and connect even if ensureFreshToken failed above
+        dbg('[UI] Has convId but no token, retrying token...', 'warn');
         updateStatus('connecting', 'Connecting...');
         try {
           await ensureFreshToken(true);
           if (wsToken) {
+            dbg('[UI] Token obtained on retry, connecting WS');
             connectWebSocket();
           } else {
+            dbg('[UI] Still no token after retry', 'warn');
             updateStatus('online', "We're online");
           }
         } catch (e) {
+          dbg(`[UI] Token retry error: ${e.message}`, 'error');
           updateStatus('online', "We're online");
         }
       } else {
@@ -3480,30 +3576,30 @@
       const now = Date.now();
       
       if (!forceRefresh && wsToken && tokenLastRefreshed && (now - tokenLastRefreshed) < TOKEN_REFRESH_INTERVAL) {
-        console.log('✅ Using cached token');
+        dbg('[Token] Using cached token');
         return wsToken;
       }
       
       try {
-        console.log('🔄 Refreshing token...');
-        const response = await fetchWithRetry(
-          `${API_URL}/api/widget/session?store=${STORE_ID}${conversationId ? `&conversationId=${conversationId}` : ''}`,
-          {},
-          10000,
-          1
-        );
+        const tokenUrl = `${API_URL}/api/widget/session?store=${STORE_ID}${conversationId ? `&conversationId=${conversationId}` : ''}`;
+        dbg(`[Token] Refreshing: ${tokenUrl}`);
+        
+        const response = await fetchWithRetry(tokenUrl, {}, 10000, 1);
+        
+        dbg(`[Token] Response: status=${response.status}`);
         
         if (response.ok) {
           const data = await response.json();
           wsToken = data.token;
           tokenLastRefreshed = now;
-          console.log('✅ Token refreshed');
+          dbg(`[Token] ✅ Got token (${wsToken ? wsToken.substring(0, 20) + '...' : 'null'})`);
           return wsToken;
         } else {
-          console.warn('⚠️ Token refresh failed:', response.status);
+          const errText = await response.text().catch(() => '');
+          dbg(`[Token] Failed: ${response.status} - ${errText}`, 'warn');
         }
       } catch (error) {
-        console.error('❌ Token error:', error);
+        dbg(`[Token] ERROR: ${error.message}`, 'error');
       }
       return wsToken;
     }
@@ -3579,13 +3675,20 @@
 
     async function init() {
       try {
-        console.log('[Widget] Init');
+        dbg('[Init] Starting...');
+        dbg(`[Init] STORE_ID=${STORE_ID}, API_URL=${API_URL}`);
+        dbg(`[Init] URL: ${window.location.href}`);
         
         detectMessageSource();
+        
+        dbg('[Init] Loading settings...');
         await loadSettings();
+        dbg(`[Init] Settings loaded. storeSettings=${storeSettings ? 'yes' : 'null'}, wsToken=${wsToken ? 'yes' : 'null'}`);
+        
         setupEventListeners();
         
         const detected = autoDetectCustomer();
+        dbg(`[Init] autoDetect result: ${detected ? JSON.stringify({email: detected.email, name: detected.name}) : 'null'}`);
         
         if (detected) {
           customerEmail = detected.email;
@@ -3596,20 +3699,22 @@
           
           conversationId = localStorage.getItem(`chat_conv_${STORE_ID}`);
           
-          console.log('[Widget] Email:', customerEmail);
-          console.log('[Widget] Conv:', conversationId);
+          dbg(`[Init] Email=${customerEmail}, Conv=${conversationId}`);
           
+          dbg('[Init] Loading customer data...');
           await loadCustomerData();
+          dbg('[Init] Customer data loaded. Showing chat interface...');
           await showChatInterface();
         } else {
-          console.log('[Widget] Show email form');
+          dbg('[Init] No customer detected, showing email form');
           emailCollection.classList.add('visible');
           updateStatus('online', "We're online");
         }
         
-        console.log('[Widget] Init complete');
+        dbg('[Init] ✅ Complete');
       } catch (error) {
-        console.error('❌ [Widget] Init failed:', error);
+        dbg(`[Init] FATAL: ${error.message}`, 'error');
+        dbg(`[Init] Stack: ${error.stack}`, 'error');
         updateStatus('offline', 'Offline');
       }
     }
@@ -3627,10 +3732,14 @@
 
     async function loadSettings() {
       try {
+        dbg(`[Settings] Fetching: ${API_URL}/api/widget/settings?store=${STORE_ID}`);
         const response = await fetchWithRetry(`${API_URL}/api/widget/settings?store=${STORE_ID}`, {}, 15000, 2);
+        
+        dbg(`[Settings] Response: status=${response.status}`);
         
         if (response.ok) {
           storeSettings = await response.json();
+          dbg(`[Settings] Loaded: brandName=${storeSettings.brandName}, storeId=${storeSettings.storeId}`);
           
           brandName.textContent = storeSettings.brandName || 'Chat Support';
           
@@ -3647,11 +3756,15 @@
           if (storeSettings.widgetSettings?.placeholder) {
             chatInput.placeholder = storeSettings.widgetSettings.placeholder;
           }
+        } else {
+          dbg(`[Settings] Failed: ${response.status}`, 'error');
         }
         
+        dbg('[Settings] Getting initial token...');
         await ensureFreshToken(true);
+        dbg(`[Settings] Token: ${wsToken ? 'obtained' : 'FAILED'}`);
       } catch (error) {
-        console.error('❌ Failed to load settings:', error);
+        dbg(`[Settings] ERROR: ${error.message}`, 'error');
       }
     }
 
@@ -3982,6 +4095,7 @@
           const conv = await response.json();
           conversationId = conv.id;
           
+          dbg(`[SendMsg] Conversation created! id=${conversationId}, stored as chat_conv_${STORE_ID}=${conversationId}`);
           localStorage.setItem(`chat_conv_${STORE_ID}`, conversationId);
           
           updateMessageStatus(tempId, 'confirmed', { id: tempId });

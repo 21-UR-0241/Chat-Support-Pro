@@ -1362,7 +1362,7 @@ app.get('/widget.html', (req, res) => {
   res.set({
     'Content-Type': 'text/html; charset=utf-8',
     'X-Content-Type-Options': 'nosniff',
-    'Cache-Control': 'public, max-age=3600',
+    'Cache-Control': 'no-cache, must-revalidate',
     'Content-Security-Policy': "frame-ancestors *"
   });
   
@@ -1982,31 +1982,40 @@ app.put('/api/conversations/:id/close', authenticateToken, async (req, res) => {
 app.get('/api/widget/conversations/:id/messages', async (req, res) => {
   try {
     const { store } = req.query;
+    console.log(`📜 [Widget History] store=${store}, convId=${req.params.id}`);
+    
     if (!store) {
+      console.log('❌ [Widget History] Missing store param');
       return res.status(400).json({ error: 'store parameter required' });
     }
 
     const storeRecord = await db.getStoreByIdentifier(store);
     if (!storeRecord || !storeRecord.is_active) {
+      console.log(`❌ [Widget History] Store not found: "${store}", found=${!!storeRecord}, active=${storeRecord?.is_active}`);
       return res.status(404).json({ error: 'Store not found or inactive' });
     }
+    console.log(`✅ [Widget History] Store found: id=${storeRecord.id}, identifier=${storeRecord.store_identifier}`);
 
     const conversationId = parseInt(req.params.id);
     const conversation = await db.getConversation(conversationId);
 
     if (!conversation) {
+      console.log(`❌ [Widget History] Conversation ${conversationId} not found`);
       return res.status(404).json({ error: 'Conversation not found' });
     }
+    console.log(`✅ [Widget History] Conversation found: store_id=${conversation.store_id}, storeRecord.id=${storeRecord.id}`);
 
     // Verify this conversation belongs to the requesting store
-    if (conversation.store_id !== storeRecord.id) {
+    if (String(conversation.store_id) !== String(storeRecord.id)) {
+      console.log(`❌ [Widget History] Store mismatch: conv.store_id=${conversation.store_id} (${typeof conversation.store_id}) !== store.id=${storeRecord.id} (${typeof storeRecord.id})`);
       return res.status(403).json({ error: 'Unauthorized' });
     }
 
     const messages = await db.getMessages(conversationId);
+    console.log(`✅ [Widget History] Returning ${messages.length} messages`);
     res.json(messages.map(snakeToCamel));
   } catch (error) {
-    console.error('Widget message history error:', error);
+    console.error('❌ Widget message history error:', error);
     res.status(500).json({ error: 'Failed to fetch messages' });
   }
 });
