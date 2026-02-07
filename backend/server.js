@@ -1572,6 +1572,7 @@ app.get('/api/widget/session', async (req, res) => {
 app.get('/api/widget/conversation/lookup', async (req, res) => {
   try {
     const { store, email } = req.query;
+    console.log(`🔍 [Widget Lookup] store=${store}, email=${email}`);
     
     if (!store || !email) {
       return res.status(400).json({ error: 'store and email parameters required' });
@@ -1579,45 +1580,60 @@ app.get('/api/widget/conversation/lookup', async (req, res) => {
     
     const storeRecord = await db.getStoreByIdentifier(store);
     if (!storeRecord || !storeRecord.is_active) {
+      console.log(`❌ [Widget Lookup] Store not found for identifier: ${store}`);
       return res.status(404).json({ error: 'Store not found or inactive' });
     }
+    console.log(`✅ [Widget Lookup] Store found: id=${storeRecord.id}, identifier=${storeRecord.store_identifier}, domain=${storeRecord.shop_domain}`);
     
-    // First try: get conversations by current store_id
+    // Get conversations for this store
     let conversations = await db.getConversations({ storeId: storeRecord.id });
+    console.log(`📋 [Widget Lookup] getConversations returned ${conversations.length} conversations for storeId=${storeRecord.id}`);
+    
+    // Helper to get field value regardless of case (db may return snake or camel)
+    const getField = (obj, snake, camel) => obj[snake] ?? obj[camel];
     
     // Find matching email - prefer open, then most recent
     let match = conversations.find(c => 
-      c.customer_email === email && c.status === 'open'
+      getField(c, 'customer_email', 'customerEmail') === email && getField(c, 'status', 'status') === 'open'
     );
     if (!match) {
-      match = conversations.find(c => c.customer_email === email);
+      match = conversations.find(c => getField(c, 'customer_email', 'customerEmail') === email);
     }
     
-    // If not found by store_id, try broader search (handles store recreations)
+    // If not found, try broader search without storeId filter
     if (!match) {
+      console.log(`⚠️ [Widget Lookup] Not found in store-filtered results, trying broader search...`);
       const allConversations = await db.getConversations({});
+      console.log(`📋 [Widget Lookup] Broad search returned ${allConversations.length} total conversations`);
       
-      // Filter by email AND verify store_identifier matches
-      const emailMatches = allConversations.filter(c => 
-        c.customer_email === email && (
-          c.store_identifier === storeRecord.shop_domain ||
-          c.store_identifier === storeRecord.store_identifier ||
-          c.store_identifier === store
-        )
-      );
+      const emailMatches = allConversations.filter(c => getField(c, 'customer_email', 'customerEmail') === email);
+      console.log(`📋 [Widget Lookup] Found ${emailMatches.length} conversations with email=${email}`);
       
-      match = emailMatches.find(c => c.status === 'open') || emailMatches[0];
+      // Accept any conversation from this store (by id or identifier)
+      const storeMatches = emailMatches.filter(c => {
+        const cStoreId = getField(c, 'store_id', 'storeId');
+        const cStoreIdent = getField(c, 'store_identifier', 'storeIdentifier');
+        return String(cStoreId) === String(storeRecord.id) ||
+          cStoreIdent === storeRecord.shop_domain ||
+          cStoreIdent === storeRecord.store_identifier ||
+          cStoreIdent === store;
+      });
+      
+      match = storeMatches.find(c => getField(c, 'status', 'status') === 'open') || storeMatches[0];
     }
     
     if (match) {
-      console.log(`✅ [Widget Lookup] Found conversation ${match.id} for ${email} (store_id=${match.store_id})`);
-      res.json({ conversationId: match.id });
+      const matchId = match.id;
+      const matchStoreId = getField(match, 'store_id', 'storeId');
+      const matchStatus = getField(match, 'status', 'status');
+      console.log(`✅ [Widget Lookup] Found conversation ${matchId} for ${email} (store_id=${matchStoreId}, status=${matchStatus})`);
+      res.json({ conversationId: matchId });
     } else {
       console.log(`ℹ️ [Widget Lookup] No conversation found for ${email} in store ${store}`);
       res.json({ conversationId: null });
     }
   } catch (error) {
-    console.error('Widget conversation lookup error:', error);
+    console.error('❌ Widget conversation lookup error:', error);
     res.status(500).json({ error: 'Lookup failed' });
   }
 });
@@ -2053,17 +2069,20 @@ app.get('/api/widget/conversations/:id/messages', async (req, res) => {
       return res.status(404).json({ error: 'Conversation not found' });
     }
 
+    // db may return snake_case or camelCase depending on driver - handle both
+    const convStoreId = conversation.store_id ?? conversation.storeId;
+    const convStoreIdentifier = conversation.store_identifier ?? conversation.storeIdentifier;
+
     // Security check: verify conversation belongs to this store
-    // Check BOTH numeric store_id AND string store_identifier to handle store recreations
-    const storeIdMatch = String(conversation.store_id) === String(storeRecord.id);
-    const identifierMatch = conversation.store_identifier && (
-      conversation.store_identifier === storeRecord.shop_domain ||
-      conversation.store_identifier === storeRecord.store_identifier ||
-      conversation.store_identifier === store
+    const storeIdMatch = String(convStoreId) === String(storeRecord.id);
+    const identifierMatch = convStoreIdentifier && (
+      convStoreIdentifier === storeRecord.shop_domain ||
+      convStoreIdentifier === storeRecord.store_identifier ||
+      convStoreIdentifier === store
     );
     
     if (!storeIdMatch && !identifierMatch) {
-      console.warn(`❌ [Widget History] Access denied: conv ${conversationId} store_id=${conversation.store_id} store_identifier=${conversation.store_identifier} does not match store id=${storeRecord.id} identifier=${storeRecord.store_identifier} domain=${storeRecord.shop_domain}`);
+      console.warn(`❌ [Widget History] Access denied: conv ${conversationId} store_id=${convStoreId} store_identifier=${convStoreIdentifier} does not match store id=${storeRecord.id} identifier=${storeRecord.store_identifier} domain=${storeRecord.shop_domain}`);
       return res.status(403).json({ error: 'Unauthorized' });
     }
 
