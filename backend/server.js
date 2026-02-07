@@ -1982,37 +1982,39 @@ app.put('/api/conversations/:id/close', authenticateToken, async (req, res) => {
 app.get('/api/widget/conversations/:id/messages', async (req, res) => {
   try {
     const { store } = req.query;
-    console.log(`📜 [Widget History] store=${store}, convId=${req.params.id}`);
     
     if (!store) {
-      console.log('❌ [Widget History] Missing store param');
       return res.status(400).json({ error: 'store parameter required' });
     }
 
     const storeRecord = await db.getStoreByIdentifier(store);
     if (!storeRecord || !storeRecord.is_active) {
-      console.log(`❌ [Widget History] Store not found: "${store}", found=${!!storeRecord}, active=${storeRecord?.is_active}`);
       return res.status(404).json({ error: 'Store not found or inactive' });
     }
-    console.log(`✅ [Widget History] Store found: id=${storeRecord.id}, identifier=${storeRecord.store_identifier}`);
 
     const conversationId = parseInt(req.params.id);
     const conversation = await db.getConversation(conversationId);
 
     if (!conversation) {
-      console.log(`❌ [Widget History] Conversation ${conversationId} not found`);
       return res.status(404).json({ error: 'Conversation not found' });
     }
-    console.log(`✅ [Widget History] Conversation found: store_id=${conversation.store_id}, storeRecord.id=${storeRecord.id}`);
 
-    // Verify this conversation belongs to the requesting store
-    if (String(conversation.store_id) !== String(storeRecord.id)) {
-      console.log(`❌ [Widget History] Store mismatch: conv.store_id=${conversation.store_id} (${typeof conversation.store_id}) !== store.id=${storeRecord.id} (${typeof storeRecord.id})`);
+    // Security check: verify conversation belongs to this store
+    // Check BOTH numeric store_id AND string store_identifier to handle store recreations
+    const storeIdMatch = String(conversation.store_id) === String(storeRecord.id);
+    const identifierMatch = conversation.store_identifier && (
+      conversation.store_identifier === storeRecord.shop_domain ||
+      conversation.store_identifier === storeRecord.store_identifier ||
+      conversation.store_identifier === store
+    );
+    
+    if (!storeIdMatch && !identifierMatch) {
+      console.warn(`❌ [Widget History] Access denied: conv ${conversationId} store_id=${conversation.store_id} store_identifier=${conversation.store_identifier} does not match store id=${storeRecord.id} identifier=${storeRecord.store_identifier} domain=${storeRecord.shop_domain}`);
       return res.status(403).json({ error: 'Unauthorized' });
     }
 
     const messages = await db.getMessages(conversationId);
-    console.log(`✅ [Widget History] Returning ${messages.length} messages`);
+    console.log(`✅ [Widget History] Returning ${messages.length} messages for conversation ${conversationId} (matched by ${storeIdMatch ? 'store_id' : 'store_identifier'})`);
     res.json(messages.map(snakeToCamel));
   } catch (error) {
     console.error('❌ Widget message history error:', error);

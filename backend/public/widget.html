@@ -3306,15 +3306,11 @@
           dbg(`[History] Error body: ${errorBody}`, 'error');
           
           if (response.status === 404) {
-            dbg('[History] 404 - clearing stored conversation ID', 'warn');
+            dbg('[History] 404 - conversation not found, clearing stored ID', 'warn');
             localStorage.removeItem(`chat_conv_${STORE_ID}`);
             conversationId = null;
-          } else if (response.status === 403) {
-            dbg('[History] 403 - store mismatch, clearing stored conversation ID', 'warn');
-            localStorage.removeItem(`chat_conv_${STORE_ID}`);
-            conversationId = null;
-          } else if (response.status === 400) {
-            dbg('[History] 400 - bad request (missing store param?)', 'error');
+          } else {
+            dbg(`[History] HTTP ${response.status} - will retry on next load`, 'warn');
           }
           
           hideLoadingHistory();
