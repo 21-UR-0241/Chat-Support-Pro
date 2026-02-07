@@ -2473,21 +2473,23 @@ app.use((err, req, res, next) => {
 
 // ============ KEEP-ALIVE MECHANISM ============
 
+// ============ KEEP-ALIVE MECHANISM ============
+
 function setupKeepAlive() {
-  // Enable by default - critical for preventing cold starts on Render
   if (process.env.KEEP_ALIVE === 'false') {
     console.log('⏰ Keep-alive disabled');
     return;
   }
 
   const APP_URL = process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`;
+  const httpModule = APP_URL.startsWith('https') ? require('https') : http;
   
   console.log('⏰ Keep-alive enabled - pinging every 5 minutes');
   
   setInterval(() => {
     const now = new Date().toISOString();
     
-    http.get(`${APP_URL}/health`, (res) => {
+    httpModule.get(`${APP_URL}/health`, (res) => {
       let data = '';
       
       res.on('data', (chunk) => {
@@ -2509,14 +2511,13 @@ function setupKeepAlive() {
   
   setTimeout(() => {
     console.log('⏰ Running initial keep-alive ping...');
-    http.get(`${APP_URL}/health`, (res) => {
+    httpModule.get(`${APP_URL}/health`, (res) => {
       console.log(`⏰ Initial ping: ${res.statusCode}`);
     }).on('error', (err) => {
       console.error('❌ Initial ping error:', err.message);
     });
   }, 60 * 1000);
 }
-
 // ============ START SERVER ============
 
 const PORT = process.env.PORT || 3000;
