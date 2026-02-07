@@ -2067,8 +2067,6 @@
 
 
 
-
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2305,6 +2303,23 @@
       font-size: 15px;
       font-weight: 600;
       cursor: pointer;
+    }
+
+    .submit-button:disabled {
+      opacity: 0.7;
+      cursor: not-allowed;
+    }
+
+    .btn-spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255,255,255,0.4);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
     }
 
     .privacy-note {
@@ -3342,8 +3357,15 @@
       
       console.log('✅ [Email] Saved:', customerEmail);
       
-      await loadCustomerData();
-      await showChatInterface();
+      // Show loading state on button
+      const submitBtn = emailForm.querySelector('.submit-button');
+      const originalText = submitBtn.textContent;
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="btn-spinner"></span> Connecting...';
+      
+      // Show chat interface immediately, load customer data in background
+      showChatInterface();
+      loadCustomerData();
     });
 
     async function loadCustomerData() {
