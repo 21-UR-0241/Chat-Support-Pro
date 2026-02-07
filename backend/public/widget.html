@@ -2092,6 +2092,7 @@
   </script>
 </body>
 </html> -->
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2472,28 +2473,6 @@
       word-wrap: break-word;
       white-space: pre-wrap;
     }
-
-    /* DEBUG PANEL - triple-tap header to toggle */
-    #debug-panel {
-      display: none;
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      max-height: 40vh;
-      background: rgba(0,0,0,0.9);
-      color: #0f0;
-      font-family: monospace;
-      font-size: 11px;
-      overflow-y: auto;
-      z-index: 9999;
-      padding: 8px;
-    }
-    #debug-panel.visible { display: block; }
-    #debug-panel .log-line { margin: 2px 0; }
-    #debug-panel .log-error { color: #f55; }
-    #debug-panel .log-warn { color: #ff0; }
-    #debug-panel .log-ok { color: #0f0; }
 
     /* FILE ATTACHMENT STYLES */
     .message .file-attachment {
@@ -2923,41 +2902,8 @@
     <img id="lightbox-image" src="" alt="Full size image">
   </div>
 
-  <!-- DEBUG PANEL - triple-tap header to toggle -->
-  <div id="debug-panel"></div>
-
   <script>
-    // ============ DEBUG UTILITIES ============
-    const debugPanel = document.getElementById('debug-panel');
-    const debugLogs = [];
-    
-    function dbg(msg, level = 'info') {
-      const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      const line = `[${time}] ${msg}`;
-      debugLogs.push({ line, level });
-      console.log(msg);
-      
-      const div = document.createElement('div');
-      div.className = `log-line ${level === 'error' ? 'log-error' : level === 'warn' ? 'log-warn' : 'log-ok'}`;
-      div.textContent = line;
-      debugPanel.appendChild(div);
-      debugPanel.scrollTop = debugPanel.scrollHeight;
-    }
-    
-    // Triple-tap header to toggle debug panel
-    let headerTapCount = 0;
-    let headerTapTimer = null;
-    document.getElementById('chat-header').addEventListener('click', () => {
-      headerTapCount++;
-      clearTimeout(headerTapTimer);
-      headerTapTimer = setTimeout(() => { headerTapCount = 0; }, 600);
-      if (headerTapCount >= 3) {
-        debugPanel.classList.toggle('visible');
-        headerTapCount = 0;
-      }
-    });
-
-    console.log('🚀 [Widget] Starting...');
+    console.log('[Widget] Starting...');
 
     const urlParams = new URLSearchParams(window.location.search);
     const STORE_ID = urlParams.get('store');
@@ -3056,11 +3002,11 @@
       if (file.type.startsWith('image/')) {
         const reader = new FileReader();
         reader.onload = (e) => {
-          previewContent.innerHTML = `<img src="${e.target.result}" class="preview-image" alt="Preview">`;
+          previewContent.innerHTML = '<img src="' + e.target.result + '" class="preview-image" alt="Preview">';
         };
         reader.readAsDataURL(file);
       } else {
-        previewContent.innerHTML = `<div class="preview-file-icon">📎</div>`;
+        previewContent.innerHTML = '<div class="preview-file-icon">📎</div>';
       }
 
       updateSendButton();
@@ -3090,8 +3036,6 @@
         uploading = true;
         uploadProgress = 0;
 
-        console.log('📤 Uploading file to Bunny.net:', file.name);
-
         const formData = new FormData();
         formData.append('file', file);
 
@@ -3100,7 +3044,7 @@
         xhr.upload.addEventListener('progress', (e) => {
           if (e.lengthComputable) {
             uploadProgress = Math.round((e.loaded * 100) / e.total);
-            previewProgress.textContent = `${uploadProgress}%`;
+            previewProgress.textContent = uploadProgress + '%';
           }
         });
 
@@ -3109,7 +3053,7 @@
             if (xhr.status >= 200 && xhr.status < 300) {
               resolve(JSON.parse(xhr.responseText));
             } else {
-              reject(new Error(`Upload failed: ${xhr.status}`));
+              reject(new Error('Upload failed: ' + xhr.status));
             }
           });
 
@@ -3117,16 +3061,14 @@
             reject(new Error('Upload failed'));
           });
 
-          xhr.open('POST', `${API_URL}/api/files/upload`);
+          xhr.open('POST', API_URL + '/api/files/upload');
           xhr.send(formData);
         });
 
         const response = await uploadPromise;
-
-        console.log('✅ File uploaded successfully:', response);
         return response;
       } catch (error) {
-        console.error('❌ File upload failed:', error);
+        console.error('File upload failed:', error);
         throw error;
       } finally {
         uploading = false;
@@ -3153,17 +3095,14 @@
       const isImage = fileData.type && fileData.type.startsWith('image/');
 
       if (isImage) {
-        return `<div class="file-attachment"><img src="${escapeHtml(fileData.url)}" alt="${escapeHtml(fileData.name || 'Image')}"></div>`;
+        return '<div class="file-attachment"><img src="' + escapeHtml(fileData.url) + '" alt="' + escapeHtml(fileData.name || 'Image') + '"></div>';
       } else {
-        return `
-          <div class="file-attachment file-doc">
-            <div class="file-icon">📎</div>
-            <div class="file-info">
-              <div class="file-name">${escapeHtml(fileData.name || 'File')}</div>
-              ${fileData.size ? `<div class="file-size">${formatFileSize(fileData.size)}</div>` : ''}
-            </div>
-          </div>
-        `;
+        return '<div class="file-attachment file-doc">' +
+          '<div class="file-icon">📎</div>' +
+          '<div class="file-info">' +
+            '<div class="file-name">' + escapeHtml(fileData.name || 'File') + '</div>' +
+            (fileData.size ? '<div class="file-size">' + formatFileSize(fileData.size) + '</div>' : '') +
+          '</div></div>';
       }
     }
 
@@ -3221,12 +3160,9 @@
     }
 
     function autoDetectCustomer() {
-      console.log('🔍 [Detect] Starting...');
-      
       try {
         if (window.parent && window.parent.chatCustomerData) {
           const data = window.parent.chatCustomerData;
-          console.log('✅ [Detect] Found in parent');
           return {
             email: data.email,
             name: data.name || data.firstName,
@@ -3237,7 +3173,6 @@
       
       const urlEmail = urlParams.get('email');
       if (urlEmail && isValidEmail(urlEmail)) {
-        console.log('✅ [Detect] Found in URL');
         return {
           email: urlEmail,
           name: urlParams.get('name') || null,
@@ -3246,11 +3181,10 @@
       }
       
       try {
-        const storedEmail = localStorage.getItem(`chat_email_${STORE_ID}`);
-        const storedName = localStorage.getItem(`chat_name_${STORE_ID}`);
+        const storedEmail = localStorage.getItem('chat_email_' + STORE_ID);
+        const storedName = localStorage.getItem('chat_name_' + STORE_ID);
         
         if (storedEmail && isValidEmail(storedEmail)) {
-          console.log('✅ [Detect] Found in storage');
           return {
             email: storedEmail,
             name: storedName || null,
@@ -3259,32 +3193,21 @@
         }
       } catch (e) {}
 
-      console.log('ℹ️ [Detect] Nothing found');
       return null;
     }
 
     async function loadConversationHistory() {
-      dbg(`[History] Start - convId=${conversationId}, historyLoaded=${historyLoaded}, STORE_ID=${STORE_ID}`);
-      
-      if (!conversationId) {
-        dbg('[History] SKIP: no conversationId', 'warn');
-        return;
-      }
-      if (historyLoaded) {
-        dbg('[History] SKIP: already loaded', 'warn');
-        return;
-      }
-      if (!STORE_ID) {
-        dbg('[History] SKIP: no STORE_ID', 'error');
-        welcomeMessage.classList.add('visible');
+      if (!conversationId || historyLoaded || !STORE_ID) {
+        if (!conversationId || !STORE_ID) {
+          welcomeMessage.classList.add('visible');
+        }
         return;
       }
 
       try {
         showLoadingHistory();
 
-        const url = `${API_URL}/api/widget/conversations/${conversationId}/messages?store=${STORE_ID}`;
-        dbg(`[History] Fetching: ${url}`);
+        const url = API_URL + '/api/widget/conversations/' + conversationId + '/messages?store=' + STORE_ID;
 
         let response;
         try {
@@ -3292,27 +3215,16 @@
             headers: { 'Content-Type': 'application/json' }
           }, 20000, 2);
         } catch (fetchErr) {
-          dbg(`[History] Fetch FAILED: ${fetchErr.message}`, 'error');
           hideLoadingHistory();
           welcomeMessage.classList.add('visible');
           return;
         }
 
-        dbg(`[History] Response: status=${response.status}, ok=${response.ok}`);
-
         if (!response.ok) {
-          let errorBody = '';
-          try { errorBody = await response.text(); } catch (e) {}
-          dbg(`[History] Error body: ${errorBody}`, 'error');
-          
           if (response.status === 404) {
-            dbg('[History] 404 - conversation not found, clearing stored ID', 'warn');
-            localStorage.removeItem(`chat_conv_${STORE_ID}`);
+            localStorage.removeItem('chat_conv_' + STORE_ID);
             conversationId = null;
-          } else {
-            dbg(`[History] HTTP ${response.status} - will retry on next load`, 'warn');
           }
-          
           hideLoadingHistory();
           welcomeMessage.classList.add('visible');
           return;
@@ -3321,48 +3233,35 @@
         let data;
         try {
           const rawText = await response.text();
-          dbg(`[History] Raw response length: ${rawText.length} chars`);
           data = JSON.parse(rawText);
         } catch (parseErr) {
-          dbg(`[History] JSON parse FAILED: ${parseErr.message}`, 'error');
           hideLoadingHistory();
           welcomeMessage.classList.add('visible');
           return;
         }
 
-        dbg(`[History] Data type: ${typeof data}, isArray: ${Array.isArray(data)}`);
-        
         let messages = Array.isArray(data) ? data : (data.messages || data.data || []);
-        
-        dbg(`[History] Messages count: ${messages.length}`);
-        
-        if (messages.length > 0) {
-          dbg(`[History] First msg: id=${messages[0].id}, type=${messages[0].senderType || messages[0].sender_type}, content="${(messages[0].content || '').substring(0, 40)}"`);
-        }
 
         hideLoadingHistory();
         
         if (messages.length > 0) {
           welcomeMessage.style.display = 'none';
           
-          messages.forEach((msg, index) => {
+          messages.forEach((msg) => {
             displayHistoryMessage(msg);
           });
           
           historyLoaded = true;
-          dbg(`[History] ✅ Rendered ${messages.length} messages`);
           
           setTimeout(() => {
             chatMessages.scrollTop = chatMessages.scrollHeight;
           }, 100);
         } else {
-          dbg('[History] No messages returned - showing welcome', 'warn');
           welcomeMessage.classList.add('visible');
         }
 
       } catch (error) {
-        dbg(`[History] UNCAUGHT ERROR: ${error.message}`, 'error');
-        dbg(`[History] Stack: ${error.stack}`, 'error');
+        console.error('[History] Error:', error);
         hideLoadingHistory();
         welcomeMessage.classList.add('visible');
       }
@@ -3378,17 +3277,11 @@
         fileData: msg.fileData || msg.file_data || null
       };
 
-      if (displayedMessageIds.has(message.id)) {
-        dbg(`[History] SKIP duplicate id=${message.id}`, 'warn');
-        return;
-      }
-
+      if (displayedMessageIds.has(message.id)) return;
       displayedMessageIds.add(message.id);
-      dbg(`[History] Rendering: id=${message.id}, type=${message.senderType}, content="${(message.content || '').substring(0, 30)}"`);
-
 
       const messageDiv = document.createElement('div');
-      messageDiv.className = `message ${message.senderType} history`;
+      messageDiv.className = 'message ' + message.senderType + ' history';
       messageDiv.dataset.messageId = message.id;
       
       const time = formatMessageTime(message.timestamp);
@@ -3397,29 +3290,26 @@
         : getInitials(message.senderName);
       
       const senderName = message.senderType !== 'system' 
-        ? `<div class="sender-name">${escapeHtml(message.senderName)}</div>` 
+        ? '<div class="sender-name">' + escapeHtml(message.senderName) + '</div>' 
         : '';
       
-      // HANDLE FILE ATTACHMENTS
       let fileAttachmentHtml = '';
       if (message.fileData) {
         const fileData = typeof message.fileData === 'string' ? JSON.parse(message.fileData) : message.fileData;
         fileAttachmentHtml = createFileAttachmentHtml(fileData);
       }
 
-      messageDiv.innerHTML = `
-        <div class="avatar">${avatarText}</div>
-        <div class="bubble">
-          ${senderName}
-          ${message.content ? `<div class="text">${escapeHtml(message.content)}</div>` : ''}
-          ${fileAttachmentHtml}
-          <div class="time">${time}</div>
-        </div>
-      `;
+      messageDiv.innerHTML = 
+        '<div class="avatar">' + avatarText + '</div>' +
+        '<div class="bubble">' +
+          senderName +
+          (message.content ? '<div class="text">' + escapeHtml(message.content) + '</div>' : '') +
+          fileAttachmentHtml +
+          '<div class="time">' + time + '</div>' +
+        '</div>';
       
       chatMessages.appendChild(messageDiv);
 
-      // ADD CLICK HANDLER FOR IMAGES
       const imgElement = messageDiv.querySelector('.file-attachment img');
       if (imgElement) {
         imgElement.addEventListener('click', () => {
@@ -3434,10 +3324,7 @@
       const loadingDiv = document.createElement('div');
       loadingDiv.className = 'loading-history';
       loadingDiv.id = 'loading-history-indicator';
-      loadingDiv.innerHTML = `
-        <div class="spinner"></div>
-        <span>Loading conversation...</span>
-      `;
+      loadingDiv.innerHTML = '<div class="spinner"></div><span>Loading conversation...</span>';
       
       chatMessages.appendChild(loadingDiv);
     }
@@ -3453,32 +3340,24 @@
       const email = document.getElementById('customer-email').value.trim();
       const name = document.getElementById('customer-name').value.trim();
       
-      if (!isValidEmail(email)) {
-        return;
-      }
+      if (!isValidEmail(email)) return;
       
       customerEmail = email;
       customerName = name || 'Guest';
       
-      localStorage.setItem(`chat_email_${STORE_ID}`, customerEmail);
-      localStorage.setItem(`chat_name_${STORE_ID}`, customerName);
+      localStorage.setItem('chat_email_' + STORE_ID, customerEmail);
+      localStorage.setItem('chat_name_' + STORE_ID, customerName);
       
-      console.log('✅ [Email] Saved:', customerEmail);
-      
-      // Show loading state on button
       const submitBtn = emailForm.querySelector('.submit-button');
-      const originalText = submitBtn.textContent;
       submitBtn.disabled = true;
       submitBtn.innerHTML = '<span class="btn-spinner"></span> Connecting...';
       
-      // Look up existing conversation for returning customers
       const lookedUp = await lookupConversation(customerEmail);
       if (lookedUp) {
         conversationId = String(lookedUp);
-        localStorage.setItem(`chat_conv_${STORE_ID}`, conversationId);
+        localStorage.setItem('chat_conv_' + STORE_ID, conversationId);
       }
       
-      // Show chat interface, load customer data in background
       showChatInterface();
       loadCustomerData();
     });
@@ -3487,53 +3366,41 @@
       if (!customerEmail) return;
       
       try {
-        console.log('🔄 Loading customer data...');
         await Promise.all([
           fetchCustomerData(customerEmail),
           fetchCustomerOrders(customerEmail),
           fetchCustomerCart(customerEmail)
         ]);
-        console.log('✅ Customer data loaded');
       } catch (error) {
-        console.error('❌ Failed to load customer data:', error);
+        console.error('Failed to load customer data:', error);
       }
     }
 
     async function showChatInterface() {
-      dbg(`[UI] showChatInterface - convId=${conversationId}, historyLoaded=${historyLoaded}`);
-      
       emailCollection.classList.remove('visible');
       chatInputContainer.classList.add('visible');
       
       if (conversationId && !historyLoaded) {
-        dbg('[UI] Loading history (no token needed)...');
         await loadConversationHistory();
-        dbg('[UI] History load complete. Getting token for WS...');
         await ensureFreshToken(true);
       } else {
-        dbg('[UI] No conversationId or already loaded - showing welcome');
         welcomeMessage.classList.add('visible');
       }
       
       chatInput.focus();
       
       if (conversationId && wsToken) {
-        dbg('[UI] Connecting WebSocket...');
         setTimeout(() => connectWebSocket(), 500);
       } else if (conversationId) {
-        dbg('[UI] Has convId but no token, retrying token...', 'warn');
         updateStatus('connecting', 'Connecting...');
         try {
           await ensureFreshToken(true);
           if (wsToken) {
-            dbg('[UI] Token obtained on retry, connecting WS');
             connectWebSocket();
           } else {
-            dbg('[UI] Still no token after retry', 'warn');
             updateStatus('online', "We're online");
           }
         } catch (e) {
-          dbg(`[UI] Token retry error: ${e.message}`, 'error');
           updateStatus('online', "We're online");
         }
       } else {
@@ -3541,15 +3408,13 @@
       }
     }
 
-    async function fetchWithTimeout(url, options = {}, timeout = 15000) {
+    async function fetchWithTimeout(url, options, timeout) {
+      if (timeout === undefined) timeout = 15000;
       const controller = new AbortController();
       const id = setTimeout(() => controller.abort(), timeout);
       
       try {
-        const response = await fetch(url, {
-          ...options,
-          signal: controller.signal
-        });
+        const response = await fetch(url, Object.assign({}, options, { signal: controller.signal }));
         clearTimeout(id);
         return response;
       } catch (error) {
@@ -3561,48 +3426,40 @@
       }
     }
 
-    async function fetchWithRetry(url, options = {}, timeout = 15000, retries = 2) {
+    async function fetchWithRetry(url, options, timeout, retries) {
+      if (timeout === undefined) timeout = 15000;
+      if (retries === undefined) retries = 2;
       for (let attempt = 0; attempt <= retries; attempt++) {
         try {
-          // First attempt gets extra time for cold starts
           const attemptTimeout = attempt === 0 ? timeout + 15000 : timeout;
           return await fetchWithTimeout(url, options, attemptTimeout);
         } catch (error) {
-          console.warn(`⚠️ Attempt ${attempt + 1}/${retries + 1} failed:`, error.message);
           if (attempt === retries) throw error;
-          await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+          await new Promise(function(r) { setTimeout(r, 1000 * (attempt + 1)); });
         }
       }
     }
 
-    async function ensureFreshToken(forceRefresh = false) {
+    async function ensureFreshToken(forceRefresh) {
       const now = Date.now();
       
       if (!forceRefresh && wsToken && tokenLastRefreshed && (now - tokenLastRefreshed) < TOKEN_REFRESH_INTERVAL) {
-        dbg('[Token] Using cached token');
         return wsToken;
       }
       
       try {
-        const tokenUrl = `${API_URL}/api/widget/session?store=${STORE_ID}${conversationId ? `&conversationId=${conversationId}` : ''}`;
-        dbg(`[Token] Refreshing: ${tokenUrl}`);
+        const tokenUrl = API_URL + '/api/widget/session?store=' + STORE_ID + (conversationId ? '&conversationId=' + conversationId : '');
         
         const response = await fetchWithRetry(tokenUrl, {}, 10000, 1);
-        
-        dbg(`[Token] Response: status=${response.status}`);
         
         if (response.ok) {
           const data = await response.json();
           wsToken = data.token;
           tokenLastRefreshed = now;
-          dbg(`[Token] ✅ Got token (${wsToken ? wsToken.substring(0, 20) + '...' : 'null'})`);
           return wsToken;
-        } else {
-          const errText = await response.text().catch(() => '');
-          dbg(`[Token] Failed: ${response.status} - ${errText}`, 'warn');
         }
       } catch (error) {
-        dbg(`[Token] ERROR: ${error.message}`, 'error');
+        console.error('[Token] Error:', error);
       }
       return wsToken;
     }
@@ -3612,18 +3469,17 @@
       
       try {
         const response = await fetchWithTimeout(
-          `${API_URL}/api/customers/lookup?store=${STORE_ID}&email=${encodeURIComponent(email)}`,
+          API_URL + '/api/customers/lookup?store=' + STORE_ID + '&email=' + encodeURIComponent(email),
           {},
           12000
         );
         
         if (response.ok) {
           customerData = await response.json();
-          console.log('✅ Customer data loaded');
           return customerData;
         }
       } catch (error) {
-        console.error('❌ Failed to fetch customer:', error);
+        console.error('Failed to fetch customer:', error);
       }
       return null;
     }
@@ -3633,18 +3489,17 @@
       
       try {
         const response = await fetchWithTimeout(
-          `${API_URL}/api/customers/orders?store=${STORE_ID}&email=${encodeURIComponent(email)}`,
+          API_URL + '/api/customers/orders?store=' + STORE_ID + '&email=' + encodeURIComponent(email),
           {},
           12000
         );
         
         if (response.ok) {
           customerOrders = await response.json();
-          console.log('✅ Orders loaded:', customerOrders.length);
           return customerOrders;
         }
       } catch (error) {
-        console.error('❌ Failed to fetch orders:', error);
+        console.error('Failed to fetch orders:', error);
       }
       return [];
     }
@@ -3653,9 +3508,8 @@
       if (!email || !STORE_ID) return null;
       
       try {
-        dbg(`[Lookup] Looking up conversation for ${email}...`);
         const response = await fetchWithTimeout(
-          `${API_URL}/api/widget/conversation/lookup?store=${STORE_ID}&email=${encodeURIComponent(email)}`,
+          API_URL + '/api/widget/conversation/lookup?store=' + STORE_ID + '&email=' + encodeURIComponent(email),
           {},
           10000
         );
@@ -3663,16 +3517,11 @@
         if (response.ok) {
           const data = await response.json();
           if (data.conversationId) {
-            dbg(`[Lookup] ✅ Found conversation: ${data.conversationId}`);
             return data.conversationId;
-          } else {
-            dbg('[Lookup] No existing conversation found');
           }
-        } else {
-          dbg(`[Lookup] Failed: ${response.status}`, 'warn');
         }
       } catch (error) {
-        dbg(`[Lookup] Error: ${error.message}`, 'error');
+        console.error('[Lookup] Error:', error);
       }
       return null;
     }
@@ -3689,7 +3538,7 @@
       
       try {
         const response = await fetchWithTimeout(
-          `${API_URL}/api/customers/cart?store=${STORE_ID}&email=${encodeURIComponent(email)}`,
+          API_URL + '/api/customers/cart?store=' + STORE_ID + '&email=' + encodeURIComponent(email),
           {},
           12000
         );
@@ -3699,64 +3548,45 @@
           return customerCart;
         }
       } catch (error) {
-        console.error('❌ Failed to fetch cart:', error);
+        console.error('Failed to fetch cart:', error);
       }
       return null;
     }
 
     async function init() {
       try {
-        dbg('[Init] Starting...');
-        dbg(`[Init] STORE_ID=${STORE_ID}, API_URL=${API_URL}`);
-        dbg(`[Init] URL: ${window.location.href}`);
-        
         detectMessageSource();
         
-        dbg('[Init] Loading settings...');
         await loadSettings();
-        dbg(`[Init] Settings loaded. storeSettings=${storeSettings ? 'yes' : 'null'}, wsToken=${wsToken ? 'yes' : 'null'}`);
-        
         setupEventListeners();
         
         const detected = autoDetectCustomer();
-        dbg(`[Init] autoDetect result: ${detected ? JSON.stringify({email: detected.email, name: detected.name}) : 'null'}`);
         
         if (detected) {
           customerEmail = detected.email;
           customerName = detected.name || 'Guest';
           
-          localStorage.setItem(`chat_email_${STORE_ID}`, customerEmail);
-          if (customerName) localStorage.setItem(`chat_name_${STORE_ID}`, customerName);
+          localStorage.setItem('chat_email_' + STORE_ID, customerEmail);
+          if (customerName) localStorage.setItem('chat_name_' + STORE_ID, customerName);
           
-          conversationId = localStorage.getItem(`chat_conv_${STORE_ID}`);
+          conversationId = localStorage.getItem('chat_conv_' + STORE_ID);
           
-          // If no stored conversation, look it up from the server
           if (!conversationId && customerEmail) {
-            dbg('[Init] No stored convId, looking up from server...');
             const lookedUp = await lookupConversation(customerEmail);
             if (lookedUp) {
               conversationId = String(lookedUp);
-              localStorage.setItem(`chat_conv_${STORE_ID}`, conversationId);
-              dbg(`[Init] Restored conversation ${conversationId} from server`);
+              localStorage.setItem('chat_conv_' + STORE_ID, conversationId);
             }
           }
           
-          dbg(`[Init] Email=${customerEmail}, Conv=${conversationId}`);
-          
-          dbg('[Init] Loading customer data...');
           await loadCustomerData();
-          dbg('[Init] Customer data loaded. Showing chat interface...');
           await showChatInterface();
         } else {
-          dbg('[Init] No customer detected, showing email form');
           emailCollection.classList.add('visible');
           updateStatus('online', "We're online");
         }
-        
-        dbg('[Init] ✅ Complete');
       } catch (error) {
-        dbg(`[Init] FATAL: ${error.message}`, 'error');
-        dbg(`[Init] Stack: ${error.stack}`, 'error');
+        console.error('[Init] Fatal:', error);
         updateStatus('offline', 'Offline');
       }
     }
@@ -3774,39 +3604,30 @@
 
     async function loadSettings() {
       try {
-        dbg(`[Settings] Fetching: ${API_URL}/api/widget/settings?store=${STORE_ID}`);
-        const response = await fetchWithRetry(`${API_URL}/api/widget/settings?store=${STORE_ID}`, {}, 15000, 2);
-        
-        dbg(`[Settings] Response: status=${response.status}`);
+        const response = await fetchWithRetry(API_URL + '/api/widget/settings?store=' + STORE_ID, {}, 15000, 2);
         
         if (response.ok) {
           storeSettings = await response.json();
-          dbg(`[Settings] Loaded: brandName=${storeSettings.brandName}, storeId=${storeSettings.storeId}`);
           
           brandName.textContent = storeSettings.brandName || 'Chat Support';
           
-          // Force bright green theme - ignore server primaryColor
           document.documentElement.style.setProperty('--primary-color', '#3bbe28');
           document.documentElement.style.setProperty('--primary-dark', '#2fa01e');
           document.documentElement.style.setProperty('--primary-light', '#4cd938');
           document.documentElement.style.setProperty('--success-color', '#3bbe28');
           
-          if (storeSettings.widgetSettings?.greeting) {
+          if (storeSettings.widgetSettings && storeSettings.widgetSettings.greeting) {
             welcomeMessage.querySelector('p').innerHTML = storeSettings.widgetSettings.greeting;
           }
           
-          if (storeSettings.widgetSettings?.placeholder) {
+          if (storeSettings.widgetSettings && storeSettings.widgetSettings.placeholder) {
             chatInput.placeholder = storeSettings.widgetSettings.placeholder;
           }
-        } else {
-          dbg(`[Settings] Failed: ${response.status}`, 'error');
         }
         
-        dbg('[Settings] Getting initial token...');
         await ensureFreshToken(true);
-        dbg(`[Settings] Token: ${wsToken ? 'obtained' : 'FAILED'}`);
       } catch (error) {
-        dbg(`[Settings] ERROR: ${error.message}`, 'error');
+        console.error('[Settings] Error:', error);
       }
     }
 
@@ -3818,7 +3639,6 @@
       if (!conversationId) return;
 
       try {
-        console.log('[WebSocket] Connecting...');
         updateStatus('connecting', 'Connecting...');
         
         await ensureFreshToken(reconnectAttempts > 0);
@@ -3836,7 +3656,6 @@
         ws = new WebSocket(WS_URL);
         
         ws.onopen = () => {
-          console.log('[WebSocket] Connected');
           reconnectAttempts = 0;
           
           ws.send(JSON.stringify({
@@ -3855,22 +3674,18 @@
           }
         };
         
-        ws.onerror = (error) => {
-          console.error('[WebSocket] Error:', error);
+        ws.onerror = () => {
           updateStatus('offline', 'Error');
         };
         
         ws.onclose = (event) => {
-          console.log('[WebSocket] Closed:', event.code);
           updateStatus('offline', 'Disconnected');
           ws = null;
           
           if (reconnectAttempts < maxReconnectAttempts && conversationId) {
             reconnectAttempts++;
             const delay = reconnectDelay * reconnectAttempts;
-            console.log(`[WebSocket] Reconnect in ${delay}ms`);
             updateStatus('connecting', 'Reconnecting...');
-            
             setTimeout(() => connectWebSocket(), delay);
           } else if (reconnectAttempts >= maxReconnectAttempts) {
             updateStatus('offline', 'Offline');
@@ -3886,11 +3701,9 @@
     function handleWebSocketMessage(data) {
       switch (data.type) {
         case 'connected':
-          console.log('[WebSocket] Connected');
           break;
           
         case 'auth_ok':
-          console.log('[WebSocket] Authenticated');
           updateStatus('online', "We're online");
           
           ws.send(JSON.stringify({
@@ -3900,12 +3713,11 @@
             token: wsToken,
             customerEmail: customerEmail,
             customerName: customerName,
-            storeId: storeSettings?.storeId
+            storeId: storeSettings ? storeSettings.storeId : undefined
           }));
           break;
           
         case 'joined':
-          console.log('[WebSocket] Joined');
           updateStatus('online', "We're online");
           break;
           
@@ -3938,9 +3750,6 @@
             tokenLastRefreshed = null;
           }
           break;
-          
-        default:
-          console.log(`[WebSocket] ${data.type}`);
       }
     }
 
@@ -3955,14 +3764,8 @@
         fileData: message.fileData || message.file_data || null
       };
       
-      if (msg.conversationId && msg.conversationId !== parseInt(conversationId)) {
-        return;
-      }
-      
-      if (displayedMessageIds.has(msg.id)) {
-        return;
-      }
-      
+      if (msg.conversationId && msg.conversationId !== parseInt(conversationId)) return;
+      if (displayedMessageIds.has(msg.id)) return;
       if (msg.senderType === 'customer') {
         displayedMessageIds.add(msg.id);
         return;
@@ -3981,12 +3784,12 @@
       );
     }
 
-    function updateMessageStatus(tempId, status, confirmedMessage = null) {
+    function updateMessageStatus(tempId, status, confirmedMessage) {
       const elements = document.querySelectorAll('.message');
-      elements.forEach(el => {
+      elements.forEach(function(el) {
         if (el.dataset.messageId === tempId) {
           if (status === 'confirmed') {
-            el.dataset.messageId = confirmedMessage?.id || tempId;
+            el.dataset.messageId = (confirmedMessage && confirmedMessage.id) || tempId;
             el.classList.remove('pending');
           } else if (status === 'failed') {
             el.classList.remove('pending');
@@ -4047,13 +3850,8 @@
     async function sendMessage() {
       const message = chatInput.value.trim();
       
-      // Allow sending if there's either text OR file
       if (!message && !selectedFile) return;
-
-      if (uploading) {
-        console.log('⚠️ Upload in progress, please wait...');
-        return;
-      }
+      if (uploading) return;
 
       clearTimeout(typingTimeout);
       clearTimeout(typingDebounceTimer);
@@ -4072,9 +3870,8 @@
       attachButton.disabled = true;
       removeFileBtn.disabled = true;
 
-      const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const tempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
 
-      // UPLOAD FILE FIRST IF PRESENT
       let fileData = null;
       if (selectedFile) {
         try {
@@ -4085,11 +3882,8 @@
             type: selectedFile.type,
             size: selectedFile.size
           };
-          console.log('✅ File uploaded:', fileData);
         } catch (error) {
-          console.error('❌ File upload failed:', error);
           addMessage('system', 'Failed to upload file. Please try again.', 'System');
-          
           chatInput.disabled = false;
           sendButton.disabled = false;
           attachButton.disabled = false;
@@ -4098,7 +3892,6 @@
         }
       }
 
-      // ADD MESSAGE WITH FILE
       addMessage('customer', message, customerName || 'You', tempId, true, fileData);
       
       chatInput.value = '';
@@ -4113,18 +3906,18 @@
         if (!conversationId) {
           await ensureFreshToken(true);
           
-          const response = await fetchWithRetry(`${API_URL}/api/conversations`, {
+          const response = await fetchWithRetry(API_URL + '/api/conversations', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               storeIdentifier: STORE_ID,
               customerEmail: customerEmail,
               customerName: customerName,
-              initialMessage: message || (fileData ? `📎 ${fileData.name}` : ''),
+              initialMessage: message || (fileData ? '📎 ' + fileData.name : ''),
               customerData: customerData,
               hasOrders: customerOrders.length > 0,
               orderCount: customerOrders.length,
-              cartSubtotal: customerCart?.subtotal || 0,
+              cartSubtotal: customerCart ? customerCart.subtotal || 0 : 0,
               source: messageSource || 'website',
               fileData: fileData
             })
@@ -4137,21 +3930,20 @@
           const conv = await response.json();
           conversationId = conv.id;
           
-          dbg(`[SendMsg] Conversation created! id=${conversationId}, stored as chat_conv_${STORE_ID}=${conversationId}`);
-          localStorage.setItem(`chat_conv_${STORE_ID}`, conversationId);
+          localStorage.setItem('chat_conv_' + STORE_ID, conversationId);
           
           updateMessageStatus(tempId, 'confirmed', { id: tempId });
           
           if (wsToken && !ws) {
-            connectWebSocket().catch(err => console.warn('WS failed:', err));
+            connectWebSocket().catch(function() {});
           }
           
           let autoReply = 'Thanks for reaching out! An agent will be with you shortly.';
           if (customerData && customerData.name) {
-            autoReply = `Hi ${customerData.name}! ${autoReply}`;
+            autoReply = 'Hi ' + customerData.name + '! ' + autoReply;
           }
           if (customerOrders.length > 0) {
-            autoReply += ` We can see you have ${customerOrders.length} order${customerOrders.length !== 1 ? 's' : ''} with us.`;
+            autoReply += ' We can see you have ' + customerOrders.length + ' order' + (customerOrders.length !== 1 ? 's' : '') + ' with us.';
           }
           
           addMessage('agent', autoReply, 'Support Team');
@@ -4159,7 +3951,7 @@
         } else {
           await ensureFreshToken(false);
           
-          const response = await fetchWithRetry(`${API_URL}/api/widget/messages`, {
+          const response = await fetchWithRetry(API_URL + '/api/widget/messages', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -4171,14 +3963,14 @@
               tempId: tempId,
               customerData: customerData,
               hasOrders: customerOrders.length > 0,
-              cartSubtotal: customerCart?.subtotal || 0,
+              cartSubtotal: customerCart ? customerCart.subtotal || 0 : 0,
               source: messageSource || 'website',
               fileData: fileData
             })
           }, 15000, 2);
 
           if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
+            const errorData = await response.json().catch(function() { return {}; });
             
             updateMessageStatus(tempId, 'failed');
             
@@ -4188,9 +3980,7 @@
               errorData.error.includes('token') ||
               errorData.error.includes('unauthorized')
             )) {
-              console.warn('🔄 Session expired');
-              
-              localStorage.removeItem(`chat_conv_${STORE_ID}`);
+              localStorage.removeItem('chat_conv_' + STORE_ID);
               conversationId = null;
               wsToken = null;
               tokenLastRefreshed = null;
@@ -4201,12 +3991,12 @@
                 ws = null;
               }
               
-              const failedMsg = document.querySelector(`[data-message-id="${tempId}"]`);
+              const failedMsg = document.querySelector('[data-message-id="' + tempId + '"]');
               if (failedMsg) failedMsg.remove();
               
               addMessage('system', 'Session expired. Creating new conversation...', 'System');
               
-              await new Promise(resolve => setTimeout(resolve, 800));
+              await new Promise(function(resolve) { setTimeout(resolve, 800); });
               
               const systemMsg = chatMessages.lastElementChild;
               if (systemMsg && systemMsg.classList.contains('system')) {
@@ -4224,9 +4014,7 @@
             }
           } else {
             const sentMessage = await response.json();
-            
             updateMessageStatus(tempId, 'confirmed', sentMessage);
-            
             if (sentMessage.id) {
               displayedMessageIds.add(sentMessage.id);
             }
@@ -4240,7 +4028,7 @@
         chatInput.focus();
         
       } catch (error) {
-        console.error('❌ Send failed:', error);
+        console.error('Send failed:', error);
         
         if (error.message.includes('token') || error.message.includes('unauthorized')) {
           wsToken = null;
@@ -4249,7 +4037,7 @@
         
         updateMessageStatus(tempId, 'failed');
         
-        const errorMsg = error.message === 'Request timeout' 
+        var errorMsg = error.message === 'Request timeout' 
           ? 'Connection is slow. Please try sending again.'
           : 'Failed to send. Please try again.';
         
@@ -4263,13 +4051,13 @@
       }
     }
 
-    function addMessage(type, text, sender, messageId = null, pending = false, fileData = null) {
+    function addMessage(type, text, sender, messageId, pending, fileData) {
       const messageDiv = document.createElement('div');
-      messageDiv.className = `message ${type}`;
+      messageDiv.className = 'message ' + type;
       if (pending) {
         messageDiv.classList.add('pending');
       }
-      messageDiv.dataset.messageId = messageId || `local-${Date.now()}`;
+      messageDiv.dataset.messageId = messageId || ('local-' + Date.now());
       
       const time = new Date().toLocaleTimeString('en-US', { 
         hour: 'numeric', 
@@ -4280,29 +4068,26 @@
                          type === 'agent' ? getInitials(sender || 'Support') : 
                          '!';
       
-      const senderName = type !== 'system' && sender ? 
-        `<div class="sender-name">${escapeHtml(sender)}</div>` : '';
+      const senderNameHtml = type !== 'system' && sender ? 
+        '<div class="sender-name">' + escapeHtml(sender) + '</div>' : '';
       
-      // HANDLE FILE ATTACHMENTS
       let fileAttachmentHtml = '';
       if (fileData) {
         fileAttachmentHtml = createFileAttachmentHtml(fileData);
       }
 
-      messageDiv.innerHTML = `
-        <div class="avatar">${avatarText}</div>
-        <div class="bubble">
-          ${senderName}
-          ${text ? `<div class="text">${escapeHtml(text)}</div>` : ''}
-          ${fileAttachmentHtml}
-          <div class="time">${time}</div>
-        </div>
-      `;
+      messageDiv.innerHTML = 
+        '<div class="avatar">' + avatarText + '</div>' +
+        '<div class="bubble">' +
+          senderNameHtml +
+          (text ? '<div class="text">' + escapeHtml(text) + '</div>' : '') +
+          fileAttachmentHtml +
+          '<div class="time">' + time + '</div>' +
+        '</div>';
       
       chatMessages.appendChild(messageDiv);
       chatMessages.scrollTop = chatMessages.scrollHeight;
 
-      // ADD CLICK HANDLER FOR IMAGES
       const imgElement = messageDiv.querySelector('.file-attachment img');
       if (imgElement) {
         imgElement.addEventListener('click', () => {
@@ -4319,16 +4104,11 @@
       const indicator = document.createElement('div');
       indicator.className = 'message agent';
       indicator.id = 'typing-indicator';
-      indicator.innerHTML = `
-        <div class="avatar">SA</div>
-        <div class="typing-indicator">
-          <div class="dots">
-            <span></span>
-            <span></span>
-            <span></span>
-          </div>
-        </div>
-      `;
+      indicator.innerHTML = 
+        '<div class="avatar">SA</div>' +
+        '<div class="typing-indicator">' +
+          '<div class="dots"><span></span><span></span><span></span></div>' +
+        '</div>';
       chatMessages.appendChild(indicator);
       chatMessages.scrollTop = chatMessages.scrollHeight;
     }
