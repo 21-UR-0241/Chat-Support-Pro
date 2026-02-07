@@ -2062,7 +2062,6 @@
 
 
  -->
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -3194,12 +3193,12 @@
         const url = `${API_URL}/api/widget/conversations/${conversationId}/messages?store=${STORE_ID}`;
         console.log('📜 [History] Fetching:', url);
         
-        const response = await fetch(url, {
+        const response = await fetchWithRetry(url, {
           headers: {
             'Authorization': `Bearer ${wsToken}`,
             'Content-Type': 'application/json'
           }
-        });
+        }, 15000, 1);
 
         console.log('📡 [History] Response status:', response.status);
 
@@ -3427,7 +3426,9 @@
     async function fetchWithRetry(url, options = {}, timeout = 15000, retries = 2) {
       for (let attempt = 0; attempt <= retries; attempt++) {
         try {
-          return await fetchWithTimeout(url, options, timeout);
+          // First attempt gets extra time for cold starts
+          const attemptTimeout = attempt === 0 ? timeout + 15000 : timeout;
+          return await fetchWithTimeout(url, options, attemptTimeout);
         } catch (error) {
           console.warn(`⚠️ Attempt ${attempt + 1}/${retries + 1} failed:`, error.message);
           if (attempt === retries) throw error;
@@ -3446,10 +3447,11 @@
       
       try {
         console.log('🔄 Refreshing token...');
-        const response = await fetchWithTimeout(
+        const response = await fetchWithRetry(
           `${API_URL}/api/widget/session?store=${STORE_ID}${conversationId ? `&conversationId=${conversationId}` : ''}`,
           {},
-          10000
+          10000,
+          1
         );
         
         if (response.ok) {
@@ -3474,7 +3476,7 @@
         const response = await fetchWithTimeout(
           `${API_URL}/api/customers/lookup?store=${STORE_ID}&email=${encodeURIComponent(email)}`,
           {},
-          5000
+          12000
         );
         
         if (response.ok) {
@@ -3495,7 +3497,7 @@
         const response = await fetchWithTimeout(
           `${API_URL}/api/customers/orders?store=${STORE_ID}&email=${encodeURIComponent(email)}`,
           {},
-          5000
+          12000
         );
         
         if (response.ok) {
@@ -3523,7 +3525,7 @@
         const response = await fetchWithTimeout(
           `${API_URL}/api/customers/cart?store=${STORE_ID}&email=${encodeURIComponent(email)}`,
           {},
-          5000
+          12000
         );
         
         if (response.ok) {
@@ -3586,7 +3588,7 @@
 
     async function loadSettings() {
       try {
-        const response = await fetchWithTimeout(`${API_URL}/api/widget/settings?store=${STORE_ID}`, {}, 8000);
+        const response = await fetchWithRetry(`${API_URL}/api/widget/settings?store=${STORE_ID}`, {}, 15000, 2);
         
         if (response.ok) {
           storeSettings = await response.json();
@@ -4052,7 +4054,7 @@
         updateMessageStatus(tempId, 'failed');
         
         const errorMsg = error.message === 'Request timeout' 
-          ? 'Request timed out. Please try again.'
+          ? 'Connection is slow. Please try sending again.'
           : 'Failed to send. Please try again.';
         
         addMessage('system', errorMsg, 'System');

@@ -1245,6 +1245,8 @@
 
 // module.exports = { app, server };
 
+
+
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -1870,7 +1872,7 @@ app.get('/api/conversations/:id', authenticateToken, async (req, res) => {
 
 app.post('/api/conversations', async (req, res) => {
   try {
-    const { storeIdentifier, customerEmail, customerName, initialMessage } = req.body;
+    const { storeIdentifier, customerEmail, customerName, initialMessage, fileData } = req.body;
     
     if (!storeIdentifier || !customerEmail) {
       return res.status(400).json({ error: 'storeIdentifier and customerEmail required' });
@@ -1890,38 +1892,48 @@ app.post('/api/conversations', async (req, res) => {
       priority: 'normal'
     });
     
-    if (initialMessage) {
-      const message = await db.saveMessage({
-        conversation_id: conversation.id,
-        store_id: store.id,
-        sender_type: 'customer',
-        sender_name: customerName || customerEmail,
-        content: initialMessage
-      });
-      
-      const camelMessage = snakeToCamel(message);
-      
-      sendToConversation(conversation.id, {
-        type: 'new_message',
-        message: camelMessage
-      });
-      
-      broadcastToAgents({
-        type: 'new_message',
-        message: camelMessage,
-        conversationId: conversation.id,
-        storeId: store.id
-      });
-    }
+    // Respond IMMEDIATELY
+    res.json(snakeToCamel(conversation));
     
-    broadcastToAgents({
-      type: 'new_conversation',
-      conversation: snakeToCamel(conversation),
-      storeId: store.id,
-      storeIdentifier
+    // Save initial message and broadcast in background
+    setImmediate(async () => {
+      try {
+        if (initialMessage) {
+          const message = await db.saveMessage({
+            conversation_id: conversation.id,
+            store_id: store.id,
+            sender_type: 'customer',
+            sender_name: customerName || customerEmail,
+            content: initialMessage,
+            file_data: fileData ? JSON.stringify(fileData) : null
+          });
+          
+          const camelMessage = snakeToCamel(message);
+          
+          sendToConversation(conversation.id, {
+            type: 'new_message',
+            message: camelMessage
+          });
+          
+          broadcastToAgents({
+            type: 'new_message',
+            message: camelMessage,
+            conversationId: conversation.id,
+            storeId: store.id
+          });
+        }
+        
+        broadcastToAgents({
+          type: 'new_conversation',
+          conversation: snakeToCamel(conversation),
+          storeId: store.id,
+          storeIdentifier
+        });
+      } catch (error) {
+        console.error('Background conversation processing error:', error);
+      }
     });
     
-    res.json(snakeToCamel(conversation));
   } catch (error) {
     console.error('Create conversation error:', error);
     res.status(500).json({ 
@@ -2462,14 +2474,15 @@ app.use((err, req, res, next) => {
 // ============ KEEP-ALIVE MECHANISM ============
 
 function setupKeepAlive() {
-  if (process.env.KEEP_ALIVE !== 'true') {
+  // Enable by default - critical for preventing cold starts on Render
+  if (process.env.KEEP_ALIVE === 'false') {
     console.log('⏰ Keep-alive disabled');
     return;
   }
 
   const APP_URL = process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`;
   
-  console.log('⏰ Keep-alive enabled - pinging every 14 minutes');
+  console.log('⏰ Keep-alive enabled - pinging every 5 minutes');
   
   setInterval(() => {
     const now = new Date().toISOString();
@@ -2492,7 +2505,7 @@ function setupKeepAlive() {
       console.error(`❌ Keep-alive ping error [${now}]:`, err.message);
     });
     
-  }, 14 * 60 * 1000);
+  }, 5 * 60 * 1000);
   
   setTimeout(() => {
     console.log('⏰ Running initial keep-alive ping...');
