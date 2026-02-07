@@ -2070,8 +2070,8 @@ app.get('/api/widget/conversations/:id/messages', async (req, res) => {
     }
 
     // db may return snake_case or camelCase depending on driver - handle both
-    const convStoreId = conversation.store_id ?? conversation.storeId;
-    const convStoreIdentifier = conversation.store_identifier ?? conversation.storeIdentifier;
+const convStoreId = conversation.shop_id ?? conversation.shopId ?? conversation.store_id ?? conversation.storeId;
+const convStoreIdentifier = conversation.shop_domain ?? conversation.shopDomain ?? conversation.store_identifier ?? conversation.storeIdentifier;
 
     // Security check: verify conversation belongs to this store
     const storeIdMatch = String(convStoreId) === String(storeRecord.id);
