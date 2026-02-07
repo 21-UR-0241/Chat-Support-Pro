@@ -1245,8 +1245,6 @@
 
 // module.exports = { app, server };
 
-
-
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -2064,24 +2062,25 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
       pending: true
     };
     
+    // Broadcast to conversation participants IMMEDIATELY
+    sendToConversation(conversationId, {
+      type: 'new_message',
+      message: snakeToCamel(tempMessage)
+    });
+    
+    broadcastToAgents({
+      type: 'new_message',
+      message: snakeToCamel(tempMessage),
+      conversationId,
+      storeId
+    });
+    
     // Respond to admin IMMEDIATELY
     res.json(snakeToCamel(tempMessage));
     
-    // Then broadcast and save in background
+    // Then save to DB in background
     setImmediate(async () => {
       try {
-        sendToConversation(conversationId, {
-          type: 'new_message',
-          message: snakeToCamel(tempMessage)
-        });
-        
-        broadcastToAgents({
-          type: 'new_message',
-          message: snakeToCamel(tempMessage),
-          conversationId,
-          storeId
-        });
-        
         const savedMessage = await db.saveMessage({
           conversation_id: conversationId,
           store_id: storeId,
@@ -2163,16 +2162,25 @@ app.post('/api/widget/messages', async (req, res) => {
       pending: true
     };
     
-    // Respond to widget IMMEDIATELY
+    // Broadcast to agents and conversation participants IMMEDIATELY
+    sendToConversation(conversationId, {
+      type: 'new_message',
+      message: snakeToCamel(tempMessage)
+    });
+    
+    broadcastToAgents({
+      type: 'new_message',
+      message: snakeToCamel(tempMessage),
+      conversationId,
+      storeId: store.id
+    });
+    
+    // Respond to widget
     res.json(snakeToCamel(tempMessage));
     
-    // Then broadcast and save in background
+    // Save to DB in background
     setImmediate(async () => {
       try {
-        sendToConversation(conversationId, {
-          type: 'new_message',
-          message: snakeToCamel(tempMessage)
-        });
         const savedMessage = await db.saveMessage({
           conversation_id: conversationId,
           store_id: store.id,
@@ -2473,23 +2481,21 @@ app.use((err, req, res, next) => {
 
 // ============ KEEP-ALIVE MECHANISM ============
 
-// ============ KEEP-ALIVE MECHANISM ============
-
 function setupKeepAlive() {
+  // Enable by default - critical for preventing cold starts on Render
   if (process.env.KEEP_ALIVE === 'false') {
     console.log('⏰ Keep-alive disabled');
     return;
   }
 
   const APP_URL = process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`;
-  const httpModule = APP_URL.startsWith('https') ? require('https') : http;
   
   console.log('⏰ Keep-alive enabled - pinging every 5 minutes');
   
   setInterval(() => {
     const now = new Date().toISOString();
     
-    httpModule.get(`${APP_URL}/health`, (res) => {
+    http.get(`${APP_URL}/health`, (res) => {
       let data = '';
       
       res.on('data', (chunk) => {
@@ -2511,13 +2517,14 @@ function setupKeepAlive() {
   
   setTimeout(() => {
     console.log('⏰ Running initial keep-alive ping...');
-    httpModule.get(`${APP_URL}/health`, (res) => {
+    http.get(`${APP_URL}/health`, (res) => {
       console.log(`⏰ Initial ping: ${res.statusCode}`);
     }).on('error', (err) => {
       console.error('❌ Initial ping error:', err.message);
     });
   }, 60 * 1000);
 }
+
 // ============ START SERVER ============
 
 const PORT = process.env.PORT || 3000;

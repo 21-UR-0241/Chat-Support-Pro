@@ -965,7 +965,6 @@
 
 // export default ChatWindow;
 
-
 import React, { useState, useEffect, useRef } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import api from "../services/api";
@@ -1060,8 +1059,7 @@ function ChatWindow({
     const file = e.target.files[0];
     if (!file) return;
 
-    // Validate file size (max 10MB)
-    const maxSize = 10 * 1024 * 1024; // 10MB
+    const maxSize = 10 * 1024 * 1024;
     if (file.size > maxSize) {
       alert('File size must be less than 10MB');
       return;
@@ -1069,7 +1067,6 @@ function ChatWindow({
 
     setSelectedFile(file);
 
-    // Create preview for images
     if (file.type.startsWith('image/')) {
       const reader = new FileReader();
       reader.onload = (e) => {
@@ -1110,8 +1107,6 @@ function ChatWindow({
       setUploading(true);
       setUploadProgress(0);
 
-      console.log('📤 Uploading file to Bunny.net:', file.name);
-
       const formData = new FormData();
       formData.append('file', file);
 
@@ -1122,7 +1117,6 @@ function ChatWindow({
         setUploadProgress(percentCompleted);
       });
 
-      console.log('✅ File uploaded successfully:', response);
       return response;
     } catch (error) {
       console.error('❌ File upload failed:', error);
@@ -1134,10 +1128,7 @@ function ChatWindow({
   };
 
   const handleAddTemplate = (e) => {
-    if (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
+    if (e) { e.preventDefault(); e.stopPropagation(); }
     setEditingTemplate(null);
     setTemplateName('');
     setTemplateContent('');
@@ -1146,10 +1137,7 @@ function ChatWindow({
   };
 
   const handleEditTemplate = (template, e) => {
-    if (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
+    if (e) { e.preventDefault(); e.stopPropagation(); }
     setEditingTemplate(template);
     setTemplateName(template.name || '');
     setTemplateContent(template.content || '');
@@ -1158,10 +1146,7 @@ function ChatWindow({
   };
 
   const handleSaveTemplate = async (e) => {
-    if (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
+    if (e) { e.preventDefault(); e.stopPropagation(); }
 
     const trimmedName = templateName.trim();
     const trimmedContent = templateContent.trim();
@@ -1179,16 +1164,12 @@ function ChatWindow({
           name: trimmedName,
           content: trimmedContent,
         });
-        
-        setTemplates(prev =>
-          prev.map(t => t.id === editingTemplate.id ? updated : t)
-        );
+        setTemplates(prev => prev.map(t => t.id === editingTemplate.id ? updated : t));
       } else {
         const newTemplate = await api.createTemplate({
           name: trimmedName,
           content: trimmedContent,
         });
-        
         setTemplates(prev => [...prev, newTemplate]);
       }
 
@@ -1196,7 +1177,6 @@ function ChatWindow({
       setTemplateName('');
       setTemplateContent('');
       setEditingTemplate(null);
-      
     } catch (error) {
       console.error('Failed to save template:', error);
       alert(`Failed to save template: ${error.message || 'Please try again.'}`);
@@ -1206,14 +1186,8 @@ function ChatWindow({
   };
 
   const handleDeleteTemplate = async (templateId, e) => {
-    if (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-
-    if (!window.confirm('Are you sure you want to delete this template?')) {
-      return;
-    }
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    if (!window.confirm('Are you sure you want to delete this template?')) return;
 
     try {
       await api.deleteTemplate(templateId);
@@ -1227,9 +1201,7 @@ function ChatWindow({
   const handleUseTemplate = (template) => {
     setMessageText(template.content);
     setShowTemplates(false);
-    if (textareaRef.current) {
-      textareaRef.current.focus();
-    }
+    if (textareaRef.current) textareaRef.current.focus();
   };
 
   const handleCancelTemplateModal = () => {
@@ -1241,52 +1213,363 @@ function ChatWindow({
     }
   };
 
-  // WebSocket and message handling functions (keeping existing logic)
+  // ============ WEBSOCKET IMPLEMENTATION ============
+
+  const getWsUrl = () => {
+    const baseUrl = api.getBaseUrl ? api.getBaseUrl() : (process.env.REACT_APP_API_URL || window.location.origin);
+    return baseUrl.replace(/^http/, 'ws') + '/ws';
+  };
+
   const connectWebSocket = () => {
-    // Keep your existing WebSocket code
+    // Clean up any existing connection
+    disconnectWebSocket();
+    
+    if (!conversation?.id) return;
+
+    const token = localStorage.getItem('token');
+    if (!token) {
+      console.error('❌ [WS] No auth token found');
+      return;
+    }
+
+    try {
+      const wsUrl = getWsUrl();
+      console.log(`🔌 [WS] Connecting to ${wsUrl} for conversation ${conversation.id}...`);
+      
+      hasAuthenticated.current = false;
+      hasJoined.current = false;
+      
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        console.log('✅ [WS] Connected, authenticating...');
+        reconnectAttempts.current = 0;
+        
+        // Step 1: Authenticate as agent
+        ws.send(JSON.stringify({
+          type: 'auth',
+          token: token,
+          clientType: 'agent'
+        }));
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          handleWebSocketMessage(data);
+        } catch (error) {
+          console.error('❌ [WS] Parse error:', error);
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error('❌ [WS] Error:', error);
+        setWsConnected(false);
+      };
+
+      ws.onclose = (event) => {
+        console.log(`🔌 [WS] Closed: ${event.code}`);
+        setWsConnected(false);
+        hasAuthenticated.current = false;
+        hasJoined.current = false;
+        wsRef.current = null;
+
+        // Auto-reconnect if not intentional close
+        if (event.code !== 1000 && reconnectAttempts.current < maxReconnectAttempts && conversation?.id) {
+          reconnectAttempts.current++;
+          const delay = Math.min(2000 * reconnectAttempts.current, 10000);
+          console.log(`🔄 [WS] Reconnecting in ${delay}ms (attempt ${reconnectAttempts.current}/${maxReconnectAttempts})...`);
+          
+          reconnectTimeoutRef.current = setTimeout(() => {
+            connectWebSocket();
+          }, delay);
+        }
+      };
+    } catch (error) {
+      console.error('❌ [WS] Connection failed:', error);
+      setWsConnected(false);
+    }
   };
 
   const disconnectWebSocket = () => {
-    // Keep your existing code
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+    
+    if (wsRef.current) {
+      const ws = wsRef.current;
+      wsRef.current = null;
+      hasAuthenticated.current = false;
+      hasJoined.current = false;
+      
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close(1000, 'Component unmounting');
+      }
+    }
+    
+    setWsConnected(false);
   };
 
   const handleWebSocketMessage = (data) => {
-    // Keep your existing code
+    switch (data.type) {
+      case 'connected':
+        console.log('🔌 [WS] Server acknowledged connection');
+        break;
+
+      case 'auth_ok':
+        console.log('✅ [WS] Authenticated as', data.role);
+        hasAuthenticated.current = true;
+        
+        // Step 2: Join the conversation
+        if (conversation?.id && wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({
+            type: 'join_conversation',
+            conversationId: parseInt(conversation.id),
+            role: 'agent',
+            employeeName: employeeName || 'Agent'
+          }));
+        }
+        break;
+
+      case 'joined':
+        console.log('✅ [WS] Joined conversation', data.conversationId);
+        hasJoined.current = true;
+        setWsConnected(true);
+        break;
+
+      case 'new_message':
+        if (data.message) {
+          handleIncomingMessage(data.message);
+        }
+        break;
+
+      case 'message_confirmed':
+        if (data.tempId && data.message) {
+          // Update optimistic message with confirmed data
+          setMessages(prev => prev.map(msg => {
+            if (msg.id === data.tempId || (msg._optimistic && msg.id === data.tempId)) {
+              return {
+                ...data.message,
+                fileData: data.message.fileData || msg.fileData,
+                fileUrl: data.message.fileUrl || msg.fileUrl,
+                sending: false,
+                _optimistic: false
+              };
+            }
+            return msg;
+          }));
+          
+          if (data.message.id) {
+            displayedMessageIds.current.add(data.message.id);
+          }
+        }
+        break;
+
+      case 'message_failed':
+        if (data.tempId) {
+          setMessages(prev => prev.map(msg =>
+            msg.id === data.tempId
+              ? { ...msg, sending: false, failed: true, _optimistic: false }
+              : msg
+          ));
+        }
+        break;
+
+      case 'typing':
+        handleTypingIndicator(data);
+        break;
+
+      case 'customer_joined':
+        console.log('👤 [WS] Customer joined:', data.customerName);
+        break;
+
+      case 'customer_left':
+        console.log('👤 [WS] Customer left');
+        setTypingUsers(new Set());
+        break;
+
+      case 'agent_joined':
+        console.log('👤 [WS] Agent joined:', data.agentName);
+        break;
+
+      case 'conversation_read':
+        console.log('✅ [WS] Conversation marked as read');
+        break;
+
+      case 'error':
+        console.error('❌ [WS] Server error:', data.message);
+        if (data.message && (data.message.includes('token') || data.message.includes('auth'))) {
+          hasAuthenticated.current = false;
+          hasJoined.current = false;
+          setWsConnected(false);
+        }
+        break;
+
+      case 'pong':
+        break;
+
+      default:
+        console.log(`ℹ️ [WS] Unhandled message type: ${data.type}`);
+    }
   };
 
   const handleIncomingMessage = (message) => {
-    // Keep your existing code
+    const msgId = message.id;
+    const convId = message.conversationId || message.conversation_id;
+
+    // Only handle messages for the current conversation
+    if (convId && convId !== parseInt(conversation?.id)) {
+      // Message is for a different conversation — show notification
+      showNotification(message);
+      return;
+    }
+
+    // Skip if already displayed
+    if (msgId && displayedMessageIds.current.has(msgId)) {
+      return;
+    }
+
+    // Skip our own agent messages (we already show them optimistically)
+    if (message.senderType === 'agent' && message.senderName === employeeName) {
+      if (msgId) displayedMessageIds.current.add(msgId);
+      return;
+    }
+
+    if (msgId) displayedMessageIds.current.add(msgId);
+
+    console.log('📨 [WS] New message from', message.senderType, ':', (message.content || '').substring(0, 50));
+
+    setMessages(prev => {
+      // Double-check it's not already in the list
+      if (prev.some(m => m.id === msgId)) return prev;
+      return [...prev, {
+        ...message,
+        sending: false,
+        _optimistic: false
+      }];
+    });
+
+    // Show notification if message is from customer
+    if (message.senderType === 'customer') {
+      showNotification(message);
+    }
   };
 
   const showNotification = (message) => {
-    // Keep your existing code
+    if (!message || message.senderType === 'agent') return;
+
+    // Play sound
+    playNotificationSound();
+
+    // Browser notification
+    if (Notification.permission === 'granted') {
+      createNotification(message);
+    } else if (Notification.permission !== 'denied') {
+      Notification.requestPermission().then(permission => {
+        if (permission === 'granted') {
+          createNotification(message);
+        }
+      });
+    }
   };
 
   const createNotification = (message) => {
-    // Keep your existing code
-  };
+    try {
+      const senderName = message.senderName || message.customerName || 'Customer';
+      const content = message.content || (message.fileData ? '📎 Sent a file' : 'New message');
+      
+      const notification = new Notification(`New message from ${senderName}`, {
+        body: content.substring(0, 100),
+        icon: '/favicon.ico',
+        tag: `msg-${message.id || Date.now()}`,
+        requireInteraction: false
+      });
 
-  const removeNotificationFromTracking = (conversationId, notification) => {
-    // Keep your existing code
+      notification.onclick = () => {
+        window.focus();
+        notification.close();
+      };
+
+      // Auto-close after 5 seconds
+      setTimeout(() => notification.close(), 5000);
+    } catch (error) {
+      console.warn('Notification failed:', error);
+    }
   };
 
   const clearAllNotifications = (conversationId) => {
-    // Keep your existing code
+    const notifications = activeNotificationsRef.current.get(conversationId);
+    if (notifications) {
+      notifications.forEach(n => {
+        try { n.close(); } catch (e) {}
+      });
+      activeNotificationsRef.current.delete(conversationId);
+    }
   };
 
   const playNotificationSound = () => {
-    // Keep your existing code
+    try {
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.value = 800;
+      oscillator.type = 'sine';
+      gainNode.gain.value = 0.1;
+      
+      oscillator.start();
+      gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.3);
+      oscillator.stop(audioContext.currentTime + 0.3);
+    } catch (error) {
+      // Audio not available
+    }
   };
 
   const handleTypingIndicator = (data) => {
-    // Keep your existing code
+    // Only show typing for customers, not other agents
+    if (data.senderType === 'agent') return;
+    
+    const senderName = data.senderName || 'Customer';
+
+    if (data.isTyping) {
+      setTypingUsers(prev => new Set([...prev, senderName]));
+      
+      // Auto-clear after 5 seconds in case we miss the stop event
+      setTimeout(() => {
+        setTypingUsers(prev => {
+          const next = new Set(prev);
+          next.delete(senderName);
+          return next;
+        });
+      }, 5000);
+    } else {
+      setTypingUsers(prev => {
+        const next = new Set(prev);
+        next.delete(senderName);
+        return next;
+      });
+    }
   };
 
   const sendTypingIndicator = (isTyping) => {
-    // Keep your existing code
+    if (wsRef.current?.readyState === WebSocket.OPEN && conversation?.id && hasJoined.current) {
+      wsRef.current.send(JSON.stringify({
+        type: 'typing',
+        conversationId: parseInt(conversation.id),
+        isTyping,
+        senderType: 'agent',
+        senderName: employeeName || 'Agent'
+      }));
+    }
   };
 
-  // useEffect hooks
+  // ============ EFFECTS ============
+
   useEffect(() => {
     if (!conversation) {
       disconnectWebSocket();
@@ -1328,6 +1611,17 @@ function ChatWindow({
     }
   }, [messageText]);
 
+  // Keep-alive ping every 30 seconds
+  useEffect(() => {
+    const pingInterval = setInterval(() => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'ping' }));
+      }
+    }, 30000);
+    
+    return () => clearInterval(pingInterval);
+  }, []);
+
   const loadMessages = async () => {
     try {
       setLoading(true);
@@ -1352,10 +1646,7 @@ function ChatWindow({
   };
 
   const handleSend = async (e) => {
-    if (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
+    if (e) { e.preventDefault(); e.stopPropagation(); }
 
     const hasText = messageText.trim();
     const hasFile = selectedFile;
@@ -1369,7 +1660,6 @@ function ChatWindow({
       let fileUrl = null;
       let fileData = null;
 
-      // Upload file first if present
       if (selectedFile) {
         const uploadResult = await uploadFileToBunny(selectedFile);
         fileUrl = uploadResult.url;
@@ -1379,7 +1669,6 @@ function ChatWindow({
           type: selectedFile.type,
           size: selectedFile.size,
         };
-        console.log('✅ File uploaded, fileData:', fileData);
       }
 
       setMessageText('');
@@ -1404,26 +1693,21 @@ function ChatWindow({
         sending: true,
       };
 
-      console.log('📤 Adding optimistic message:', optimisticMessage);
       setMessages(prev => [...prev, optimisticMessage]);
       clearAllNotifications(conversation.id);
 
       const sentMessage = await onSendMessage(conversation, text, fileData);
-      console.log('✅ Server response:', sentMessage);
       
       if (sentMessage.id) {
         displayedMessageIds.current.add(sentMessage.id);
       }
       
-      // ✅ FIX: Preserve fileData from optimistic message if server response doesn't have it
       const mergedMessage = {
         ...sentMessage,
         fileUrl: sentMessage.fileUrl || fileUrl,
         fileData: sentMessage.fileData || fileData,
         sending: false
       };
-      
-      console.log('🔄 Updating message with merged data:', mergedMessage);
       
       setMessages(prev =>
         prev.map(msg =>
@@ -1485,9 +1769,7 @@ function ChatWindow({
   };
 
   const handleBackClick = () => {
-    if (onClose) {
-      onClose();
-    }
+    if (onClose) onClose();
   };
 
   const getInitials = (name) => {
@@ -1507,16 +1789,10 @@ function ChatWindow({
       const prevMessage = index > 0 ? messages[index - 1] : null;
       const nextMessage = index < messages.length - 1 ? messages[index + 1] : null;
       
-      const isFirstInGroup = !prevMessage || 
-                            prevMessage.senderType !== message.senderType;
-      const isLastInGroup = !nextMessage || 
-                           nextMessage.senderType !== message.senderType;
+      const isFirstInGroup = !prevMessage || prevMessage.senderType !== message.senderType;
+      const isLastInGroup = !nextMessage || nextMessage.senderType !== message.senderType;
       
-      return {
-        ...message,
-        isFirstInGroup,
-        isLastInGroup,
-      };
+      return { ...message, isFirstInGroup, isLastInGroup };
     });
   };
 
@@ -1534,19 +1810,16 @@ function ChatWindow({
 
   const getStoreDetails = () => {
     if (!stores || !conversation) return null;
-    
     const store = stores.find(s =>
       s.storeIdentifier === conversation.storeIdentifier ||
       s.id === conversation.shopId
     );
-    
     return store || null;
   };
 
   const storeDetails = getStoreDetails();
   const storeName = storeDetails?.brandName || conversation.storeName || conversation.storeIdentifier;
   const storeDomain = storeDetails?.domain || storeDetails?.url || storeDetails?.storeDomain || null;
-
   const groupedMessages = getGroupedMessages();
 
   return (
@@ -1631,20 +1904,10 @@ function ChatWindow({
               </div>
             </div>
             <div className="modal-footer">
-              <button 
-                className="btn-cancel" 
-                onClick={handleCancelDelete}
-                disabled={deleting}
-                type="button"
-              >
+              <button className="btn-cancel" onClick={handleCancelDelete} disabled={deleting} type="button">
                 Cancel
               </button>
-              <button 
-                className="btn-delete" 
-                onClick={handleConfirmDelete}
-                disabled={deleting}
-                type="button"
-              >
+              <button className="btn-delete" onClick={handleConfirmDelete} disabled={deleting} type="button">
                 {deleting ? 'Deleting...' : 'Yes, Delete'}
               </button>
             </div>
@@ -1657,46 +1920,16 @@ function ChatWindow({
         <div 
           className="modal-overlay" 
           onClick={handleCancelTemplateModal}
-          style={{ 
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 10000
-          }}
+          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000 }}
         >
           <div 
             className="modal-content template-modal" 
             onClick={(e) => e.stopPropagation()}
-            style={{
-              backgroundColor: 'white',
-              padding: '20px',
-              borderRadius: '8px',
-              maxWidth: '500px',
-              width: '90%',
-              maxHeight: '90vh',
-              overflow: 'auto'
-            }}
+            style={{ backgroundColor: 'white', padding: '20px', borderRadius: '8px', maxWidth: '500px', width: '90%', maxHeight: '90vh', overflow: 'auto' }}
           >
             <div className="modal-header" style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0 }}>📝 {editingTemplate ? 'Edit Template' : 'New Template'}</h3>
-              <button
-                onClick={handleCancelTemplateModal}
-                disabled={templateLoading}
-                type="button"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  fontSize: '24px',
-                  cursor: 'pointer',
-                  padding: '0 8px'
-                }}
-              >
+              <button onClick={handleCancelTemplateModal} disabled={templateLoading} type="button" style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', padding: '0 8px' }}>
                 ✕
               </button>
             </div>
@@ -1713,13 +1946,7 @@ function ChatWindow({
                   onChange={(e) => setTemplateName(e.target.value)}
                   disabled={templateLoading}
                   autoFocus
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    border: '1px solid #ccc',
-                    borderRadius: '4px',
-                    fontSize: '14px'
-                  }}
+                  style={{ width: '100%', padding: '8px 12px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '14px' }}
                 />
               </div>
               <div className="form-group">
@@ -1733,45 +1960,19 @@ function ChatWindow({
                   onChange={(e) => setTemplateContent(e.target.value)}
                   disabled={templateLoading}
                   rows="6"
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    border: '1px solid #ccc',
-                    borderRadius: '4px',
-                    fontSize: '14px',
-                    resize: 'vertical',
-                    fontFamily: 'inherit'
-                  }}
+                  style={{ width: '100%', padding: '8px 12px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '14px', resize: 'vertical', fontFamily: 'inherit' }}
                 />
               </div>
             </div>
             <div className="modal-footer" style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-              <button 
-                onClick={handleCancelTemplateModal}
-                disabled={templateLoading}
-                type="button"
-                style={{
-                  padding: '8px 16px',
-                  border: '1px solid #ccc',
-                  backgroundColor: 'white',
-                  borderRadius: '4px',
-                  cursor: 'pointer'
-                }}
-              >
+              <button onClick={handleCancelTemplateModal} disabled={templateLoading} type="button" style={{ padding: '8px 16px', border: '1px solid #ccc', backgroundColor: 'white', borderRadius: '4px', cursor: 'pointer' }}>
                 Cancel
               </button>
               <button 
                 onClick={handleSaveTemplate}
                 disabled={templateLoading || !templateName.trim() || !templateContent.trim()}
                 type="button"
-                style={{
-                  padding: '8px 16px',
-                  border: 'none',
-                  backgroundColor: (templateLoading || !templateName.trim() || !templateContent.trim()) ? '#ccc' : '#00a884',
-                  color: 'white',
-                  borderRadius: '4px',
-                  cursor: (templateLoading || !templateName.trim() || !templateContent.trim()) ? 'not-allowed' : 'pointer'
-                }}
+                style={{ padding: '8px 16px', border: 'none', backgroundColor: (templateLoading || !templateName.trim() || !templateContent.trim()) ? '#ccc' : '#00a884', color: 'white', borderRadius: '4px', cursor: (templateLoading || !templateName.trim() || !templateContent.trim()) ? 'not-allowed' : 'pointer' }}
               >
                 {templateLoading ? 'Saving...' : (editingTemplate ? 'Update' : 'Save')} Template
               </button>
@@ -1838,39 +2039,11 @@ function ChatWindow({
       {/* Templates Dropdown */}
       {showTemplates && (
         <div 
-          style={{
-            position: 'fixed',
-            bottom: `${dropdownPosition.bottom}px`,
-            left: `${dropdownPosition.left}px`,
-            right: `${dropdownPosition.right}px`,
-            maxWidth: '500px',
-            maxHeight: '400px',
-            background: 'white',
-            borderRadius: '12px',
-            boxShadow: '0 4px 20px rgba(11, 20, 26, 0.2)',
-            zIndex: 1000,
-            pointerEvents: 'auto',
-            overflowY: 'auto'
-          }}
+          style={{ position: 'fixed', bottom: `${dropdownPosition.bottom}px`, left: `${dropdownPosition.left}px`, right: `${dropdownPosition.right}px`, maxWidth: '500px', maxHeight: '400px', background: 'white', borderRadius: '12px', boxShadow: '0 4px 20px rgba(11, 20, 26, 0.2)', zIndex: 1000, pointerEvents: 'auto', overflowY: 'auto' }}
         >
           <div style={{ padding: '16px 20px', borderBottom: '1px solid #e9edef', display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'sticky', top: 0, background: 'white', zIndex: 1 }}>
             <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>Quick Replies</h4>
-            <button
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setShowTemplates(false);
-              }}
-              type="button"
-              style={{
-                background: 'none',
-                border: 'none',
-                fontSize: '20px',
-                cursor: 'pointer',
-                padding: '4px 8px',
-                color: '#54656f'
-              }}
-            >
+            <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowTemplates(false); }} type="button" style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', padding: '4px 8px', color: '#54656f' }}>
               ✕
             </button>
           </div>
@@ -1878,24 +2051,7 @@ function ChatWindow({
             {templates.length === 0 ? (
               <div style={{ padding: '40px 20px', textAlign: 'center' }}>
                 <p style={{ marginBottom: '16px', color: '#667781' }}>No templates yet</p>
-                <button
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    handleAddTemplate(e);
-                  }}
-                  type="button"
-                  style={{
-                    padding: '10px 20px',
-                    border: 'none',
-                    background: '#00a884',
-                    color: 'white',
-                    borderRadius: '8px',
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    cursor: 'pointer'
-                  }}
-                >
+                <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleAddTemplate(e); }} type="button" style={{ padding: '10px 20px', border: 'none', background: '#00a884', color: 'white', borderRadius: '8px', fontSize: '14px', fontWeight: 600, cursor: 'pointer' }}>
                   + Create First Template
                 </button>
               </div>
@@ -1904,22 +2060,11 @@ function ChatWindow({
                 {templates.map(template => (
                   <div 
                     key={template.id} 
-                    style={{
-                      display: 'flex',
-                      gap: '8px',
-                      padding: '12px',
-                      borderRadius: '8px',
-                      marginBottom: '4px',
-                      cursor: 'pointer',
-                      transition: 'background 0.2s'
-                    }}
+                    style={{ display: 'flex', gap: '8px', padding: '12px', borderRadius: '8px', marginBottom: '4px', cursor: 'pointer', transition: 'background 0.2s' }}
                     onMouseEnter={(e) => e.currentTarget.style.background = '#f5f6f6'}
                     onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                   >
-                    <div 
-                      style={{ flex: 1, minWidth: 0 }}
-                      onClick={() => handleUseTemplate(template)}
-                    >
+                    <div style={{ flex: 1, minWidth: 0 }} onClick={() => handleUseTemplate(template)}>
                       <div style={{ fontSize: '14px', fontWeight: 600, color: '#111b21', marginBottom: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {template.name}
                       </div>
@@ -1928,62 +2073,16 @@ function ChatWindow({
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: '4px', alignItems: 'flex-start' }}>
-                      <button
-                        onClick={(e) => handleEditTemplate(template, e)}
-                        title="Edit template"
-                        type="button"
-                        style={{
-                          width: '32px',
-                          height: '32px',
-                          border: 'none',
-                          background: 'transparent',
-                          borderRadius: '50%',
-                          cursor: 'pointer',
-                          fontSize: '16px'
-                        }}
-                      >
+                      <button onClick={(e) => handleEditTemplate(template, e)} title="Edit template" type="button" style={{ width: '32px', height: '32px', border: 'none', background: 'transparent', borderRadius: '50%', cursor: 'pointer', fontSize: '16px' }}>
                         ✏️
                       </button>
-                      <button
-                        onClick={(e) => handleDeleteTemplate(template.id, e)}
-                        title="Delete template"
-                        type="button"
-                        style={{
-                          width: '32px',
-                          height: '32px',
-                          border: 'none',
-                          background: 'transparent',
-                          borderRadius: '50%',
-                          cursor: 'pointer',
-                          fontSize: '16px',
-                          color: '#ff4444'
-                        }}
-                      >
+                      <button onClick={(e) => handleDeleteTemplate(template.id, e)} title="Delete template" type="button" style={{ width: '32px', height: '32px', border: 'none', background: 'transparent', borderRadius: '50%', cursor: 'pointer', fontSize: '16px', color: '#ff4444' }}>
                         🗑️
                       </button>
                     </div>
                   </div>
                 ))}
-                <button
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    handleAddTemplate(e);
-                  }}
-                  type="button"
-                  style={{
-                    padding: '12px',
-                    border: '2px dashed #e9edef',
-                    background: 'transparent',
-                    color: '#00a884',
-                    borderRadius: '8px',
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    width: '100%',
-                    marginTop: '8px'
-                  }}
-                >
+                <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleAddTemplate(e); }} type="button" style={{ padding: '12px', border: '2px dashed #e9edef', background: 'transparent', color: '#00a884', borderRadius: '8px', fontSize: '14px', fontWeight: 600, cursor: 'pointer', width: '100%', marginTop: '8px' }}>
                   + Add New Template
                 </button>
               </>
@@ -1994,73 +2093,26 @@ function ChatWindow({
 
       {/* File Preview */}
       {filePreview && (
-        <div style={{
-          padding: '12px 16px',
-          backgroundColor: '#f5f6f6',
-          borderTop: '1px solid #e9edef',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px'
-        }}>
+        <div style={{ padding: '12px 16px', backgroundColor: '#f5f6f6', borderTop: '1px solid #e9edef', display: 'flex', alignItems: 'center', gap: '12px' }}>
           {filePreview.type === 'image' ? (
-            <img 
-              src={filePreview.url} 
-              alt="Preview" 
-              style={{
-                width: '60px',
-                height: '60px',
-                objectFit: 'cover',
-                borderRadius: '8px'
-              }}
-            />
+            <img src={filePreview.url} alt="Preview" style={{ width: '60px', height: '60px', objectFit: 'cover', borderRadius: '8px' }} />
           ) : (
-            <div style={{
-              width: '60px',
-              height: '60px',
-              backgroundColor: '#00a884',
-              borderRadius: '8px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '24px'
-            }}>
+            <div style={{ width: '60px', height: '60px', backgroundColor: '#00a884', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px' }}>
               📎
             </div>
           )}
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ 
-              fontSize: '14px', 
-              fontWeight: 500,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap'
-            }}>
+            <div style={{ fontSize: '14px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {filePreview.name}
             </div>
             {filePreview.size && (
-              <div style={{ fontSize: '12px', color: '#667781' }}>
-                {filePreview.size}
-              </div>
+              <div style={{ fontSize: '12px', color: '#667781' }}>{filePreview.size}</div>
             )}
           </div>
           {uploading && (
-            <div style={{ fontSize: '12px', color: '#00a884' }}>
-              {uploadProgress}%
-            </div>
+            <div style={{ fontSize: '12px', color: '#00a884' }}>{uploadProgress}%</div>
           )}
-          <button
-            onClick={handleRemoveFile}
-            disabled={uploading}
-            type="button"
-            style={{
-              background: 'none',
-              border: 'none',
-              fontSize: '20px',
-              cursor: uploading ? 'not-allowed' : 'pointer',
-              color: '#667781',
-              padding: '4px 8px'
-            }}
-          >
+          <button onClick={handleRemoveFile} disabled={uploading} type="button" style={{ background: 'none', border: 'none', fontSize: '20px', cursor: uploading ? 'not-allowed' : 'pointer', color: '#667781', padding: '4px 8px' }}>
             ✕
           </button>
         </div>
@@ -2068,16 +2120,7 @@ function ChatWindow({
 
       {/* Input Container */}
       <div className="chat-input-container" ref={inputContainerRef}>
-        <button
-          className="template-btn"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setShowTemplates(!showTemplates);
-          }}
-          title="Quick replies"
-          type="button"
-        >
+        <button className="template-btn" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowTemplates(!showTemplates); }} title="Quick replies" type="button">
           📋
         </button>
         <div className="chat-input-wrapper">
@@ -2098,13 +2141,7 @@ function ChatWindow({
             onChange={handleFileSelect}
             style={{ display: 'none' }}
           />
-          <button 
-            className="attach-btn" 
-            onClick={handleAttachClick}
-            disabled={uploading}
-            title="Attach file" 
-            type="button"
-          >
+          <button className="attach-btn" onClick={handleAttachClick} disabled={uploading} title="Attach file" type="button">
             {uploading ? '⏳' : '📎'}
           </button>
         </div>
