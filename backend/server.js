@@ -1568,6 +1568,60 @@ app.get('/api/widget/session', async (req, res) => {
   }
 });
 
+// Look up existing conversation for a returning customer
+app.get('/api/widget/conversation/lookup', async (req, res) => {
+  try {
+    const { store, email } = req.query;
+    
+    if (!store || !email) {
+      return res.status(400).json({ error: 'store and email parameters required' });
+    }
+    
+    const storeRecord = await db.getStoreByIdentifier(store);
+    if (!storeRecord || !storeRecord.is_active) {
+      return res.status(404).json({ error: 'Store not found or inactive' });
+    }
+    
+    // First try: get conversations by current store_id
+    let conversations = await db.getConversations({ storeId: storeRecord.id });
+    
+    // Find matching email - prefer open, then most recent
+    let match = conversations.find(c => 
+      c.customer_email === email && c.status === 'open'
+    );
+    if (!match) {
+      match = conversations.find(c => c.customer_email === email);
+    }
+    
+    // If not found by store_id, try broader search (handles store recreations)
+    if (!match) {
+      const allConversations = await db.getConversations({});
+      
+      // Filter by email AND verify store_identifier matches
+      const emailMatches = allConversations.filter(c => 
+        c.customer_email === email && (
+          c.store_identifier === storeRecord.shop_domain ||
+          c.store_identifier === storeRecord.store_identifier ||
+          c.store_identifier === store
+        )
+      );
+      
+      match = emailMatches.find(c => c.status === 'open') || emailMatches[0];
+    }
+    
+    if (match) {
+      console.log(`✅ [Widget Lookup] Found conversation ${match.id} for ${email} (store_id=${match.store_id})`);
+      res.json({ conversationId: match.id });
+    } else {
+      console.log(`ℹ️ [Widget Lookup] No conversation found for ${email} in store ${store}`);
+      res.json({ conversationId: null });
+    }
+  } catch (error) {
+    console.error('Widget conversation lookup error:', error);
+    res.status(500).json({ error: 'Lookup failed' });
+  }
+});
+
 // ============ AUTHENTICATION ENDPOINTS ============
 
 app.post('/api/employees/login', loginLimiter, async (req, res) => {

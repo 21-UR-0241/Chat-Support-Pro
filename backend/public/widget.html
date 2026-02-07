@@ -3471,7 +3471,14 @@
       submitBtn.disabled = true;
       submitBtn.innerHTML = '<span class="btn-spinner"></span> Connecting...';
       
-      // Show chat interface immediately, load customer data in background
+      // Look up existing conversation for returning customers
+      const lookedUp = await lookupConversation(customerEmail);
+      if (lookedUp) {
+        conversationId = String(lookedUp);
+        localStorage.setItem(`chat_conv_${STORE_ID}`, conversationId);
+      }
+      
+      // Show chat interface, load customer data in background
       showChatInterface();
       loadCustomerData();
     });
@@ -3642,6 +3649,34 @@
       return [];
     }
 
+    async function lookupConversation(email) {
+      if (!email || !STORE_ID) return null;
+      
+      try {
+        dbg(`[Lookup] Looking up conversation for ${email}...`);
+        const response = await fetchWithTimeout(
+          `${API_URL}/api/widget/conversation/lookup?store=${STORE_ID}&email=${encodeURIComponent(email)}`,
+          {},
+          10000
+        );
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data.conversationId) {
+            dbg(`[Lookup] ✅ Found conversation: ${data.conversationId}`);
+            return data.conversationId;
+          } else {
+            dbg('[Lookup] No existing conversation found');
+          }
+        } else {
+          dbg(`[Lookup] Failed: ${response.status}`, 'warn');
+        }
+      } catch (error) {
+        dbg(`[Lookup] Error: ${error.message}`, 'error');
+      }
+      return null;
+    }
+
     async function fetchCustomerCart(email) {
       if (!email) return null;
       
@@ -3694,6 +3729,17 @@
           if (customerName) localStorage.setItem(`chat_name_${STORE_ID}`, customerName);
           
           conversationId = localStorage.getItem(`chat_conv_${STORE_ID}`);
+          
+          // If no stored conversation, look it up from the server
+          if (!conversationId && customerEmail) {
+            dbg('[Init] No stored convId, looking up from server...');
+            const lookedUp = await lookupConversation(customerEmail);
+            if (lookedUp) {
+              conversationId = String(lookedUp);
+              localStorage.setItem(`chat_conv_${STORE_ID}`, conversationId);
+              dbg(`[Init] Restored conversation ${conversationId} from server`);
+            }
+          }
           
           dbg(`[Init] Email=${customerEmail}, Conv=${conversationId}`);
           
