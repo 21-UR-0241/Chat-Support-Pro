@@ -2177,6 +2177,7 @@ async function runMigrations() {
     await migration_004_add_last_message_fields();
     await migration_005_add_message_templates();
     await migration_006_add_file_data_column();
+    await migration_007_add_email_notifications()
     
     // Add future migrations here:
     // await migration_006_add_new_feature();
@@ -2519,6 +2520,107 @@ async function migration_006_add_file_data_column() {
     client.release();
   }
 }
+
+
+async function migration_007_add_email_notifications() {
+  const client = await pool.connect();
+
+  try {
+    console.log('📝 [Migration 007] Adding email notification support...');
+
+    // ---- 1. Add email columns to stores table ----
+    const storeColumns = await client.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'stores'
+    `);
+    const existing = storeColumns.rows.map(r => r.column_name);
+    const added = [];
+
+    if (!existing.includes('email_from_name')) {
+      await client.query(`ALTER TABLE stores ADD COLUMN email_from_name VARCHAR(255)`);
+      added.push('email_from_name');
+    }
+    if (!existing.includes('email_from_address')) {
+      await client.query(`ALTER TABLE stores ADD COLUMN email_from_address VARCHAR(255)`);
+      added.push('email_from_address');
+    }
+    if (!existing.includes('email_brand_color')) {
+      await client.query(`ALTER TABLE stores ADD COLUMN email_brand_color VARCHAR(7)`);
+      added.push('email_brand_color');
+    }
+
+    if (added.length > 0) {
+      console.log(`   Added store columns: ${added.join(', ')}`);
+    } else {
+      console.log('   Store email columns already exist');
+    }
+
+    // ---- 2. Create customer_presence table ----
+    const presenceExists = await client.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' AND table_name = 'customer_presence'
+      )
+    `);
+
+    if (!presenceExists.rows[0].exists) {
+      await client.query(`
+        CREATE TABLE customer_presence (
+          id SERIAL PRIMARY KEY,
+          conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+          customer_email VARCHAR(255) NOT NULL,
+          store_id INTEGER REFERENCES stores(id) ON DELETE CASCADE,
+          status VARCHAR(20) NOT NULL DEFAULT 'offline',
+          last_activity_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          last_heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          ws_connected BOOLEAN NOT NULL DEFAULT FALSE,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE(conversation_id)
+        )
+      `);
+      await client.query(`CREATE INDEX idx_presence_conv ON customer_presence(conversation_id)`);
+      await client.query(`CREATE INDEX idx_presence_status ON customer_presence(status)`);
+      console.log('   Created customer_presence table');
+    } else {
+      console.log('   customer_presence table already exists');
+    }
+
+    // ---- 3. Create offline_email_log table ----
+    const emailLogExists = await client.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' AND table_name = 'offline_email_log'
+      )
+    `);
+
+    if (!emailLogExists.rows[0].exists) {
+      await client.query(`
+        CREATE TABLE offline_email_log (
+          id SERIAL PRIMARY KEY,
+          conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+          message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+          customer_email VARCHAR(255) NOT NULL,
+          resend_id VARCHAR(100),
+          sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE(message_id)
+        )
+      `);
+      await client.query(`CREATE INDEX idx_email_log_conv ON offline_email_log(conversation_id, sent_at DESC)`);
+      console.log('   Created offline_email_log table');
+    } else {
+      console.log('   offline_email_log table already exists');
+    }
+
+    console.log('✅ [Migration 007] Email notification support added');
+  } catch (error) {
+    console.error('❌ [Migration 007] Failed:', error);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 
 // ============================================
 // STORE FUNCTIONS
@@ -3636,3 +3738,12 @@ module.exports = {
   getDashboardStats,
   getStoreMetrics,
 };
+
+
+
+
+// UPDATE stores 
+// SET email_from_name = brand_name, 
+//     email_from_address = 'support@send.montrealpeptides.ca', 
+//     email_brand_color = primary_color 
+// WHERE email_from_address IS NULL;

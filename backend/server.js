@@ -15,6 +15,7 @@
 // const session = require('express-session');
 // const shopifyAppRoutes = require('./routes/shopify-app-routes');
 // const fileRoutes = require('./routes/fileroutes');
+// const { handleOfflineEmailNotification } = require('./services/emailService');
 
 // const app = express();
 // const server = http.createServer(app);
@@ -116,7 +117,7 @@
 //   res.set({
 //     'Content-Type': 'text/html; charset=utf-8',
 //     'X-Content-Type-Options': 'nosniff',
-//     'Cache-Control': 'public, max-age=3600',
+//     'Cache-Control': 'no-cache, must-revalidate',
 //     'Content-Security-Policy': "frame-ancestors *"
 //   });
   
@@ -128,8 +129,34 @@
 // // Rate limiting
 // const limiter = rateLimit({
 //   windowMs: 15 * 60 * 1000,
-//   max: 100,
+//   max: 200,
 //   message: 'Too many requests from this IP, please try again later.',
+//   standardHeaders: true,
+//   legacyHeaders: false,
+//   skip: (req) => {
+//     // Skip rate limiting for authenticated employees (agents/admins)
+//     const authHeader = req.headers.authorization;
+//     if (authHeader && authHeader.startsWith('Bearer ')) {
+//       try {
+//         const { verifyToken } = require('./auth');
+//         const user = verifyToken(authHeader.split(' ')[1]);
+//         return !!user;
+//       } catch (e) {
+//         return false;
+//       }
+//     }
+//     return false;
+//   },
+//   validate: {
+//     xForwardedForHeader: false,
+//     trustProxy: false
+//   }
+// });
+
+// const widgetLimiter = rateLimit({
+//   windowMs: 15 * 60 * 1000,
+//   max: 500,
+//   message: 'Too many requests, please try again later.',
 //   standardHeaders: true,
 //   legacyHeaders: false,
 //   validate: {
@@ -138,6 +165,9 @@
 //   }
 // });
 
+// // Apply widget limiter to widget-specific routes BEFORE the general limiter
+// app.use('/api/widget/', widgetLimiter);
+// app.use('/api/customers/', widgetLimiter);
 // app.use('/api/', limiter);
 
 // const loginLimiter = rateLimit({
@@ -290,6 +320,76 @@
 //   } catch (error) {
 //     console.error('Widget session error:', error);
 //     res.status(500).json({ error: 'Failed to create widget session' });
+//   }
+// });
+
+// // Look up existing conversation for a returning customer
+// app.get('/api/widget/conversation/lookup', async (req, res) => {
+//   try {
+//     const { store, email } = req.query;
+//     console.log(`🔍 [Widget Lookup] store=${store}, email=${email}`);
+    
+//     if (!store || !email) {
+//       return res.status(400).json({ error: 'store and email parameters required' });
+//     }
+    
+//     const storeRecord = await db.getStoreByIdentifier(store);
+//     if (!storeRecord || !storeRecord.is_active) {
+//       console.log(`❌ [Widget Lookup] Store not found for identifier: ${store}`);
+//       return res.status(404).json({ error: 'Store not found or inactive' });
+//     }
+//     console.log(`✅ [Widget Lookup] Store found: id=${storeRecord.id}, identifier=${storeRecord.store_identifier}, domain=${storeRecord.shop_domain}`);
+    
+//     // Get conversations for this store
+//     let conversations = await db.getConversations({ storeId: storeRecord.id });
+//     console.log(`📋 [Widget Lookup] getConversations returned ${conversations.length} conversations for storeId=${storeRecord.id}`);
+    
+//     // Helper to get field value regardless of case (db may return snake or camel)
+//     const getField = (obj, snake, camel) => obj[snake] ?? obj[camel];
+    
+//     // Find matching email - prefer open, then most recent
+//     let match = conversations.find(c => 
+//       getField(c, 'customer_email', 'customerEmail') === email && getField(c, 'status', 'status') === 'open'
+//     );
+//     if (!match) {
+//       match = conversations.find(c => getField(c, 'customer_email', 'customerEmail') === email);
+//     }
+    
+//     // If not found, try broader search without storeId filter
+//     if (!match) {
+//       console.log(`⚠️ [Widget Lookup] Not found in store-filtered results, trying broader search...`);
+//       const allConversations = await db.getConversations({});
+//       console.log(`📋 [Widget Lookup] Broad search returned ${allConversations.length} total conversations`);
+      
+//       const emailMatches = allConversations.filter(c => getField(c, 'customer_email', 'customerEmail') === email);
+//       console.log(`📋 [Widget Lookup] Found ${emailMatches.length} conversations with email=${email}`);
+      
+//       // Accept any conversation from this store (by id or identifier)
+//       const storeMatches = emailMatches.filter(c => {
+//         const cStoreId = getField(c, 'store_id', 'storeId');
+//         const cStoreIdent = getField(c, 'store_identifier', 'storeIdentifier');
+//         return String(cStoreId) === String(storeRecord.id) ||
+//           cStoreIdent === storeRecord.shop_domain ||
+//           cStoreIdent === storeRecord.store_identifier ||
+//           cStoreIdent === store;
+//       });
+      
+//       match = storeMatches.find(c => getField(c, 'status', 'status') === 'open') || storeMatches[0];
+//     }
+    
+//     if (match) {
+//       const matchId = match.id;
+//       const matchStoreId = getField(match, 'store_id', 'storeId');
+//       const matchStatus = getField(match, 'status', 'status');
+//       console.log(`✅ [Widget Lookup] Found conversation ${matchId} for ${email} (store_id=${matchStoreId}, status=${matchStatus})`);
+//       res.json({ conversationId: matchId });
+//     } else {
+//       console.log(`ℹ️ [Widget Lookup] No conversation found for ${email} in store ${store}`);
+//       res.json({ conversationId: null });
+//     }
+//   } catch (error) {
+//     console.error('❌ Widget conversation lookup error:', error);
+//     res.status(500).json({ error: 'Lookup failed' });
 //   }
 // });
 
@@ -596,7 +696,7 @@
 
 // app.post('/api/conversations', async (req, res) => {
 //   try {
-//     const { storeIdentifier, customerEmail, customerName, initialMessage } = req.body;
+//     const { storeIdentifier, customerEmail, customerName, initialMessage, fileData } = req.body;
     
 //     if (!storeIdentifier || !customerEmail) {
 //       return res.status(400).json({ error: 'storeIdentifier and customerEmail required' });
@@ -616,38 +716,44 @@
 //       priority: 'normal'
 //     });
     
-//     if (initialMessage) {
-//       const message = await db.saveMessage({
-//         conversation_id: conversation.id,
-//         store_id: store.id,
-//         sender_type: 'customer',
-//         sender_name: customerName || customerEmail,
-//         content: initialMessage
-//       });
-      
-//       const camelMessage = snakeToCamel(message);
-      
-//       sendToConversation(conversation.id, {
-//         type: 'new_message',
-//         message: camelMessage
-//       });
-      
-//       broadcastToAgents({
-//         type: 'new_message',
-//         message: camelMessage,
-//         conversationId: conversation.id,
-//         storeId: store.id
-//       });
-//     }
+//     // Respond IMMEDIATELY
+//     res.json(snakeToCamel(conversation));
     
-//     broadcastToAgents({
-//       type: 'new_conversation',
-//       conversation: snakeToCamel(conversation),
-//       storeId: store.id,
-//       storeIdentifier
+//     // Save initial message and broadcast in background
+//     setImmediate(async () => {
+//       try {
+//         if (initialMessage) {
+//           const message = await db.saveMessage({
+//             conversation_id: conversation.id,
+//             store_id: store.id,
+//             sender_type: 'customer',
+//             sender_name: customerName || customerEmail,
+//             content: initialMessage,
+//             file_data: fileData ? JSON.stringify(fileData) : null
+//           });
+          
+//           const camelMessage = snakeToCamel(message);
+          
+//           // Only broadcastToAgents - no one has joined the conversation yet
+//           broadcastToAgents({
+//             type: 'new_message',
+//             message: camelMessage,
+//             conversationId: conversation.id,
+//             storeId: store.id
+//           });
+//         }
+        
+//         broadcastToAgents({
+//           type: 'new_conversation',
+//           conversation: snakeToCamel(conversation),
+//           storeId: store.id,
+//           storeIdentifier
+//         });
+//       } catch (error) {
+//         console.error('Background conversation processing error:', error);
+//       }
 //     });
     
-//     res.json(snakeToCamel(conversation));
 //   } catch (error) {
 //     console.error('Create conversation error:', error);
 //     res.status(500).json({ 
@@ -697,6 +803,53 @@
 
 // // ============ MESSAGE ENDPOINTS ============
 
+// // Widget-accessible message history (validates by store, no employee auth needed)
+// app.get('/api/widget/conversations/:id/messages', async (req, res) => {
+//   try {
+//     const { store } = req.query;
+    
+//     if (!store) {
+//       return res.status(400).json({ error: 'store parameter required' });
+//     }
+
+//     const storeRecord = await db.getStoreByIdentifier(store);
+//     if (!storeRecord || !storeRecord.is_active) {
+//       return res.status(404).json({ error: 'Store not found or inactive' });
+//     }
+
+//     const conversationId = parseInt(req.params.id);
+//     const conversation = await db.getConversation(conversationId);
+
+//     if (!conversation) {
+//       return res.status(404).json({ error: 'Conversation not found' });
+//     }
+
+//     // db may return snake_case or camelCase depending on driver - handle both
+// const convStoreId = conversation.shop_id ?? conversation.shopId ?? conversation.store_id ?? conversation.storeId;
+// const convStoreIdentifier = conversation.shop_domain ?? conversation.shopDomain ?? conversation.store_identifier ?? conversation.storeIdentifier;
+
+//     // Security check: verify conversation belongs to this store
+//     const storeIdMatch = String(convStoreId) === String(storeRecord.id);
+//     const identifierMatch = convStoreIdentifier && (
+//       convStoreIdentifier === storeRecord.shop_domain ||
+//       convStoreIdentifier === storeRecord.store_identifier ||
+//       convStoreIdentifier === store
+//     );
+    
+//     if (!storeIdMatch && !identifierMatch) {
+//       console.warn(`❌ [Widget History] Access denied: conv ${conversationId} store_id=${convStoreId} store_identifier=${convStoreIdentifier} does not match store id=${storeRecord.id} identifier=${storeRecord.store_identifier} domain=${storeRecord.shop_domain}`);
+//       return res.status(403).json({ error: 'Unauthorized' });
+//     }
+
+//     const messages = await db.getMessages(conversationId);
+//     console.log(`✅ [Widget History] Returning ${messages.length} messages for conversation ${conversationId} (matched by ${storeIdMatch ? 'store_id' : 'store_identifier'})`);
+//     res.json(messages.map(snakeToCamel));
+//   } catch (error) {
+//     console.error('❌ Widget message history error:', error);
+//     res.status(500).json({ error: 'Failed to fetch messages' });
+//   }
+// });
+
 // app.get('/api/conversations/:id/messages', authenticateToken, async (req, res) => {
 //   try {
 //     const conversationId = parseInt(req.params.id);
@@ -745,6 +898,7 @@
 //       pending: true
 //     };
     
+//     // Broadcast through BOTH channels for reliable delivery
 //     sendToConversation(conversationId, {
 //       type: 'new_message',
 //       message: snakeToCamel(tempMessage)
@@ -757,8 +911,10 @@
 //       storeId
 //     });
     
+//     // Respond to admin IMMEDIATELY
 //     res.json(snakeToCamel(tempMessage));
     
+//     // Then save to DB in background
 //     setImmediate(async () => {
 //       try {
 //         const savedMessage = await db.saveMessage({
@@ -771,12 +927,14 @@
 //           sent_at: timestamp
 //         });
         
+//         // Confirm to customer widget (update temp → real ID)
 //         sendToConversation(conversationId, {
 //           type: 'message_confirmed',
 //           tempId: tempId,
 //           message: snakeToCamel(savedMessage)
 //         });
         
+//         // Confirm to all agents (update temp → real ID, update sidebar)
 //         broadcastToAgents({
 //           type: 'message_confirmed',
 //           tempId: tempId,
@@ -842,13 +1000,24 @@
 //       pending: true
 //     };
     
+//     // Broadcast through BOTH channels for reliable delivery
+//     // Client-side dedup prevents duplicates
 //     sendToConversation(conversationId, {
 //       type: 'new_message',
 //       message: snakeToCamel(tempMessage)
 //     });
     
+//     broadcastToAgents({
+//       type: 'new_message',
+//       message: snakeToCamel(tempMessage),
+//       conversationId,
+//       storeId: store.id
+//     });
+    
+//     // Respond to widget
 //     res.json(snakeToCamel(tempMessage));
     
+//     // Save to DB in background
 //     setImmediate(async () => {
 //       try {
 //         const savedMessage = await db.saveMessage({
@@ -864,14 +1033,17 @@
         
 //         const confirmedMessage = snakeToCamel(savedMessage);
         
+//         // Confirm to customer widget
 //         sendToConversation(conversationId, {
 //           type: 'message_confirmed',
 //           tempId: tempId,
 //           message: confirmedMessage
 //         });
         
+//         // Confirm to agents (update temp ID → real ID)
 //         broadcastToAgents({
-//           type: 'new_message',
+//           type: 'message_confirmed',
+//           tempId: tempId,
 //           message: confirmedMessage,
 //           conversationId,
 //           storeId: store.id,
@@ -897,6 +1069,39 @@
 //     });
 //   }
 // });
+
+
+
+// app.post('/api/widget/presence', async (req, res) => {
+//   try {
+//     const { conversationId, customerEmail, storeId, status, lastActivityAt } = req.body;
+
+//     if (!conversationId || !customerEmail) {
+//       return res.status(400).json({ error: 'conversationId and customerEmail required' });
+//     }
+
+//     const validStatuses = ['online', 'away', 'offline'];
+//     const safeStatus = validStatuses.includes(status) ? status : 'offline';
+
+//     await db.pool.query(`
+//       INSERT INTO customer_presence 
+//         (conversation_id, customer_email, store_id, status, last_activity_at, last_heartbeat_at, ws_connected, updated_at)
+//       VALUES ($1, $2, $3, $4, $5, NOW(), FALSE, NOW())
+//       ON CONFLICT (conversation_id)
+//       DO UPDATE SET
+//         status = $4,
+//         last_activity_at = $5,
+//         last_heartbeat_at = NOW(),
+//         updated_at = NOW()
+//     `, [conversationId, customerEmail, storeId || null, safeStatus, lastActivityAt || new Date()]);
+
+//     res.json({ ok: true });
+//   } catch (error) {
+//     console.error('[Presence REST] Error:', error);
+//     res.status(500).json({ error: 'Failed to update presence' });
+//   }
+// });
+
 
 // // ============ EMPLOYEE ENDPOINTS ============
 
@@ -1152,19 +1357,21 @@
 // // ============ KEEP-ALIVE MECHANISM ============
 
 // function setupKeepAlive() {
-//   if (process.env.KEEP_ALIVE !== 'true') {
+//   // Enable by default - critical for preventing cold starts on Render
+//   if (process.env.KEEP_ALIVE === 'false') {
 //     console.log('⏰ Keep-alive disabled');
 //     return;
 //   }
 
 //   const APP_URL = process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`;
+//   const httpModule = APP_URL.startsWith('https') ? require('https') : http;
   
-//   console.log('⏰ Keep-alive enabled - pinging every 14 minutes');
+//   console.log('⏰ Keep-alive enabled - pinging every 5 minutes');
   
 //   setInterval(() => {
 //     const now = new Date().toISOString();
     
-//     http.get(`${APP_URL}/health`, (res) => {
+//     httpModule.get(`${APP_URL}/health`, (res) => {
 //       let data = '';
       
 //       res.on('data', (chunk) => {
@@ -1182,11 +1389,11 @@
 //       console.error(`❌ Keep-alive ping error [${now}]:`, err.message);
 //     });
     
-//   }, 14 * 60 * 1000);
+//   }, 5 * 60 * 1000);
   
 //   setTimeout(() => {
 //     console.log('⏰ Running initial keep-alive ping...');
-//     http.get(`${APP_URL}/health`, (res) => {
+//     httpModule.get(`${APP_URL}/health`, (res) => {
 //       console.log(`⏰ Initial ping: ${res.statusCode}`);
 //     }).on('error', (err) => {
 //       console.error('❌ Initial ping error:', err.message);
@@ -1261,6 +1468,7 @@ const { hashPassword, verifyPassword, generateToken, authenticateToken } = requi
 const session = require('express-session');
 const shopifyAppRoutes = require('./routes/shopify-app-routes');
 const fileRoutes = require('./routes/fileroutes');
+const { handleOfflineEmailNotification } = require('../frontend/src/admin/services/emailService');
 
 const app = express();
 const server = http.createServer(app);
@@ -2070,8 +2278,8 @@ app.get('/api/widget/conversations/:id/messages', async (req, res) => {
     }
 
     // db may return snake_case or camelCase depending on driver - handle both
-const convStoreId = conversation.shop_id ?? conversation.shopId ?? conversation.store_id ?? conversation.storeId;
-const convStoreIdentifier = conversation.shop_domain ?? conversation.shopDomain ?? conversation.store_identifier ?? conversation.storeIdentifier;
+    const convStoreId = conversation.shop_id ?? conversation.shopId ?? conversation.store_id ?? conversation.storeId;
+    const convStoreIdentifier = conversation.shop_domain ?? conversation.shopDomain ?? conversation.store_identifier ?? conversation.storeIdentifier;
 
     // Security check: verify conversation belongs to this store
     const storeIdMatch = String(convStoreId) === String(storeRecord.id);
@@ -2187,6 +2395,13 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
           conversationId,
           storeId
         });
+        
+        // Send offline email notification if customer is inactive
+        if (senderType === 'agent') {
+          handleOfflineEmailNotification(db.pool, savedMessage).catch(err =>
+            console.error('[Offline Email] Failed:', err)
+          );
+        }
         
       } catch (error) {
         console.error('Failed to save agent message:', error);
@@ -2312,6 +2527,38 @@ app.post('/api/widget/messages', async (req, res) => {
       error: 'Failed to send message',
       message: error.message 
     });
+  }
+});
+
+// ============ WIDGET PRESENCE TRACKING ============
+
+app.post('/api/widget/presence', async (req, res) => {
+  try {
+    const { conversationId, customerEmail, storeId, status, lastActivityAt } = req.body;
+
+    if (!conversationId || !customerEmail) {
+      return res.status(400).json({ error: 'conversationId and customerEmail required' });
+    }
+
+    const validStatuses = ['online', 'away', 'offline'];
+    const safeStatus = validStatuses.includes(status) ? status : 'offline';
+
+    await db.pool.query(`
+      INSERT INTO customer_presence 
+        (conversation_id, customer_email, store_id, status, last_activity_at, last_heartbeat_at, ws_connected, updated_at)
+      VALUES ($1, $2, $3, $4, $5, NOW(), FALSE, NOW())
+      ON CONFLICT (conversation_id)
+      DO UPDATE SET
+        status = $4,
+        last_activity_at = $5,
+        last_heartbeat_at = NOW(),
+        updated_at = NOW()
+    `, [conversationId, customerEmail, storeId || null, safeStatus, lastActivityAt || new Date()]);
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('[Presence REST] Error:', error);
+    res.status(500).json({ error: 'Failed to update presence' });
   }
 });
 
@@ -2645,9 +2892,28 @@ async function startServer() {
       console.log(`🔐 OAuth: http://localhost:${PORT}/auth?shop=STORE.myshopify.com`);
       console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`📎 File Upload: Enabled with Bunny.net`);
+      console.log(`📧 Email Notifications: Enabled`);
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
       
       setupKeepAlive();
+      
+      // Clean up stale presence records every 2 minutes
+      setInterval(async () => {
+        try {
+          const result = await db.pool.query(`
+            UPDATE customer_presence
+            SET status = 'offline', ws_connected = FALSE, updated_at = NOW()
+            WHERE status != 'offline'
+              AND last_heartbeat_at < NOW() - INTERVAL '3 minutes'
+            RETURNING conversation_id
+          `);
+          if (result.rowCount > 0) {
+            console.log(`[Presence] Marked ${result.rowCount} stale sessions offline`);
+          }
+        } catch (err) {
+          console.error('[Presence] Stale cleanup error:', err);
+        }
+      }, 2 * 60 * 1000);
     });
   } catch (error) {
     console.error('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
