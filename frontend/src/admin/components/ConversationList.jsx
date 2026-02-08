@@ -600,6 +600,9 @@
 // }
 
 // export default ConversationList;
+
+
+
 import React, { useMemo, useEffect, useRef, useState, useCallback } from 'react';
 import '../styles/ConversationList.css';
 
@@ -717,18 +720,7 @@ function ConversationList({
     previousConversationsRef.current = conversations;
   }, [conversations, activeConversation, loading, notificationsEnabled, soundEnabled]);
 
-  // ✅ Auto-mark active conversation as read when it has unread messages
-  useEffect(() => {
-    if (!activeConversation || !conversations || !onMarkAsRead) return;
-    const activeConv = conversations.find(c => c.id === activeConversation.id);
-    if (!activeConv) return;
-    const unreadCount = activeConv.unreadCount || activeConv.unread_count || activeConv.unread || 0;
-    if (unreadCount > 0) {
-      onMarkAsRead(activeConversation.id);
-    }
-  }, [activeConversation, conversations, onMarkAsRead]);
-
-  // Group conversations by email and store
+  // ✅ Group conversations by email + store (name-independent)
   const groupedConversations = useMemo(() => {
     if (!conversations) return [];
     const grouped = new Map();
@@ -740,8 +732,8 @@ function ConversationList({
         grouped.set(uniqueKey, { conversations: [conv], mostRecent: conv, groupKey: uniqueKey });
         return;
       }
-      const name = (conv.customerName || '').trim();
-      const groupKey = `${email}-${storeId}-${name}`;
+      // ✅ Group by email + store only — ignore name differences
+      const groupKey = `${email}-${storeId}`;
       if (grouped.has(groupKey)) {
         const group = grouped.get(groupKey);
         group.conversations.push(conv);
@@ -759,16 +751,41 @@ function ConversationList({
     });
   }, [conversations]);
 
-  // ✅ Get effective unread count — returns 0 for the active conversation
+  // ✅ Build a set of ALL conversation IDs in the same group as the active conversation
+  const activeGroupConversationIds = useMemo(() => {
+    if (!activeConversation || !groupedConversations) return new Set();
+    const activeGroup = groupedConversations.find(group =>
+      group.conversations.some(c => c.id === activeConversation.id)
+    );
+    if (!activeGroup) return new Set([activeConversation.id]);
+    return new Set(activeGroup.conversations.map(c => c.id));
+  }, [activeConversation, groupedConversations]);
+
+  // ✅ Get effective unread — returns 0 for ANY conversation in the active group
   const getEffectiveUnread = useCallback((conv) => {
-    if (conv.id === activeConversation?.id) return 0;
+    if (activeGroupConversationIds.has(conv.id)) return 0;
     return conv.unreadCount || conv.unread_count || conv.unread || 0;
-  }, [activeConversation]);
+  }, [activeGroupConversationIds]);
 
   // ✅ Get total unread for a group
   const getGroupUnread = useCallback((group) => {
     return group.conversations.reduce((sum, c) => sum + getEffectiveUnread(c), 0);
   }, [getEffectiveUnread]);
+
+  // ✅ Auto-mark ALL conversations in active group as read
+  useEffect(() => {
+    if (!activeConversation || !conversations || !onMarkAsRead) return;
+    if (activeGroupConversationIds.size === 0) return;
+
+    activeGroupConversationIds.forEach((convId) => {
+      const conv = conversations.find(c => c.id === convId);
+      if (!conv) return;
+      const unreadCount = conv.unreadCount || conv.unread_count || conv.unread || 0;
+      if (unreadCount > 0) {
+        onMarkAsRead(convId);
+      }
+    });
+  }, [activeConversation, conversations, onMarkAsRead, activeGroupConversationIds]);
 
   // Filter grouped conversations
   const filteredGroupedConversations = useMemo(() => {
@@ -781,7 +798,8 @@ function ConversationList({
           s.storeIdentifier === conv.storeIdentifier || s.id === conv.shopId
         )?.brandName || conv.storeName || '';
         const matchesSearch =
-          conv.customerName?.toLowerCase().includes(search) ||
+          // ✅ Search across ALL names in the group
+          group.conversations.some(c => c.customerName?.toLowerCase().includes(search)) ||
           conv.customerEmail?.toLowerCase().includes(search) ||
           conv.customerId?.toLowerCase().includes(search) ||
           conv.lastMessage?.toLowerCase().includes(search) ||
@@ -813,7 +831,7 @@ function ConversationList({
     });
   }, [groupedConversations, filters, stores, getGroupUnread]);
 
-  // ✅ Total unread — excludes active conversation
+  // ✅ Total unread — excludes active group
   const totalUnread = useMemo(() => {
     if (!conversations) return 0;
     return conversations.reduce((sum, c) => sum + getEffectiveUnread(c), 0);
@@ -854,8 +872,19 @@ function ConversationList({
     onFilterChange({ search: '', status: '', priority: '', storeId: '', readStatus: '' });
   };
 
+  // ✅ When clicking a group, select mostRecent and mark ALL in group as read
   const handleGroupClick = (group) => {
     onSelectConversation(group.mostRecent);
+
+    // Mark all conversations in this group as read
+    if (onMarkAsRead) {
+      group.conversations.forEach((conv) => {
+        const unread = conv.unreadCount || conv.unread_count || conv.unread || 0;
+        if (unread > 0) {
+          onMarkAsRead(conv.id);
+        }
+      });
+    }
   };
 
   const hasActiveFilters = filters.status || filters.priority || filters.storeId || filters.readStatus;
@@ -980,6 +1009,12 @@ function ConversationList({
               s.storeIdentifier === conversation.storeIdentifier || s.id === conversation.shopId
             )?.brandName || conversation.storeName || 'Unknown Store';
 
+            // ✅ Pick the longest (most complete) name from all conversations in the group
+            const displayName = group.conversations
+              .map(c => (c.customerName || '').trim())
+              .filter(Boolean)
+              .sort((a, b) => b.length - a.length)[0] || 'Guest';
+
             return (
               <div
                 key={group.groupKey}
@@ -989,12 +1024,12 @@ function ConversationList({
                 <div className="conversation-avatar">
                   <UserIcon />
                   {hasUnread && <span className="avatar-badge">{totalGroupUnread}</span>}
-                  {isGrouped && <span className="group-count-badge">{group.conversations.length}</span>}
+
                 </div>
                 <div className="conversation-details">
                   <div className="conversation-top">
                     <div className="conversation-name-wrapper">
-                      <h3 className="conversation-name">{conversation.customerName || 'Guest'}</h3>
+                      <h3 className="conversation-name">{displayName}</h3>
                       {isUrgent && <span className="urgent-indicator">🔴</span>}
                     </div>
                     <span className="conversation-time">{formatTime(conversation.lastMessageAt)}</span>
