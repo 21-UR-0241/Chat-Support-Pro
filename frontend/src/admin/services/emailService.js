@@ -6,8 +6,9 @@ const { Resend } = require('resend');
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
+// ⚠️ TESTING: Set to 1 hour for production
 const COOLDOWN_HOURS = parseInt(process.env.EMAIL_COOLDOWN_HOURS || '1', 10);
-const COOLDOWN_MS = COOLDOWN_HOURS * 60 * 60 * 1000;
+const COOLDOWN_MS = 10 * 1000; // ⚠️ TESTING: 10 seconds (production: COOLDOWN_HOURS * 60 * 60 * 1000)
 
 // Fallbacks if database has no values
 const FALLBACK_FROM_ADDRESS = 'support@montrealpeptides.ca';
@@ -53,7 +54,7 @@ async function handleOfflineEmailNotification(pool, message) {
     const isOnline = (
       customer.status === 'online' &&
       customer.ws_connected &&
-      (now - lastHeartbeat) < 90000
+      (now - lastHeartbeat) < 10000 // ⚠️ TESTING: 10s (production: 90000)
     );
 
     if (isOnline) {
@@ -128,11 +129,21 @@ async function handleOfflineEmailNotification(pool, message) {
       brandColor,
     });
 
+    // Plain text version (improves deliverability)
+    const plainText = buildPlainText({
+      brandName: emailFromName,
+      customerName: conv.customer_name,
+      agentName: sender_name,
+      messages: unreadMessages,
+      replyUrl: `https://${storeDomain}`,
+    });
+
     const { data, error } = await resend.emails.send({
       from: `${emailFromName} <${emailFromAddress}>`,
       to: [customer.customer_email],
       subject: `${sender_name || 'Support'} replied to your message – ${emailFromName}`,
       html: emailHtml,
+      text: plainText,
     });
 
     if (error) {
@@ -160,7 +171,7 @@ async function handleOfflineEmailNotification(pool, message) {
 
 function buildEmailHtml({ brandName, customerName, agentName, messages, conversationId, storeDomain, brandColor }) {
   const greeting = customerName ? `Hi ${esc(customerName)},` : 'Hi there,';
-  const replyUrl = `https://${storeDomain}/chat?resume=${conversationId}`;
+  const replyUrl = `https://${storeDomain}`;
   const color = brandColor || FALLBACK_BRAND_COLOR;
 
   // Brand initials (e.g. "Montreal Peptides" → "MP")
@@ -238,7 +249,7 @@ function buildEmailHtml({ brandName, customerName, agentName, messages, conversa
                 <tr>
                   <td align="center" style="padding: 24px 32px 32px 32px;">
                     <a href="${replyUrl}" style="display: inline-block; background: ${color}; color: #ffffff; padding: 14px 36px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.15);">
-                      Reply to Conversation &rarr;
+                      Continue Conversation &rarr;
                     </a>
                   </td>
                 </tr>
@@ -274,6 +285,28 @@ function buildEmailHtml({ brandName, customerName, agentName, messages, conversa
   </table>
 </body>
 </html>`;
+}
+
+function buildPlainText({ brandName, customerName, agentName, messages, replyUrl }) {
+  const greeting = customerName ? `Hi ${customerName},` : 'Hi there,';
+  const msgText = messages.map(msg => {
+    const time = new Date(msg.timestamp).toLocaleString('en-US', {
+      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    });
+    return `${msg.sender_name || 'Support Agent'} (${time}):\n${msg.content}`;
+  }).join('\n\n');
+
+  return `${greeting}
+
+You have a new message from ${agentName || 'our team'} at ${brandName}:
+
+${msgText}
+
+Continue here: ${replyUrl}
+
+---
+Sent because you have an active chat with ${brandName}.
+You won't receive another for at least ${COOLDOWN_HOURS} hour${COOLDOWN_HOURS > 1 ? 's' : ''}.`;
 }
 
 function esc(text) {
