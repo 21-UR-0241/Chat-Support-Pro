@@ -1,5 +1,6 @@
 
-// import React, { useState, useEffect, useRef } from 'react';
+
+// import React, { useState, useEffect, useRef, useCallback } from 'react';
 // import api from './services/api';
 // import { useConversations } from './hooks/useConversations';
 // import { useWebSocket } from './hooks/useWebSocket';
@@ -91,6 +92,9 @@
 //   // ✅ Track active notifications by conversation ID
 //   const activeNotificationsRef = useRef(new Map());
 
+//   // ✅ Debounce ref to prevent duplicate mark-as-read API calls
+//   const markAsReadTimerRef = useRef(new Map());
+
 //   const {
 //     conversations,
 //     loading: conversationsLoading,
@@ -99,15 +103,8 @@
 //     refresh: refreshConversations,
 //     updateConversation,
 //     optimisticUpdate,
+//     setActiveConversationId, // ✅ NEW from useConversations
 //   } = useConversations(employee.id);
-
-//   useEffect(() => {
-//     if (conversations && conversations.length > 0) {
-//       console.log('🔥 CONVERSATIONS DEBUG:', conversations);
-//       console.log('🔥 FIRST CONVERSATION:', conversations[0]);
-//       console.log('🔥 KEYS:', Object.keys(conversations[0]));
-//     }
-//   }, [conversations]);
 
 //   const ws = useWebSocket(employee.id);
 
@@ -117,7 +114,58 @@
 //     requestNotificationPermission();
 //   }, []);
 
-//   // ✅ WebSocket event listeners with smart notification handling
+//   // ─────────────────────────────────────────────────
+//   // ✅ Mark conversation as read (local + backend)
+//   // Uses api.markConversationRead() which has correct base URL and auth
+//   // ─────────────────────────────────────────────────
+//   const handleMarkAsRead = useCallback((conversationId) => {
+//     console.log('👁️ [App] Marking conversation as read:', conversationId);
+
+//     // 1. Instantly update local state so UI clears badges immediately
+//     updateConversation(conversationId, {
+//       unreadCount: 0,
+//       unread_count: 0,
+//       unread: 0,
+//     });
+
+//     // 2. Debounce the API call to avoid spamming if messages arrive rapidly
+//     if (markAsReadTimerRef.current.has(conversationId)) {
+//       clearTimeout(markAsReadTimerRef.current.get(conversationId));
+//     }
+
+//     markAsReadTimerRef.current.set(
+//       conversationId,
+//       setTimeout(async () => {
+//         try {
+//           // ✅ Uses the existing api service method with correct URL + auth
+//           await api.markConversationRead(conversationId);
+//           console.log('✅ [App] Server confirmed conversation read:', conversationId);
+//         } catch (error) {
+//           console.error('❌ [App] Failed to mark conversation as read:', error);
+//         }
+//         markAsReadTimerRef.current.delete(conversationId);
+//       }, 300)
+//     );
+//   }, [updateConversation]);
+
+//   // ─────────────────────────────────────────────────
+//   // ✅ Select conversation + mark as read
+//   // ─────────────────────────────────────────────────
+//   const handleSelectConversation = useCallback((conversation) => {
+//     setActiveConversation(conversation);
+
+//     // ✅ Tell useConversations which conversation is active
+//     // so it won't overwrite unreadCount=0 from WebSocket updates
+//     setActiveConversationId(conversation.id);
+
+//     // Mark as read when selecting
+//     const unreadCount = conversation.unreadCount || conversation.unread_count || conversation.unread || 0;
+//     if (unreadCount > 0) {
+//       handleMarkAsRead(conversation.id);
+//     }
+//   }, [handleMarkAsRead, setActiveConversationId]);
+
+//   // ✅ WebSocket event listeners
 //   useEffect(() => {
 //     if (!ws) return;
 
@@ -137,10 +185,10 @@
 //       if (senderType === 'agent') {
 //         console.log('🔕 [App] Agent message - clearing notifications for conversation:', conversationId);
 //         clearNotificationsForConversation(conversationId);
-//         return; // Don't show notification for agent messages
+//         return;
 //       }
 
-//       // ✅ Only show notification for CUSTOMER messages AND not viewing that conversation
+//       // ✅ Customer message on a conversation the admin is NOT viewing
 //       if (senderType === 'customer' && activeConversation?.id !== conversationId) {
 //         const conv = data.conversation || {};
 //         const customerName = conv.customerName || conv.customer_name || 'Guest';
@@ -148,8 +196,11 @@
         
 //         console.log('🔔 [App] Showing notification for customer message');
 //         showNotification(conversationId, customerName, messagePreview);
-//       } else if (senderType === 'customer' && activeConversation?.id === conversationId) {
-//         console.log('⏭️ [App] Customer message in active conversation - no notification needed');
+//       } 
+//       // ✅ Customer message on the conversation the admin IS viewing → auto mark read
+//       else if (senderType === 'customer' && activeConversation?.id === conversationId) {
+//         console.log('⏭️ [App] Customer message in active conversation - auto marking read');
+//         handleMarkAsRead(conversationId);
 //       }
 //     });
 
@@ -178,7 +229,7 @@
 //       unsubscribe4();
 //       unsubscribe5();
 //     };
-//   }, [ws, activeConversation]);
+//   }, [ws, activeConversation, handleMarkAsRead]);
 
 //   useEffect(() => {
 //     if (activeConversation && ws) {
@@ -192,6 +243,13 @@
 //       };
 //     }
 //   }, [activeConversation, ws]);
+
+//   // ✅ When admin closes a conversation (goes back to list), clear the active ID
+//   useEffect(() => {
+//     if (!activeConversation) {
+//       setActiveConversationId(null);
+//     }
+//   }, [activeConversation, setActiveConversationId]);
 
 //   useEffect(() => {
 //     if (activeConversation) {
@@ -226,10 +284,11 @@
 //     }
 //   };
 
-//   const handleSendMessage = async (conversation, message) => {
+//   const handleSendMessage = async (conversation, message, fileData) => {
 //     console.log('📤 handleSendMessage called with:', {
 //       conversationId: conversation.id,
-//       message
+//       message,
+//       fileData
 //     });
 
 //     try {
@@ -245,6 +304,9 @@
 //       // ✅ Clear notifications when agent sends a message
 //       clearNotificationsForConversation(conversation.id);
 
+//       // ✅ Mark as read when agent replies
+//       handleMarkAsRead(conversation.id);
+
 //       // ✅ Optimistically update the conversation list
 //       optimisticUpdate(conversation.id, message);
 
@@ -253,7 +315,8 @@
 //         storeId: storeId,
 //         senderType: 'agent',
 //         senderName: employee.name,
-//         content: message,
+//         content: message || '',
+//         fileData: fileData || null,
 //       };
 
 //       console.log('📨 Sending message with data:', messageData);
@@ -262,7 +325,6 @@
       
 //       console.log('✅ Message sent successfully:', sentMessage);
 
-//       // ✅ Update with actual server response (if different from optimistic)
 //       if (sentMessage.createdAt) {
 //         updateConversation(conversation.id, {
 //           lastMessageAt: sentMessage.createdAt,
@@ -278,7 +340,6 @@
 //         stack: error.stack
 //       });
       
-//       // ✅ On error, refresh to get correct state
 //       refreshConversations();
       
 //       throw error;
@@ -328,7 +389,7 @@
 //         body: messagePreview,
 //         icon: '/favicon.ico',
 //         badge: '/badge-icon.png',
-//         tag: `conv-${conversationId}`, // Use conversation ID as tag
+//         tag: `conv-${conversationId}`,
 //         requireInteraction: false,
 //         silent: false,
 //       };
@@ -346,7 +407,7 @@
 //         window.focus();
 //         const conv = conversations.find(c => c.id === conversationId);
 //         if (conv) {
-//           setActiveConversation(conv);
+//           handleSelectConversation(conv);
 //         }
 //         notification.close();
 //         removeNotificationFromTracking(conversationId, notification);
@@ -602,7 +663,8 @@
 //             <ConversationList
 //               conversations={conversations}
 //               activeConversation={activeConversation}
-//               onSelectConversation={setActiveConversation}
+//               onSelectConversation={handleSelectConversation}
+//               onMarkAsRead={handleMarkAsRead}
 //               filters={filters}
 //               onFilterChange={updateFilters}
 //               stores={stores}
@@ -638,6 +700,9 @@
 // }
 
 // export default App;
+
+
+
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import api from './services/api';
@@ -684,7 +749,6 @@ function App() {
     setLoading(false);
   };
 
-  
   const handleLogin = (employeeData) => {
     console.log('✅ Login successful, setting authenticated state');
     setEmployee(employeeData);
@@ -742,10 +806,22 @@ function DashboardContent({ employee, onLogout }) {
     refresh: refreshConversations,
     updateConversation,
     optimisticUpdate,
-    setActiveConversationId, // ✅ NEW from useConversations
+    setActiveConversationId,
   } = useConversations(employee.id);
 
   const ws = useWebSocket(employee.id);
+
+  // ✅ Refs to avoid stale closures in WebSocket handler
+  const activeConversationRef = useRef(activeConversation);
+  const conversationsRef = useRef(conversations);
+
+  useEffect(() => {
+    activeConversationRef.current = activeConversation;
+  }, [activeConversation]);
+
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
 
   useEffect(() => {
     loadStores();
@@ -755,7 +831,6 @@ function DashboardContent({ employee, onLogout }) {
 
   // ─────────────────────────────────────────────────
   // ✅ Mark conversation as read (local + backend)
-  // Uses api.markConversationRead() which has correct base URL and auth
   // ─────────────────────────────────────────────────
   const handleMarkAsRead = useCallback((conversationId) => {
     console.log('👁️ [App] Marking conversation as read:', conversationId);
@@ -776,7 +851,6 @@ function DashboardContent({ employee, onLogout }) {
       conversationId,
       setTimeout(async () => {
         try {
-          // ✅ Uses the existing api service method with correct URL + auth
           await api.markConversationRead(conversationId);
           console.log('✅ [App] Server confirmed conversation read:', conversationId);
         } catch (error) {
@@ -793,51 +867,75 @@ function DashboardContent({ employee, onLogout }) {
   const handleSelectConversation = useCallback((conversation) => {
     setActiveConversation(conversation);
 
-    // ✅ Tell useConversations which conversation is active
-    // so it won't overwrite unreadCount=0 from WebSocket updates
     setActiveConversationId(conversation.id);
 
-    // Mark as read when selecting
     const unreadCount = conversation.unreadCount || conversation.unread_count || conversation.unread || 0;
     if (unreadCount > 0) {
       handleMarkAsRead(conversation.id);
     }
   }, [handleMarkAsRead, setActiveConversationId]);
 
+  // ─────────────────────────────────────────────────
   // ✅ WebSocket event listeners
+  // ─────────────────────────────────────────────────
   useEffect(() => {
     if (!ws) return;
 
     // Handle new messages
     const unsubscribe1 = ws.on('new_message', (data) => {
+      const currentActiveConv = activeConversationRef.current;
+      const currentConversations = conversationsRef.current;
+
       console.log('📨 [App] New message received:', {
         conversationId: data.conversationId,
         senderType: data.message?.senderType || data.message?.sender_type,
-        activeConversation: activeConversation?.id
+        activeConversation: currentActiveConv?.id
       });
 
       const message = data.message || {};
       const senderType = message.senderType || message.sender_type;
-      const conversationId = data.conversationId;
+      const conversationId = data.conversationId || message.conversationId;
 
-      // ✅ If it's an AGENT message, clear notifications for this conversation
+      // ✅ ALWAYS update the conversation list with new message data
+      const isActiveConv = currentActiveConv?.id === conversationId;
+      const conversationUpdate = {
+        lastMessage: message.content || '',
+        lastMessageAt: message.createdAt || message.created_at || new Date().toISOString(),
+        lastSenderType: senderType,
+        lastMessageSenderType: senderType,
+      };
+
+      if (senderType === 'customer' && !isActiveConv) {
+        // Increment unread only for customer messages on non-active conversations
+        const existingConv = currentConversations.find(c => c.id === conversationId);
+        const currentUnread = existingConv?.unreadCount || existingConv?.unread_count || 0;
+        conversationUpdate.unreadCount = currentUnread + 1;
+        conversationUpdate.unread_count = currentUnread + 1;
+      }
+
+      updateConversation(conversationId, conversationUpdate);
+
+      // If it's an AGENT message, clear notifications for this conversation
       if (senderType === 'agent') {
         console.log('🔕 [App] Agent message - clearing notifications for conversation:', conversationId);
         clearNotificationsForConversation(conversationId);
         return;
       }
 
-      // ✅ Customer message on a conversation the admin is NOT viewing
-      if (senderType === 'customer' && activeConversation?.id !== conversationId) {
-        const conv = data.conversation || {};
-        const customerName = conv.customerName || conv.customer_name || 'Guest';
+      // Customer message on a conversation the admin is NOT viewing → notify
+      if (senderType === 'customer' && !isActiveConv) {
+        const customerName =
+          currentConversations.find(c => c.id === conversationId)?.customerName ||
+          data.conversation?.customerName ||
+          data.conversation?.customer_name ||
+          'Guest';
         const messagePreview = message.content?.substring(0, 50) || 'New message';
-        
+
         console.log('🔔 [App] Showing notification for customer message');
         showNotification(conversationId, customerName, messagePreview);
-      } 
-      // ✅ Customer message on the conversation the admin IS viewing → auto mark read
-      else if (senderType === 'customer' && activeConversation?.id === conversationId) {
+      }
+      // Customer message on the conversation the admin IS viewing → auto mark read
+      else if (senderType === 'customer' && isActiveConv) {
         console.log('⏭️ [App] Customer message in active conversation - auto marking read');
         handleMarkAsRead(conversationId);
       }
@@ -868,15 +966,17 @@ function DashboardContent({ employee, onLogout }) {
       unsubscribe4();
       unsubscribe5();
     };
-  }, [ws, activeConversation, handleMarkAsRead]);
+    // ✅ Only depend on ws, handleMarkAsRead, updateConversation
+    // activeConversation and conversations are read via refs to avoid re-subscribing
+  }, [ws, handleMarkAsRead, updateConversation]);
 
   useEffect(() => {
     if (activeConversation && ws) {
       ws.joinConversation(activeConversation.id);
-      
+
       // ✅ Clear notifications when opening a conversation
       clearNotificationsForConversation(activeConversation.id);
-      
+
       return () => {
         ws.leaveConversation();
       };
@@ -893,7 +993,7 @@ function DashboardContent({ employee, onLogout }) {
   useEffect(() => {
     if (activeConversation) {
       const updated = conversations.find(c => c.id === activeConversation.id);
-      
+
       if (updated && updated !== activeConversation) {
         console.log('🔄 [App] Syncing activeConversation with updated data');
         setActiveConversation(updated);
@@ -932,9 +1032,9 @@ function DashboardContent({ employee, onLogout }) {
 
     try {
       const storeId = conversation.shopId || conversation.shop_id || conversation.storeId || null;
-      
+
       console.log('🏪 Store ID:', storeId);
-      
+
       if (!storeId) {
         console.error('❌ No store ID found in conversation:', conversation);
         throw new Error('Store ID is missing from conversation');
@@ -961,7 +1061,7 @@ function DashboardContent({ employee, onLogout }) {
       console.log('📨 Sending message with data:', messageData);
 
       const sentMessage = await api.sendMessage(messageData);
-      
+
       console.log('✅ Message sent successfully:', sentMessage);
 
       if (sentMessage.createdAt) {
@@ -978,9 +1078,9 @@ function DashboardContent({ employee, onLogout }) {
         response: error.response,
         stack: error.stack
       });
-      
+
       refreshConversations();
-      
+
       throw error;
     }
   };
@@ -1044,7 +1144,7 @@ function DashboardContent({ employee, onLogout }) {
       // Click to open conversation
       notification.onclick = () => {
         window.focus();
-        const conv = conversations.find(c => c.id === conversationId);
+        const conv = conversationsRef.current.find(c => c.id === conversationId);
         if (conv) {
           handleSelectConversation(conv);
         }
@@ -1189,8 +1289,8 @@ function DashboardContent({ employee, onLogout }) {
           </div>
 
           {activePage === 'dashboard' && (
-            <button 
-              className="btn-refresh" 
+            <button
+              className="btn-refresh"
               onClick={refreshConversations}
               type="button"
               title="Manually refresh conversations"
@@ -1198,8 +1298,8 @@ function DashboardContent({ employee, onLogout }) {
               🔄 Refresh
             </button>
           )}
-          
-          <div 
+
+          <div
             className="employee-info"
             data-role={employee.role}
             onClick={handleLogoutClick}
@@ -1233,15 +1333,15 @@ function DashboardContent({ employee, onLogout }) {
               </p>
             </div>
             <div className="modal-footer">
-              <button 
-                className="btn-cancel" 
+              <button
+                className="btn-cancel"
                 onClick={handleCancelLogout}
                 type="button"
               >
                 Cancel
               </button>
-              <button 
-                className="btn-logout" 
+              <button
+                className="btn-logout"
                 onClick={handleConfirmLogout}
                 type="button"
               >
@@ -1329,7 +1429,7 @@ function DashboardContent({ employee, onLogout }) {
 
       {/* Main Content - Employee Management */}
       {activePage === 'employees' && (
-        <EmployeeManagement 
+        <EmployeeManagement
           currentUser={employee}
           onBack={handleBackToDashboard}
         />
