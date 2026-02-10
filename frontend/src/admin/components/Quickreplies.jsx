@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import '../styles/QuickReplies.css';
+import '../styles/Quickreplies.css';
 
 
 function QuickReplies({
