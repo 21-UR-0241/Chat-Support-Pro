@@ -73,6 +73,13 @@
   min-width: 28px;
 }
 
+/* Wrapper for bubble + datetime */
+.message-bubble-wrapper {
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+}
+
 /* Message Bubble */
 .message-bubble {
   position: relative;
@@ -134,41 +141,59 @@
   word-wrap: break-word;
   word-break: break-word;
   margin: 0;
+  padding-bottom: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
-/* Message Time Row */
-.message-time-row {
+/* Date and Time Header - BELOW the bubble */
+.message-datetime-header {
   display: flex;
   align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 0 4px;
+  font-size: 11px;
+  color: #8696a0;
+}
+
+.message-row.agent .message-datetime-header {
   justify-content: flex-end;
-  gap: 3px;
-  margin-top: 2px;
-  float: right;
-  margin-left: 8px;
+}
+
+.message-row.customer .message-datetime-header {
+  justify-content: flex-start;
+}
+
+.message-date {
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.datetime-separator {
+  opacity: 0.6;
+  font-size: 10px;
 }
 
 .message-time {
-  font-size: 11px;
-  color: #667781;
   white-space: nowrap;
   user-select: none;
+  font-weight: 400;
 }
 
-/* Message Status */
-.message-status {
+/* Message Status in header */
+.message-datetime-header .message-status {
   display: inline-flex;
   align-items: center;
-  color: #667781;
+  color: #8696a0;
   line-height: 0;
-  margin-left: 2px;
+  margin-left: 4px;
 }
 
-.message-status svg {
+.message-datetime-header .message-status svg {
   display: block;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
 }
 
 /* Spinner Animation */
@@ -257,6 +282,10 @@
     font-size: 14px;
     line-height: 18px;
   }
+  
+  .message-datetime-header {
+    font-size: 10px;
+  }
 }
 
 @media (max-width: 480px) {
@@ -308,8 +337,7 @@
     color: #e9edef;
   }
 
-  .dark-mode .message-time,
-  .dark-mode .message-status {
+  .dark-mode .message-datetime-header {
     color: #8696a0;
   }
   
@@ -317,7 +345,7 @@
     border-color: transparent transparent #1f2c33 transparent;
   }
   
-.dark-mode .message-bubble.agent::before {
-  border-color: #005c4b transparent transparent transparent;
-}
+  .dark-mode .message-bubble.agent::before {
+    border-color: #005c4b transparent transparent transparent;
+  }
 }

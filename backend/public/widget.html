@@ -800,2052 +800,6 @@
       </svg>
     </button>
   </div>
-
-  <div id="image-lightbox">
-    <button class="close-lightbox" type="button">✕</button>
-    <img id="lightbox-image" src="" alt="Full size image">
-  </div>
-
-  <script>
-    console.log('[Widget] Starting...');
-
-    const urlParams = new URLSearchParams(window.location.search);
-    const STORE_ID = urlParams.get('store');
-    const API_URL = window.location.origin;
-    const WS_URL = window.location.origin.replace(/^http/, 'ws') + '/ws';
-
-    let conversationId = null;
-    let ws = null;
-    let wsToken = null;
-    let tokenLastRefreshed = null;
-    const TOKEN_REFRESH_INTERVAL = 5 * 60 * 1000;
-    let customerEmail = null;
-    let customerName = null;
-    let customerData = null;
-    let customerOrders = [];
-    let customerCart = null;
-    let storeSettings = null;
-    let reconnectAttempts = 0;
-    let maxReconnectAttempts = 5;
-    let reconnectDelay = 2000;
-    let displayedMessageIds = new Set();
-    let typingTimeout = null;
-    let typingDebounceTimer = null;
-    let messageSource = null;
-    let historyLoaded = false;
-    
-    // FILE UPLOAD VARIABLES
-    let selectedFile = null;
-    let uploading = false;
-    let uploadProgress = 0;
-
-    const chatMessages = document.getElementById('chat-messages');
-    const chatInput = document.getElementById('chat-input');
-    const sendButton = document.getElementById('send-button');
-    const emailCollection = document.getElementById('email-collection');
-    const welcomeMessage = document.getElementById('welcome-message');
-    const chatInputContainer = document.getElementById('chat-input-container');
-    const emailForm = document.getElementById('email-form');
-    const statusText = document.getElementById('status-text');
-    const statusIndicator = document.getElementById('status-indicator');
-    const brandName = document.getElementById('brand-name');
-    const headerAvatar = document.getElementById('header-avatar');
-    
-    // FILE ELEMENTS
-    const attachButton = document.getElementById('attach-button');
-    const fileInput = document.getElementById('file-input');
-    const filePreview = document.getElementById('file-preview');
-    const previewContent = document.getElementById('preview-content');
-    const previewName = document.getElementById('preview-name');
-    const previewSize = document.getElementById('preview-size');
-    const previewProgress = document.getElementById('preview-progress');
-    const removeFileBtn = document.getElementById('remove-file-btn');
-    const imageLightbox = document.getElementById('image-lightbox');
-    const lightboxImage = document.getElementById('lightbox-image');
-
-    if (!STORE_ID) {
-      console.error('[Widget] No store ID');
-    }
-
-    // FILE HANDLING FUNCTIONS
-    function formatFileSize(bytes) {
-      if (bytes === 0) return '0 Bytes';
-      const k = 1024;
-      const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-      const i = Math.floor(Math.log(bytes) / Math.log(k));
-      return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
-    }
-
-    attachButton.addEventListener('click', () => {
-      fileInput.click();
-    });
-
-    fileInput.addEventListener('change', (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-
-      // Validate file size (max 10MB)
-      const maxSize = 10 * 1024 * 1024;
-      if (file.size > maxSize) {
-        alert('File size must be less than 10MB');
-        fileInput.value = '';
-        return;
-      }
-
-      selectedFile = file;
-      showFilePreview(file);
-    });
-
-    function showFilePreview(file) {
-      filePreview.classList.add('visible');
-      previewName.textContent = file.name;
-      previewSize.textContent = formatFileSize(file.size);
-      previewProgress.textContent = '';
-
-      // Create preview
-      if (file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          previewContent.innerHTML = '<img src="' + e.target.result + '" class="preview-image" alt="Preview">';
-        };
-        reader.readAsDataURL(file);
-      } else {
-        previewContent.innerHTML = '<div class="preview-file-icon">📎</div>';
-      }
-
-      updateSendButton();
-    }
-
-    removeFileBtn.addEventListener('click', () => {
-      removeFile();
-    });
-
-    function removeFile() {
-      selectedFile = null;
-      filePreview.classList.remove('visible');
-      fileInput.value = '';
-      previewContent.innerHTML = '';
-      previewName.textContent = '';
-      previewSize.textContent = '';
-      previewProgress.textContent = '';
-      updateSendButton();
-    }
-
-    function updateSendButton() {
-      sendButton.disabled = !chatInput.value.trim() && !selectedFile;
-    }
-
-    async function uploadFileToBunny(file) {
-      try {
-        uploading = true;
-        uploadProgress = 0;
-
-        const formData = new FormData();
-        formData.append('file', file);
-
-        const xhr = new XMLHttpRequest();
-
-        xhr.upload.addEventListener('progress', (e) => {
-          if (e.lengthComputable) {
-            uploadProgress = Math.round((e.loaded * 100) / e.total);
-            previewProgress.textContent = uploadProgress + '%';
-          }
-        });
-
-        const uploadPromise = new Promise((resolve, reject) => {
-          xhr.addEventListener('load', () => {
-            if (xhr.status >= 200 && xhr.status < 300) {
-              resolve(JSON.parse(xhr.responseText));
-            } else {
-              reject(new Error('Upload failed: ' + xhr.status));
-            }
-          });
-
-          xhr.addEventListener('error', () => {
-            reject(new Error('Upload failed'));
-          });
-
-          xhr.open('POST', API_URL + '/api/files/upload');
-          xhr.send(formData);
-        });
-
-        const response = await uploadPromise;
-        return response;
-      } catch (error) {
-        console.error('File upload failed:', error);
-        throw error;
-      } finally {
-        uploading = false;
-        uploadProgress = 0;
-        previewProgress.textContent = '';
-      }
-    }
-
-    // IMAGE LIGHTBOX
-    function openImageLightbox(imageUrl) {
-      lightboxImage.src = imageUrl;
-      imageLightbox.classList.add('visible');
-    }
-
-    imageLightbox.addEventListener('click', (e) => {
-      if (e.target === imageLightbox || e.target.classList.contains('close-lightbox')) {
-        imageLightbox.classList.remove('visible');
-      }
-    });
-
-    function createFileAttachmentHtml(fileData) {
-      if (!fileData || !fileData.url) return '';
-
-      const isImage = fileData.type && fileData.type.startsWith('image/');
-
-      if (isImage) {
-        return '<div class="file-attachment"><img src="' + escapeHtml(fileData.url) + '" alt="' + escapeHtml(fileData.name || 'Image') + '"></div>';
-      } else {
-        return '<div class="file-attachment file-doc">' +
-          '<div class="file-icon">📎</div>' +
-          '<div class="file-info">' +
-            '<div class="file-name">' + escapeHtml(fileData.name || 'File') + '</div>' +
-            (fileData.size ? '<div class="file-size">' + formatFileSize(fileData.size) + '</div>' : '') +
-          '</div></div>';
-      }
-    }
-
-    function detectMessageSource() {
-      const source = urlParams.get('source') || urlParams.get('channel');
-      if (source) {
-        messageSource = source;
-      } else {
-        const referrer = document.referrer;
-        if (referrer) {
-          try {
-            const url = new URL(referrer);
-            messageSource = url.hostname;
-          } catch (e) {
-            messageSource = 'Website';
-          }
-        } else {
-          messageSource = 'Direct';
-        }
-      }
-      return messageSource;
-    }
-
-    function getInitials(name) {
-      if (!name) return 'CS';
-      const parts = name.trim().split(' ');
-      if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
-      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-    }
-
-    function isValidEmail(email) {
-      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-    }
-
-    function formatMessageTime(timestamp) {
-      const date = new Date(timestamp);
-      const now = new Date();
-      const diffDays = Math.floor((now - date) / 86400000);
-
-      if (diffDays === 0) {
-        return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-      }
-      
-      if (diffDays === 1) {
-        return 'Yesterday ' + date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-      }
-      
-      if (diffDays < 7) {
-        return date.toLocaleDateString('en-US', { weekday: 'short' }) + ' ' + 
-               date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-      }
-      
-      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' + 
-             date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-    }
-
-    function autoDetectCustomer() {
-      try {
-        if (window.parent && window.parent.chatCustomerData) {
-          const data = window.parent.chatCustomerData;
-          return {
-            email: data.email,
-            name: data.name || data.firstName,
-            autoDetected: true
-          };
-        }
-      } catch (e) {}
-      
-      const urlEmail = urlParams.get('email');
-      if (urlEmail && isValidEmail(urlEmail)) {
-        return {
-          email: urlEmail,
-          name: urlParams.get('name') || null,
-          autoDetected: true
-        };
-      }
-      
-      try {
-        const storedEmail = localStorage.getItem('chat_email_' + STORE_ID);
-        const storedName = localStorage.getItem('chat_name_' + STORE_ID);
-        
-        if (storedEmail && isValidEmail(storedEmail)) {
-          return {
-            email: storedEmail,
-            name: storedName || null,
-            autoDetected: true
-          };
-        }
-      } catch (e) {}
-
-      return null;
-    }
-
-    async function loadConversationHistory() {
-      if (!conversationId || historyLoaded || !STORE_ID) {
-        if (!conversationId || !STORE_ID) {
-          welcomeMessage.classList.add('visible');
-        }
-        return;
-      }
-
-      try {
-        showLoadingHistory();
-
-        const url = API_URL + '/api/widget/conversations/' + conversationId + '/messages?store=' + STORE_ID;
-
-        let response;
-        try {
-          response = await fetchWithRetry(url, {
-            headers: { 'Content-Type': 'application/json' }
-          }, 20000, 2);
-        } catch (fetchErr) {
-          hideLoadingHistory();
-          welcomeMessage.classList.add('visible');
-          return;
-        }
-
-        if (!response.ok) {
-          if (response.status === 404) {
-            localStorage.removeItem('chat_conv_' + STORE_ID);
-            conversationId = null;
-          }
-          hideLoadingHistory();
-          welcomeMessage.classList.add('visible');
-          return;
-        }
-
-        let data;
-        try {
-          const rawText = await response.text();
-          data = JSON.parse(rawText);
-        } catch (parseErr) {
-          hideLoadingHistory();
-          welcomeMessage.classList.add('visible');
-          return;
-        }
-
-        let messages = Array.isArray(data) ? data : (data.messages || data.data || []);
-
-        hideLoadingHistory();
-        
-        if (messages.length > 0) {
-          welcomeMessage.style.display = 'none';
-          
-          messages.forEach((msg) => {
-            displayHistoryMessage(msg);
-          });
-          
-          historyLoaded = true;
-          
-          setTimeout(() => {
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-          }, 100);
-        } else {
-          welcomeMessage.classList.add('visible');
-        }
-
-      } catch (error) {
-        console.error('[History] Error:', error);
-        hideLoadingHistory();
-        welcomeMessage.classList.add('visible');
-      }
-    }
-
-    function displayHistoryMessage(msg) {
-      const message = {
-        id: msg.id,
-        senderType: msg.senderType || msg.sender_type || msg.type || 'agent',
-        senderName: msg.senderName || msg.sender_name || msg.sender || 'Support',
-        content: msg.content || msg.message || msg.text || '',
-        timestamp: msg.createdAt || msg.created_at || msg.timestamp || new Date().toISOString(),
-        fileData: msg.fileData || msg.file_data || null
-      };
-
-      if (displayedMessageIds.has(message.id)) return;
-      displayedMessageIds.add(message.id);
-
-      const messageDiv = document.createElement('div');
-      messageDiv.className = 'message ' + message.senderType + ' history';
-      messageDiv.dataset.messageId = message.id;
-      
-      const time = formatMessageTime(message.timestamp);
-      const avatarText = message.senderType === 'customer' 
-        ? getInitials(customerName || message.senderName) 
-        : getInitials(message.senderName);
-      
-      const senderName = message.senderType !== 'system' 
-        ? '<div class="sender-name">' + escapeHtml(message.senderName) + '</div>' 
-        : '';
-      
-      let fileAttachmentHtml = '';
-      if (message.fileData) {
-        const fileData = typeof message.fileData === 'string' ? JSON.parse(message.fileData) : message.fileData;
-        fileAttachmentHtml = createFileAttachmentHtml(fileData);
-      }
-
-      messageDiv.innerHTML = 
-        '<div class="avatar">' + avatarText + '</div>' +
-        '<div class="bubble">' +
-          senderName +
-          (message.content ? '<div class="text">' + escapeHtml(message.content) + '</div>' : '') +
-          fileAttachmentHtml +
-          '<div class="time">' + time + '</div>' +
-        '</div>';
-      
-      chatMessages.appendChild(messageDiv);
-
-      const imgElement = messageDiv.querySelector('.file-attachment img');
-      if (imgElement) {
-        imgElement.addEventListener('click', () => {
-          openImageLightbox(imgElement.src);
-        });
-      }
-    }
-
-    function showLoadingHistory() {
-      hideLoadingHistory();
-      
-      const loadingDiv = document.createElement('div');
-      loadingDiv.className = 'loading-history';
-      loadingDiv.id = 'loading-history-indicator';
-      loadingDiv.innerHTML = '<div class="spinner"></div><span>Loading conversation...</span>';
-      
-      chatMessages.appendChild(loadingDiv);
-    }
-
-    function hideLoadingHistory() {
-      const loading = document.getElementById('loading-history-indicator');
-      if (loading) loading.remove();
-    }
-
-    emailForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      
-      const email = document.getElementById('customer-email').value.trim();
-      const name = document.getElementById('customer-name').value.trim();
-      
-      if (!isValidEmail(email)) return;
-      
-      customerEmail = email;
-      customerName = name || 'Guest';
-      
-      localStorage.setItem('chat_email_' + STORE_ID, customerEmail);
-      localStorage.setItem('chat_name_' + STORE_ID, customerName);
-      
-      const submitBtn = emailForm.querySelector('.submit-button');
-      submitBtn.disabled = true;
-      submitBtn.innerHTML = '<span class="btn-spinner"></span> Connecting...';
-      
-      const lookedUp = await lookupConversation(customerEmail);
-      if (lookedUp) {
-        conversationId = String(lookedUp);
-        localStorage.setItem('chat_conv_' + STORE_ID, conversationId);
-      }
-      
-      showChatInterface();
-      loadCustomerData();
-    });
-
-    async function loadCustomerData() {
-      if (!customerEmail) return;
-      
-      try {
-        await Promise.all([
-          fetchCustomerData(customerEmail),
-          fetchCustomerOrders(customerEmail),
-          fetchCustomerCart(customerEmail)
-        ]);
-      } catch (error) {
-        console.error('Failed to load customer data:', error);
-      }
-    }
-
-    async function showChatInterface() {
-      emailCollection.classList.remove('visible');
-      chatInputContainer.classList.add('visible');
-      
-      if (conversationId && !historyLoaded) {
-        await loadConversationHistory();
-        await ensureFreshToken(true);
-      } else {
-        welcomeMessage.classList.add('visible');
-      }
-      
-      chatInput.focus();
-      
-      if (conversationId && wsToken) {
-        setTimeout(() => connectWebSocket(), 500);
-      } else if (conversationId) {
-        updateStatus('connecting', 'Connecting...');
-        try {
-          await ensureFreshToken(true);
-          if (wsToken) {
-            connectWebSocket();
-          } else {
-            updateStatus('online', "We're online");
-          }
-        } catch (e) {
-          updateStatus('online', "We're online");
-        }
-      } else {
-        updateStatus('online', "We're online");
-      }
-    }
-
-    async function fetchWithTimeout(url, options, timeout) {
-      if (timeout === undefined) timeout = 15000;
-      const controller = new AbortController();
-      const id = setTimeout(() => controller.abort(), timeout);
-      
-      try {
-        const response = await fetch(url, Object.assign({}, options, { signal: controller.signal }));
-        clearTimeout(id);
-        return response;
-      } catch (error) {
-        clearTimeout(id);
-        if (error.name === 'AbortError') {
-          throw new Error('Request timeout');
-        }
-        throw error;
-      }
-    }
-
-    async function fetchWithRetry(url, options, timeout, retries) {
-      if (timeout === undefined) timeout = 15000;
-      if (retries === undefined) retries = 2;
-      for (let attempt = 0; attempt <= retries; attempt++) {
-        try {
-          const attemptTimeout = attempt === 0 ? timeout + 15000 : timeout;
-          return await fetchWithTimeout(url, options, attemptTimeout);
-        } catch (error) {
-          if (attempt === retries) throw error;
-          await new Promise(function(r) { setTimeout(r, 1000 * (attempt + 1)); });
-        }
-      }
-    }
-
-    async function ensureFreshToken(forceRefresh) {
-      const now = Date.now();
-      
-      if (!forceRefresh && wsToken && tokenLastRefreshed && (now - tokenLastRefreshed) < TOKEN_REFRESH_INTERVAL) {
-        return wsToken;
-      }
-      
-      try {
-        const tokenUrl = API_URL + '/api/widget/session?store=' + STORE_ID + (conversationId ? '&conversationId=' + conversationId : '');
-        
-        const response = await fetchWithRetry(tokenUrl, {}, 10000, 1);
-        
-        if (response.ok) {
-          const data = await response.json();
-          wsToken = data.token;
-          tokenLastRefreshed = now;
-          return wsToken;
-        }
-      } catch (error) {
-        console.error('[Token] Error:', error);
-      }
-      return wsToken;
-    }
-
-    async function fetchCustomerData(email) {
-      if (!email) return null;
-      
-      try {
-        const response = await fetchWithTimeout(
-          API_URL + '/api/customers/lookup?store=' + STORE_ID + '&email=' + encodeURIComponent(email),
-          {},
-          12000
-        );
-        
-        if (response.ok) {
-          customerData = await response.json();
-          return customerData;
-        }
-      } catch (error) {
-        console.error('Failed to fetch customer:', error);
-      }
-      return null;
-    }
-
-    async function fetchCustomerOrders(email) {
-      if (!email) return [];
-      
-      try {
-        const response = await fetchWithTimeout(
-          API_URL + '/api/customers/orders?store=' + STORE_ID + '&email=' + encodeURIComponent(email),
-          {},
-          12000
-        );
-        
-        if (response.ok) {
-          customerOrders = await response.json();
-          return customerOrders;
-        }
-      } catch (error) {
-        console.error('Failed to fetch orders:', error);
-      }
-      return [];
-    }
-
-    async function lookupConversation(email) {
-      if (!email || !STORE_ID) return null;
-      
-      try {
-        const response = await fetchWithTimeout(
-          API_URL + '/api/widget/conversation/lookup?store=' + STORE_ID + '&email=' + encodeURIComponent(email),
-          {},
-          10000
-        );
-        
-        if (response.ok) {
-          const data = await response.json();
-          if (data.conversationId) {
-            return data.conversationId;
-          }
-        }
-      } catch (error) {
-        console.error('[Lookup] Error:', error);
-      }
-      return null;
-    }
-
-    async function fetchCustomerCart(email) {
-      if (!email) return null;
-      
-      try {
-        if (window.parent && window.parent.chatCartData) {
-          customerCart = window.parent.chatCartData;
-          return customerCart;
-        }
-      } catch (e) {}
-      
-      try {
-        const response = await fetchWithTimeout(
-          API_URL + '/api/customers/cart?store=' + STORE_ID + '&email=' + encodeURIComponent(email),
-          {},
-          12000
-        );
-        
-        if (response.ok) {
-          customerCart = await response.json();
-          return customerCart;
-        }
-      } catch (error) {
-        console.error('Failed to fetch cart:', error);
-      }
-      return null;
-    }
-
-    async function init() {
-      try {
-        detectMessageSource();
-        
-        await loadSettings();
-        setupEventListeners();
-        
-        const detected = autoDetectCustomer();
-        
-        if (detected) {
-          customerEmail = detected.email;
-          customerName = detected.name || 'Guest';
-          
-          localStorage.setItem('chat_email_' + STORE_ID, customerEmail);
-          if (customerName) localStorage.setItem('chat_name_' + STORE_ID, customerName);
-          
-          conversationId = localStorage.getItem('chat_conv_' + STORE_ID);
-          
-          if (!conversationId && customerEmail) {
-            const lookedUp = await lookupConversation(customerEmail);
-            if (lookedUp) {
-              conversationId = String(lookedUp);
-              localStorage.setItem('chat_conv_' + STORE_ID, conversationId);
-            }
-          }
-          
-          await loadCustomerData();
-          await showChatInterface();
-        } else {
-          emailCollection.classList.add('visible');
-          updateStatus('online', "We're online");
-        }
-      } catch (error) {
-        console.error('[Init] Fatal:', error);
-        updateStatus('offline', 'Offline');
-      }
-    }
-
-    function updateStatus(status, text) {
-      statusText.textContent = text;
-      statusIndicator.classList.remove('offline', 'connecting');
-      
-      if (status === 'connecting') {
-        statusIndicator.classList.add('connecting');
-      } else if (status === 'offline') {
-        statusIndicator.classList.add('offline');
-      }
-    }
-
-    async function loadSettings() {
-      try {
-        const response = await fetchWithRetry(API_URL + '/api/widget/settings?store=' + STORE_ID, {}, 15000, 2);
-        
-        if (response.ok) {
-          storeSettings = await response.json();
-          
-          brandName.textContent = storeSettings.brandName || 'Chat Support';
-          
-          document.documentElement.style.setProperty('--primary-color', '#3bbe28');
-          document.documentElement.style.setProperty('--primary-dark', '#2fa01e');
-          document.documentElement.style.setProperty('--primary-light', '#4cd938');
-          document.documentElement.style.setProperty('--success-color', '#3bbe28');
-          
-          if (storeSettings.widgetSettings && storeSettings.widgetSettings.greeting) {
-            welcomeMessage.querySelector('p').innerHTML = storeSettings.widgetSettings.greeting;
-          }
-          
-          if (storeSettings.widgetSettings && storeSettings.widgetSettings.placeholder) {
-            chatInput.placeholder = storeSettings.widgetSettings.placeholder;
-          }
-        }
-        
-        await ensureFreshToken(true);
-      } catch (error) {
-        console.error('[Settings] Error:', error);
-      }
-    }
-
-    async function connectWebSocket() {
-      if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
-        return;
-      }
-
-      if (!conversationId) return;
-
-      try {
-        updateStatus('connecting', 'Connecting...');
-        
-        await ensureFreshToken(reconnectAttempts > 0);
-        
-        if (!wsToken) {
-          updateStatus('offline', 'No token');
-          return;
-        }
-        
-        if (ws) {
-          ws.close();
-          ws = null;
-        }
-        
-        ws = new WebSocket(WS_URL);
-        
-        ws.onopen = () => {
-          reconnectAttempts = 0;
-          
-          ws.send(JSON.stringify({
-            type: 'auth',
-            token: wsToken,
-            clientType: 'customer'
-          }));
-        };
-        
-        ws.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            handleWebSocketMessage(data);
-          } catch (error) {
-            console.error('[WebSocket] Parse error:', error);
-          }
-        };
-        
-        ws.onerror = () => {
-          updateStatus('offline', 'Error');
-        };
-        
-        ws.onclose = (event) => {
-          updateStatus('offline', 'Disconnected');
-          ws = null;
-          
-          if (reconnectAttempts < maxReconnectAttempts && conversationId) {
-            reconnectAttempts++;
-            const delay = reconnectDelay * reconnectAttempts;
-            updateStatus('connecting', 'Reconnecting...');
-            setTimeout(() => connectWebSocket(), delay);
-          } else if (reconnectAttempts >= maxReconnectAttempts) {
-            updateStatus('offline', 'Offline');
-          }
-        };
-        
-      } catch (error) {
-        console.error('[WebSocket] Failed:', error);
-        updateStatus('offline', 'Failed');
-      }
-    }
-
-    function handleWebSocketMessage(data) {
-      switch (data.type) {
-        case 'connected':
-          break;
-          
-        case 'auth_ok':
-          updateStatus('online', "We're online");
-          
-          ws.send(JSON.stringify({
-            type: 'join_conversation',
-            conversationId: parseInt(conversationId),
-            role: 'customer',
-            token: wsToken,
-            customerEmail: customerEmail,
-            customerName: customerName,
-            storeId: storeSettings ? storeSettings.storeId : undefined
-          }));
-          break;
-          
-        case 'joined':
-          updateStatus('online', "We're online");
-          break;
-          
-        case 'new_message':
-          if (data.message) {
-            displayMessageFromWebSocket(data.message);
-          }
-          break;
-          
-        case 'message_confirmed':
-          updateMessageStatus(data.tempId, 'confirmed', data.message);
-          break;
-          
-        case 'message_failed':
-          updateMessageStatus(data.tempId, 'failed');
-          break;
-          
-        case 'typing':
-          if (data.isTyping && data.senderType === 'agent') {
-            showTypingIndicator();
-          } else if (!data.isTyping) {
-            hideTypingIndicator();
-          }
-          break;
-          
-        case 'error':
-          console.error('[WebSocket] Error:', data.message);
-          if (data.message && (data.message.includes('token') || data.message.includes('auth'))) {
-            wsToken = null;
-            tokenLastRefreshed = null;
-          }
-          break;
-      }
-    }
-
-    function displayMessageFromWebSocket(message) {
-      const msg = {
-        id: message.id,
-        senderType: message.senderType || message.sender_type,
-        senderName: message.senderName || message.sender_name,
-        content: message.content,
-        conversationId: message.conversationId || message.conversation_id,
-        pending: message.pending,
-        fileData: message.fileData || message.file_data || null
-      };
-      
-      if (msg.conversationId && msg.conversationId !== parseInt(conversationId)) return;
-      if (displayedMessageIds.has(msg.id)) return;
-      if (msg.senderType === 'customer') {
-        displayedMessageIds.add(msg.id);
-        return;
-      }
-      
-      hideTypingIndicator();
-      displayedMessageIds.add(msg.id);
-      
-      addMessage(
-        msg.senderType,
-        msg.content,
-        msg.senderName || 'Support',
-        msg.id,
-        msg.pending,
-        msg.fileData
-      );
-    }
-
-    function updateMessageStatus(tempId, status, confirmedMessage) {
-      const elements = document.querySelectorAll('.message');
-      elements.forEach(function(el) {
-        if (el.dataset.messageId === tempId) {
-          if (status === 'confirmed') {
-            el.dataset.messageId = (confirmedMessage && confirmedMessage.id) || tempId;
-            el.classList.remove('pending');
-          } else if (status === 'failed') {
-            el.classList.remove('pending');
-            el.classList.add('failed');
-          }
-        }
-      });
-    }
-
-    function setupEventListeners() {
-      chatInput.addEventListener('input', () => {
-        updateSendButton();
-        autoResizeTextarea();
-        
-        clearTimeout(typingDebounceTimer);
-        typingDebounceTimer = setTimeout(() => {
-          if (ws && ws.readyState === WebSocket.OPEN && conversationId && chatInput.value.trim()) {
-            ws.send(JSON.stringify({
-              type: 'typing',
-              conversationId: parseInt(conversationId),
-              isTyping: true,
-              senderType: 'customer',
-              senderName: customerName || 'Customer'
-            }));
-            
-            clearTimeout(typingTimeout);
-            typingTimeout = setTimeout(() => {
-              if (ws && ws.readyState === WebSocket.OPEN && conversationId) {
-                ws.send(JSON.stringify({
-                  type: 'typing',
-                  conversationId: parseInt(conversationId),
-                  isTyping: false,
-                  senderType: 'customer'
-                }));
-              }
-            }, 3000);
-          }
-        }, 300);
-      });
-
-      chatInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault();
-          if (chatInput.value.trim() || selectedFile) {
-            sendMessage();
-          }
-        }
-      });
-
-      sendButton.addEventListener('click', sendMessage);
-    }
-
-    function autoResizeTextarea() {
-      chatInput.style.height = 'auto';
-      chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px';
-    }
-
-    async function sendMessage() {
-      const message = chatInput.value.trim();
-      
-      if (!message && !selectedFile) return;
-      if (uploading) return;
-
-      clearTimeout(typingTimeout);
-      clearTimeout(typingDebounceTimer);
-      
-      if (ws && ws.readyState === WebSocket.OPEN && conversationId) {
-        ws.send(JSON.stringify({
-          type: 'typing',
-          conversationId: parseInt(conversationId),
-          isTyping: false,
-          senderType: 'customer'
-        }));
-      }
-
-      chatInput.disabled = true;
-      sendButton.disabled = true;
-      attachButton.disabled = true;
-      removeFileBtn.disabled = true;
-
-      const tempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
-
-      let fileData = null;
-      if (selectedFile) {
-        try {
-          const uploadResult = await uploadFileToBunny(selectedFile);
-          fileData = {
-            url: uploadResult.url,
-            name: selectedFile.name,
-            type: selectedFile.type,
-            size: selectedFile.size
-          };
-        } catch (error) {
-          addMessage('system', 'Failed to upload file. Please try again.', 'System');
-          chatInput.disabled = false;
-          sendButton.disabled = false;
-          attachButton.disabled = false;
-          removeFileBtn.disabled = false;
-          return;
-        }
-      }
-
-      addMessage('customer', message, customerName || 'You', tempId, true, fileData);
-      
-      chatInput.value = '';
-      chatInput.style.height = 'auto';
-      removeFile();
-
-      if (welcomeMessage.style.display !== 'none') {
-        welcomeMessage.style.display = 'none';
-      }
-
-      try {
-        if (!conversationId) {
-          await ensureFreshToken(true);
-          
-          const response = await fetchWithRetry(API_URL + '/api/conversations', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              storeIdentifier: STORE_ID,
-              customerEmail: customerEmail,
-              customerName: customerName,
-              initialMessage: message || (fileData ? '📎 ' + fileData.name : ''),
-              customerData: customerData,
-              hasOrders: customerOrders.length > 0,
-              orderCount: customerOrders.length,
-              cartSubtotal: customerCart ? customerCart.subtotal || 0 : 0,
-              source: messageSource || 'website',
-              fileData: fileData
-            })
-          }, 15000, 2);
-
-          if (!response.ok) {
-            throw new Error('Failed to create conversation');
-          }
-
-          const conv = await response.json();
-          conversationId = conv.id;
-          
-          localStorage.setItem('chat_conv_' + STORE_ID, conversationId);
-          
-          updateMessageStatus(tempId, 'confirmed', { id: tempId });
-          
-          if (wsToken && !ws) {
-            connectWebSocket().catch(function() {});
-          }
-          
-          let autoReply = 'Thanks for reaching out! An agent will be with you shortly.';
-          if (customerData && customerData.name) {
-            autoReply = 'Hi ' + customerData.name + '! ' + autoReply;
-          }
-          if (customerOrders.length > 0) {
-            autoReply += ' We can see you have ' + customerOrders.length + ' order' + (customerOrders.length !== 1 ? 's' : '') + ' with us.';
-          }
-          
-          addMessage('agent', autoReply, 'Support Team');
-          
-        } else {
-          await ensureFreshToken(false);
-          
-          const response = await fetchWithRetry(API_URL + '/api/widget/messages', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              conversationId: parseInt(conversationId),
-              customerEmail: customerEmail,
-              customerName: customerName,
-              content: message || '',
-              storeIdentifier: STORE_ID,
-              tempId: tempId,
-              customerData: customerData,
-              hasOrders: customerOrders.length > 0,
-              cartSubtotal: customerCart ? customerCart.subtotal || 0 : 0,
-              source: messageSource || 'website',
-              fileData: fileData
-            })
-          }, 15000, 2);
-
-          if (!response.ok) {
-            const errorData = await response.json().catch(function() { return {}; });
-            
-            updateMessageStatus(tempId, 'failed');
-            
-            if (errorData.error && (
-              errorData.error.includes('conversation') || 
-              errorData.error === 'conversation_not_found' ||
-              errorData.error.includes('token') ||
-              errorData.error.includes('unauthorized')
-            )) {
-              localStorage.removeItem('chat_conv_' + STORE_ID);
-              conversationId = null;
-              wsToken = null;
-              tokenLastRefreshed = null;
-              historyLoaded = false;
-              
-              if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.close();
-                ws = null;
-              }
-              
-              const failedMsg = document.querySelector('[data-message-id="' + tempId + '"]');
-              if (failedMsg) failedMsg.remove();
-              
-              addMessage('system', 'Session expired. Creating new conversation...', 'System');
-              
-              await new Promise(function(resolve) { setTimeout(resolve, 800); });
-              
-              const systemMsg = chatMessages.lastElementChild;
-              if (systemMsg && systemMsg.classList.contains('system')) {
-                systemMsg.remove();
-              }
-              
-              chatInput.value = message;
-              chatInput.disabled = false;
-              sendButton.disabled = false;
-              attachButton.disabled = false;
-              
-              return sendMessage();
-            } else {
-              throw new Error(errorData.error || 'Failed to send');
-            }
-          } else {
-            const sentMessage = await response.json();
-            updateMessageStatus(tempId, 'confirmed', sentMessage);
-            if (sentMessage.id) {
-              displayedMessageIds.add(sentMessage.id);
-            }
-          }
-        }
-
-        chatInput.disabled = false;
-        sendButton.disabled = false;
-        attachButton.disabled = false;
-        removeFileBtn.disabled = false;
-        chatInput.focus();
-        
-      } catch (error) {
-        console.error('Send failed:', error);
-        
-        if (error.message.includes('token') || error.message.includes('unauthorized')) {
-          wsToken = null;
-          tokenLastRefreshed = null;
-        }
-        
-        updateMessageStatus(tempId, 'failed');
-        
-        var errorMsg = error.message === 'Request timeout' 
-          ? 'Connection is slow. Please try sending again.'
-          : 'Failed to send. Please try again.';
-        
-        addMessage('system', errorMsg, 'System');
-        
-        chatInput.disabled = false;
-        sendButton.disabled = false;
-        attachButton.disabled = false;
-        removeFileBtn.disabled = false;
-        chatInput.focus();
-      }
-    }
-
-    function addMessage(type, text, sender, messageId, pending, fileData) {
-      const messageDiv = document.createElement('div');
-      messageDiv.className = 'message ' + type;
-      if (pending) {
-        messageDiv.classList.add('pending');
-      }
-      messageDiv.dataset.messageId = messageId || ('local-' + Date.now());
-      
-      const time = new Date().toLocaleTimeString('en-US', { 
-        hour: 'numeric', 
-        minute: '2-digit' 
-      });
-      
-      const avatarText = type === 'customer' ? getInitials(customerName || sender) : 
-                         type === 'agent' ? getInitials(sender || 'Support') : 
-                         '!';
-      
-      const senderNameHtml = type !== 'system' && sender ? 
-        '<div class="sender-name">' + escapeHtml(sender) + '</div>' : '';
-      
-      let fileAttachmentHtml = '';
-      if (fileData) {
-        fileAttachmentHtml = createFileAttachmentHtml(fileData);
-      }
-
-      messageDiv.innerHTML = 
-        '<div class="avatar">' + avatarText + '</div>' +
-        '<div class="bubble">' +
-          senderNameHtml +
-          (text ? '<div class="text">' + escapeHtml(text) + '</div>' : '') +
-          fileAttachmentHtml +
-          '<div class="time">' + time + '</div>' +
-        '</div>';
-      
-      chatMessages.appendChild(messageDiv);
-      chatMessages.scrollTop = chatMessages.scrollHeight;
-
-      const imgElement = messageDiv.querySelector('.file-attachment img');
-      if (imgElement) {
-        imgElement.addEventListener('click', () => {
-          openImageLightbox(imgElement.src);
-        });
-      }
-      
-      return messageDiv;
-    }
-
-    function showTypingIndicator() {
-      hideTypingIndicator();
-      
-      const indicator = document.createElement('div');
-      indicator.className = 'message agent';
-      indicator.id = 'typing-indicator';
-      indicator.innerHTML = 
-        '<div class="avatar">SA</div>' +
-        '<div class="typing-indicator">' +
-          '<div class="dots"><span></span><span></span><span></span></div>' +
-        '</div>';
-      chatMessages.appendChild(indicator);
-      chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
-
-    function hideTypingIndicator() {
-      const indicator = document.getElementById('typing-indicator');
-      if (indicator) indicator.remove();
-    }
-
-    function escapeHtml(text) {
-      const div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
-    }
-
-    window.addEventListener('beforeunload', () => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.close();
-      }
-    });
-
-    init();
-  </script>
-</body>
-</html> -->
-
-
-
-
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chat Widget</title>
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
-    :root {
-      --primary-color: #3bbe28;
-      --primary-dark: #2fa01e;
-      --primary-light: #4cd938;
-      --success-color: #3bbe28;
-      --bg-color: #f7fafc;
-      --text-color: #1a202c;
-      --text-secondary: #718096;
-      --border-color: #e2e8f0;
-      --white: #ffffff;
-    }
-
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-      background: var(--bg-color);
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-
-    #chat-header {
-      background: var(--primary-color);
-      color: var(--white);
-      padding: 16px 20px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      box-shadow: 0 2px 8px rgba(59, 190, 40, 0.3);
-      border-bottom: none;
-      flex-shrink: 0;
-    }
-
-    #chat-header .avatar {
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      background: rgba(255,255,255,0.2);
-      color: white;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 16px;
-      font-weight: 600;
-    }
-
-    #chat-header .avatar svg {
-      width: 22px;
-      height: 22px;
-    }
-
-    #chat-header .info {
-      flex: 1;
-    }
-
-    #chat-header .info h3 {
-      font-size: 15px;
-      font-weight: 600;
-      margin-bottom: 2px;
-      color: var(--white);
-    }
-
-    #chat-header .info p {
-      font-size: 12px;
-      color: rgba(255,255,255,0.8);
-    }
-
-    .status-indicator {
-      display: inline-block;
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #a8f09a;
-      margin-right: 6px;
-      animation: pulse 2s infinite;
-    }
-
-    .status-indicator.offline {
-      background: #ef4444;
-      animation: none;
-    }
-
-    .status-indicator.connecting {
-      background: #f59e0b;
-      animation: pulse 1s infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
-    }
-
-    #chat-messages {
-      flex: 1;
-      overflow-y: auto;
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      background: var(--bg-color);
-    }
-
-    #chat-messages::-webkit-scrollbar {
-      width: 6px;
-    }
-
-    #chat-messages::-webkit-scrollbar-thumb {
-      background: #cbd5e0;
-      border-radius: 3px;
-    }
-
-    .loading-history {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-      color: var(--text-secondary);
-      font-size: 14px;
-      gap: 8px;
-    }
-    
-    .loading-history .spinner {
-      width: 16px;
-      height: 16px;
-      border: 2px solid var(--border-color);
-      border-top-color: var(--primary-color);
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
-    
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-
-    #email-collection {
-      display: none;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 40px 20px;
-      text-align: center;
-    }
-
-    #email-collection.visible {
-      display: flex;
-    }
-
-    #email-collection .icon {
-      width: 64px;
-      height: 64px;
-      margin: 0 auto 20px;
-      background: #eafbe7;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border: 2px solid #b4e8aa;
-    }
-
-    #email-collection .icon svg {
-      width: 32px;
-      height: 32px;
-      color: var(--primary-color);
-    }
-
-    #email-collection h2 {
-      font-size: 22px;
-      color: var(--text-color);
-      margin-bottom: 8px;
-    }
-
-    #email-collection p {
-      font-size: 14px;
-      color: var(--text-secondary);
-      margin-bottom: 24px;
-    }
-
-    .email-form {
-      width: 100%;
-      max-width: 400px;
-    }
-
-    .form-group {
-      margin-bottom: 16px;
-      text-align: left;
-    }
-
-    .form-group label {
-      display: block;
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--text-color);
-      margin-bottom: 6px;
-    }
-
-    .form-group input {
-      width: 100%;
-      padding: 12px 16px;
-      border: 2px solid var(--border-color);
-      border-radius: 8px;
-      font-size: 15px;
-      outline: none;
-    }
-
-    .form-group input.error {
-      border-color: #ef4444;
-    }
-
-    .form-group .error-text {
-      color: #dc2626;
-      font-size: 12px;
-      margin-top: 4px;
-      display: none;
-    }
-
-    .form-group .error-text.visible {
-      display: block;
-    }
-
-    .submit-button {
-      width: 100%;
-      padding: 14px 24px;
-      background: var(--primary-color);
-      color: white;
-      border: none;
-      border-radius: 8px;
-      font-size: 15px;
-      font-weight: 600;
-      cursor: pointer;
-    }
-
-    .submit-button:disabled {
-      opacity: 0.7;
-      cursor: not-allowed;
-    }
-
-    .btn-spinner {
-      display: inline-block;
-      width: 14px;
-      height: 14px;
-      border: 2px solid rgba(255,255,255,0.4);
-      border-top-color: white;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      vertical-align: middle;
-      margin-right: 6px;
-    }
-
-    .privacy-note {
-      font-size: 12px;
-      color: var(--text-secondary);
-      margin-top: 16px;
-    }
-
-    #welcome-message {
-      display: none;
-      text-align: center;
-      padding: 40px 20px;
-      color: var(--text-secondary);
-    }
-
-    #welcome-message.visible {
-      display: block;
-    }
-
-    #welcome-message .welcome-icon {
-      width: 48px;
-      height: 48px;
-      margin: 0 auto 16px;
-      background: #eafbe7;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border: 2px solid #b4e8aa;
-    }
-
-    #welcome-message .welcome-icon svg {
-      width: 24px;
-      height: 24px;
-      color: var(--primary-color);
-    }
-
-    #welcome-message h2 {
-      font-size: 18px;
-      margin-bottom: 8px;
-    }
-
-    #welcome-message p {
-      font-size: 14px;
-    }
-
-    .message {
-      display: flex;
-      gap: 8px;
-      max-width: 85%;
-      animation: slideIn 0.3s ease;
-    }
-
-    .message.history {
-      animation: none;
-    }
-
-    @keyframes slideIn {
-      from {
-        opacity: 0;
-        transform: translateY(10px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-
-    .message.customer {
-      align-self: flex-end;
-      flex-direction: row-reverse;
-    }
-
-    .message .avatar {
-      width: 32px;
-      height: 32px;
-      border-radius: 6px;
-      background: var(--primary-light);
-      color: white;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 12px;
-      font-weight: 600;
-      flex-shrink: 0;
-    }
-
-    .message.customer .avatar {
-      background: var(--primary-color);
-    }
-
-    .message .bubble {
-      background: white;
-      padding: 10px 14px;
-      border-radius: 12px;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.08);
-      border: 1px solid var(--border-color);
-    }
-
-    .message.customer .bubble {
-      background: var(--primary-color);
-      color: white;
-      border-color: var(--primary-color);
-    }
-
-    .message.pending .bubble {
-      opacity: 0.7;
-    }
-
-    .message .sender-name {
-      font-size: 12px;
-      font-weight: 600;
-      margin-bottom: 4px;
-    }
-
-    .message .text {
-      font-size: 14px;
-      line-height: 1.5;
-      word-wrap: break-word;
-      white-space: pre-wrap;
-    }
-
-    /* FILE ATTACHMENT STYLES */
-    .message .file-attachment {
-      margin-top: 8px;
-      border-radius: 8px;
-      overflow: hidden;
-    }
-
-    .message .file-attachment img {
-      max-width: 100%;
-      max-height: 300px;
-      display: block;
-      border-radius: 8px;
-      cursor: pointer;
-      transition: opacity 0.2s;
-    }
-
-    .message .file-attachment img:hover {
-      opacity: 0.9;
-    }
-
-    .message .file-attachment.file-doc {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 10px;
-      background: rgba(0, 0, 0, 0.05);
-      border-radius: 8px;
-    }
-
-    .message.customer .file-attachment.file-doc {
-      background: rgba(255, 255, 255, 0.2);
-    }
-
-    .message .file-icon {
-      font-size: 24px;
-    }
-
-    .message .file-info {
-      flex: 1;
-      min-width: 0;
-    }
-
-    .message .file-name {
-      font-size: 13px;
-      font-weight: 600;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .message .file-size {
-      font-size: 11px;
-      opacity: 0.7;
-      margin-top: 2px;
-    }
-
-    .message .time {
-      font-size: 11px;
-      color: var(--text-secondary);
-      margin-top: 4px;
-      opacity: 0.7;
-    }
-
-    .message.customer .time {
-      color: rgba(255,255,255,0.8);
-    }
-
-    .message.system {
-      align-self: center;
-      max-width: 100%;
-    }
-
-    .message.system .bubble {
-      background: #fef2f2;
-      border-color: #fecaca;
-      color: #dc2626;
-      font-size: 13px;
-      padding: 8px 12px;
-    }
-
-    .typing-indicator {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 14px;
-      background: white;
-      border-radius: 12px;
-      border: 1px solid var(--border-color);
-      width: fit-content;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.08);
-    }
-
-    .typing-indicator .dots {
-      display: flex;
-      gap: 4px;
-    }
-
-    .typing-indicator .dots span {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--text-secondary);
-      animation: typing 1.4s infinite;
-    }
-
-    .typing-indicator .dots span:nth-child(2) {
-      animation-delay: 0.2s;
-    }
-
-    .typing-indicator .dots span:nth-child(3) {
-      animation-delay: 0.4s;
-    }
-
-    @keyframes typing {
-      0%, 60%, 100% {
-        transform: translateY(0);
-        opacity: 0.5;
-      }
-      30% {
-        transform: translateY(-6px);
-        opacity: 1;
-      }
-    }
-
-    /* FILE PREVIEW STYLES */
-    #file-preview {
-      display: none;
-      padding: 12px 20px;
-      background: #f5f6f6;
-      border-top: 1px solid var(--border-color);
-      flex-shrink: 0;
-    }
-
-    #file-preview.visible {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    #file-preview .preview-image {
-      width: 60px;
-      height: 60px;
-      border-radius: 8px;
-      object-fit: cover;
-    }
-
-    #file-preview .preview-file-icon {
-      width: 60px;
-      height: 60px;
-      background: var(--primary-color);
-      border-radius: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 24px;
-      color: white;
-    }
-
-    #file-preview .preview-info {
-      flex: 1;
-      min-width: 0;
-    }
-
-    #file-preview .preview-name {
-      font-size: 14px;
-      font-weight: 500;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    #file-preview .preview-size {
-      font-size: 12px;
-      color: var(--text-secondary);
-      margin-top: 2px;
-    }
-
-    #file-preview .preview-progress {
-      font-size: 12px;
-      color: var(--success-color);
-      margin-top: 2px;
-      font-weight: 600;
-    }
-
-    #file-preview .remove-file-btn {
-      background: none;
-      border: none;
-      font-size: 20px;
-      cursor: pointer;
-      color: var(--text-secondary);
-      padding: 4px 8px;
-    }
-
-    #file-preview .remove-file-btn:hover {
-      color: #dc2626;
-    }
-
-    #file-preview .remove-file-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    #chat-input-container {
-      padding: 16px 20px;
-      background: white;
-      border-top: 1px solid var(--border-color);
-      display: none;
-      gap: 10px;
-      flex-shrink: 0;
-    }
-
-    #chat-input-container.visible {
-      display: flex;
-    }
-
-    #attach-button {
-      width: 44px;
-      height: 44px;
-      border-radius: 8px;
-      background: transparent;
-      border: 1px solid var(--border-color);
-      color: var(--text-color);
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 20px;
-      transition: background 0.2s;
-    }
-
-    #attach-button:hover {
-      background: var(--bg-color);
-    }
-
-    #attach-button:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    #chat-input {
-      flex: 1;
-      padding: 12px 16px;
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      font-size: 14px;
-      outline: none;
-      resize: none;
-      max-height: 120px;
-      font-family: inherit;
-    }
-
-    #send-button {
-      width: 44px;
-      height: 44px;
-      border-radius: 8px;
-      background: var(--primary-color);
-      border: none;
-      color: white;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: background 0.2s;
-    }
-
-    #send-button:hover:not(:disabled) {
-      background: var(--primary-dark);
-    }
-
-    #send-button:disabled {
-      background: #cbd5e0;
-      cursor: not-allowed;
-    }
-
-    /* IMAGE LIGHTBOX */
-    #image-lightbox {
-      display: none;
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0, 0, 0, 0.9);
-      z-index: 10000;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-    }
-
-    #image-lightbox.visible {
-      display: flex;
-    }
-
-    #image-lightbox img {
-      max-width: 100%;
-      max-height: 100%;
-      object-fit: contain;
-    }
-
-    #image-lightbox .close-lightbox {
-      position: absolute;
-      top: 20px;
-      right: 20px;
-      background: rgba(255, 255, 255, 0.2);
-      border: none;
-      color: white;
-      font-size: 30px;
-      cursor: pointer;
-      width: 50px;
-      height: 50px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: background 0.2s;
-    }
-
-    #image-lightbox .close-lightbox:hover {
-      background: rgba(255, 255, 255, 0.3);
-    }
-  </style>
-</head>
-<body>
-  <div id="chat-header">
-    <div class="avatar" id="header-avatar">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
-      </svg>
-    </div>
-    <div class="info">
-      <h3 id="brand-name">Chat Support</h3>
-      <p id="status">
-        <span class="status-indicator" id="status-indicator"></span>
-        <span id="status-text">Loading...</span>
-      </p>
-    </div>
-  </div>
-
-  <div id="chat-messages">
-    <div id="email-collection">
-      <div class="icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
-          <polyline points="22,6 12,13 2,6"></polyline>
-        </svg>
-      </div>
-      <h2>Welcome! Let's get started</h2>
-      <p>Please enter your email address to continue.</p>
-      
-      <form class="email-form" id="email-form">
-        <div class="form-group">
-          <label for="customer-email">Email Address *</label>
-          <input 
-            type="email" 
-            id="customer-email" 
-            placeholder="your@email.com"
-            required
-          >
-          <div class="error-text" id="email-error">Please enter a valid email</div>
-        </div>
-        
-        <div class="form-group">
-          <label for="customer-name">Name (Optional)</label>
-          <input 
-            type="text" 
-            id="customer-name" 
-            placeholder="Your name"
-          >
-        </div>
-        
-        <button type="submit" class="submit-button">Start Chat</button>
-        
-        <p class="privacy-note">Your information is secure.</p>
-      </form>
-    </div>
-
-    <div id="welcome-message">
-      <div class="welcome-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-        </svg>
-      </div>
-      <h2>Welcome!</h2>
-      <p>How can we help you today?</p>
-    </div>
-  </div>
-
-  <!-- FILE PREVIEW CONTAINER -->
-  <div id="file-preview">
-    <div id="preview-content"></div>
-    <div class="preview-info">
-      <div class="preview-name" id="preview-name"></div>
-      <div class="preview-size" id="preview-size"></div>
-      <div class="preview-progress" id="preview-progress"></div>
-    </div>
-    <button id="remove-file-btn" class="remove-file-btn" type="button">✕</button>
-  </div>
-
-  <div id="chat-input-container">
-    <!-- ATTACH BUTTON -->
-    <button id="attach-button" title="Attach file" type="button">📎</button>
-    <input 
-      type="file" 
-      id="file-input" 
-      accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx" 
-      style="display: none;"
-    >
-    
-    <textarea 
-      id="chat-input" 
-      placeholder="Type your message..."
-      rows="1"
-    ></textarea>
-    
-    <button id="send-button" disabled type="button">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <line x1="22" y1="2" x2="11" y2="13"></line>
-        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-      </svg>
-    </button>
-  </div>
-
-  <!-- IMAGE LIGHTBOX -->
   <div id="image-lightbox">
     <button class="close-lightbox" type="button">✕</button>
     <img id="lightbox-image" src="" alt="Full size image">
@@ -4274,4 +2228,2334 @@
   </script>
 </body>
 </html>
+ -->
 
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chat Widget</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --primary-color: #3bbe28;
+      --primary-dark: #2fa01e;
+      --primary-light: #4cd938;
+      --success-color: #3bbe28;
+      --bg-color: #f7fafc;
+      --text-color: #1a202c;
+      --text-secondary: #718096;
+      --border-color: #e2e8f0;
+      --white: #ffffff;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: var(--bg-color);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #chat-header {
+      background: var(--primary-color);
+      color: var(--white);
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 2px 8px rgba(59, 190, 40, 0.3);
+      border-bottom: none;
+      flex-shrink: 0;
+    }
+
+    #chat-header .avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.2);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    #chat-header .avatar svg {
+      width: 22px;
+      height: 22px;
+    }
+
+    #chat-header .info {
+      flex: 1;
+    }
+
+    #chat-header .info h3 {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 2px;
+      color: var(--white);
+    }
+
+    #chat-header .info p {
+      font-size: 12px;
+      color: rgba(255,255,255,0.8);
+    }
+
+    .status-indicator {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #a8f09a;
+      margin-right: 6px;
+      animation: pulse 2s infinite;
+    }
+
+    .status-indicator.offline {
+      background: #ef4444;
+      animation: none;
+    }
+
+    .status-indicator.connecting {
+      background: #f59e0b;
+      animation: pulse 1s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    #chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      background: var(--bg-color);
+    }
+
+    #chat-messages::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    #chat-messages::-webkit-scrollbar-thumb {
+      background: #cbd5e0;
+      border-radius: 3px;
+    }
+
+    .loading-history {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      color: var(--text-secondary);
+      font-size: 14px;
+      gap: 8px;
+    }
+    
+    .loading-history .spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid var(--border-color);
+      border-top-color: var(--primary-color);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    #email-collection {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 20px;
+      text-align: center;
+    }
+
+    #email-collection.visible {
+      display: flex;
+    }
+
+    #email-collection .icon {
+      width: 64px;
+      height: 64px;
+      margin: 0 auto 20px;
+      background: #eafbe7;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 2px solid #b4e8aa;
+    }
+
+    #email-collection .icon svg {
+      width: 32px;
+      height: 32px;
+      color: var(--primary-color);
+    }
+
+    #email-collection h2 {
+      font-size: 22px;
+      color: var(--text-color);
+      margin-bottom: 8px;
+    }
+
+    #email-collection p {
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin-bottom: 24px;
+    }
+
+    .email-form {
+      width: 100%;
+      max-width: 400px;
+    }
+
+    .form-group {
+      margin-bottom: 16px;
+      text-align: left;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-color);
+      margin-bottom: 6px;
+    }
+
+    .form-group input {
+      width: 100%;
+      padding: 12px 16px;
+      border: 2px solid var(--border-color);
+      border-radius: 8px;
+      font-size: 15px;
+      outline: none;
+    }
+
+    .form-group input.error {
+      border-color: #ef4444;
+    }
+
+    .form-group .error-text {
+      color: #dc2626;
+      font-size: 12px;
+      margin-top: 4px;
+      display: none;
+    }
+
+    .form-group .error-text.visible {
+      display: block;
+    }
+
+    .submit-button {
+      width: 100%;
+      padding: 14px 24px;
+      background: var(--primary-color);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .submit-button:disabled {
+      opacity: 0.7;
+      cursor: not-allowed;
+    }
+
+    .btn-spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255,255,255,0.4);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+
+    .privacy-note {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-top: 16px;
+    }
+
+    #welcome-message {
+      display: none;
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--text-secondary);
+    }
+
+    #welcome-message.visible {
+      display: block;
+    }
+
+    #welcome-message .welcome-icon {
+      width: 48px;
+      height: 48px;
+      margin: 0 auto 16px;
+      background: #eafbe7;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 2px solid #b4e8aa;
+    }
+
+    #welcome-message .welcome-icon svg {
+      width: 24px;
+      height: 24px;
+      color: var(--primary-color);
+    }
+
+    #welcome-message h2 {
+      font-size: 18px;
+      margin-bottom: 8px;
+    }
+
+    #welcome-message p {
+      font-size: 14px;
+    }
+
+    .message {
+      display: flex;
+      gap: 8px;
+      max-width: 85%;
+      animation: slideIn 0.3s ease;
+    }
+
+    .message.history {
+      animation: none;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .message.customer {
+      align-self: flex-end;
+      flex-direction: row-reverse;
+    }
+
+    .message .avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      background: var(--primary-light);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+
+    .message.customer .avatar {
+      background: var(--primary-color);
+    }
+
+    /* Message content wrapper for bubble + datetime */
+    .message-content {
+      display: flex;
+      flex-direction: column;
+      max-width: 100%;
+    }
+
+    .message .bubble {
+      background: white;
+      padding: 10px 14px;
+      border-radius: 12px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+      border: 1px solid var(--border-color);
+    }
+
+    .message.customer .bubble {
+      background: var(--primary-color);
+      color: white;
+      border-color: var(--primary-color);
+    }
+
+    .message.pending .bubble {
+      opacity: 0.7;
+    }
+
+    .message .sender-name {
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .message .text {
+      font-size: 14px;
+      line-height: 1.5;
+      word-wrap: break-word;
+      white-space: pre-wrap;
+    }
+
+    /* Date and Time below bubble */
+    .message-datetime {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-top: 4px;
+      padding: 0 4px;
+      font-size: 11px;
+      color: #8696a0;
+    }
+
+    .message.customer .message-datetime {
+      justify-content: flex-end;
+    }
+
+    .message-time {
+      white-space: nowrap;
+      font-weight: 400;
+    }
+
+    .message-date {
+      white-space: nowrap;
+      font-weight: 400;
+    }
+
+    /* FILE ATTACHMENT STYLES */
+    .message .file-attachment {
+      margin-top: 8px;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .message .file-attachment img {
+      max-width: 100%;
+      max-height: 300px;
+      display: block;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+
+    .message .file-attachment img:hover {
+      opacity: 0.9;
+    }
+
+    .message .file-attachment.file-doc {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px;
+      background: rgba(0, 0, 0, 0.05);
+      border-radius: 8px;
+    }
+
+    .message.customer .file-attachment.file-doc {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .message .file-icon {
+      font-size: 24px;
+    }
+
+    .message .file-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .message .file-name {
+      font-size: 13px;
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .message .file-size {
+      font-size: 11px;
+      opacity: 0.7;
+      margin-top: 2px;
+    }
+
+    .message.system {
+      align-self: center;
+      max-width: 100%;
+    }
+
+    .message.system .bubble {
+      background: #fef2f2;
+      border-color: #fecaca;
+      color: #dc2626;
+      font-size: 13px;
+      padding: 8px 12px;
+    }
+
+    .typing-indicator {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      background: white;
+      border-radius: 12px;
+      border: 1px solid var(--border-color);
+      width: fit-content;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+    }
+
+    .typing-indicator .dots {
+      display: flex;
+      gap: 4px;
+    }
+
+    .typing-indicator .dots span {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--text-secondary);
+      animation: typing 1.4s infinite;
+    }
+
+    .typing-indicator .dots span:nth-child(2) {
+      animation-delay: 0.2s;
+    }
+
+    .typing-indicator .dots span:nth-child(3) {
+      animation-delay: 0.4s;
+    }
+
+    @keyframes typing {
+      0%, 60%, 100% {
+        transform: translateY(0);
+        opacity: 0.5;
+      }
+      30% {
+        transform: translateY(-6px);
+        opacity: 1;
+      }
+    }
+
+    /* FILE PREVIEW STYLES */
+    #file-preview {
+      display: none;
+      padding: 12px 20px;
+      background: #f5f6f6;
+      border-top: 1px solid var(--border-color);
+      flex-shrink: 0;
+    }
+
+    #file-preview.visible {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    #file-preview .preview-image {
+      width: 60px;
+      height: 60px;
+      border-radius: 8px;
+      object-fit: cover;
+    }
+
+    #file-preview .preview-file-icon {
+      width: 60px;
+      height: 60px;
+      background: var(--primary-color);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      color: white;
+    }
+
+    #file-preview .preview-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    #file-preview .preview-name {
+      font-size: 14px;
+      font-weight: 500;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #file-preview .preview-size {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-top: 2px;
+    }
+
+    #file-preview .preview-progress {
+      font-size: 12px;
+      color: var(--success-color);
+      margin-top: 2px;
+      font-weight: 600;
+    }
+
+    #file-preview .remove-file-btn {
+      background: none;
+      border: none;
+      font-size: 20px;
+      cursor: pointer;
+      color: var(--text-secondary);
+      padding: 4px 8px;
+    }
+
+    #file-preview .remove-file-btn:hover {
+      color: #dc2626;
+    }
+
+    #file-preview .remove-file-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    #chat-input-container {
+      padding: 16px 20px;
+      background: white;
+      border-top: 1px solid var(--border-color);
+      display: none;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    #chat-input-container.visible {
+      display: flex;
+    }
+
+    #attach-button {
+      width: 44px;
+      height: 44px;
+      border-radius: 8px;
+      background: transparent;
+      border: 1px solid var(--border-color);
+      color: var(--text-color);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      transition: background 0.2s;
+    }
+
+    #attach-button:hover {
+      background: var(--bg-color);
+    }
+
+    #attach-button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    #chat-input {
+      flex: 1;
+      padding: 12px 16px;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      font-size: 14px;
+      outline: none;
+      resize: none;
+      max-height: 120px;
+      font-family: inherit;
+    }
+
+    #send-button {
+      width: 44px;
+      height: 44px;
+      border-radius: 8px;
+      background: var(--primary-color);
+      border: none;
+      color: white;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s;
+    }
+
+    #send-button:hover:not(:disabled) {
+      background: var(--primary-dark);
+    }
+
+    #send-button:disabled {
+      background: #cbd5e0;
+      cursor: not-allowed;
+    }
+
+    /* IMAGE LIGHTBOX */
+    #image-lightbox {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.9);
+      z-index: 10000;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    #image-lightbox.visible {
+      display: flex;
+    }
+
+    #image-lightbox img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+
+    #image-lightbox .close-lightbox {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: rgba(255, 255, 255, 0.2);
+      border: none;
+      color: white;
+      font-size: 30px;
+      cursor: pointer;
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s;
+    }
+
+    #image-lightbox .close-lightbox:hover {
+      background: rgba(255, 255, 255, 0.3);
+    }
+  </style>
+</head>
+<body>
+  <div id="chat-header">
+    <div class="avatar" id="header-avatar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+      </svg>
+    </div>
+    <div class="info">
+      <h3 id="brand-name">Chat Support</h3>
+      <p id="status">
+        <span class="status-indicator" id="status-indicator"></span>
+        <span id="status-text">Loading...</span>
+      </p>
+    </div>
+  </div>
+
+  <div id="chat-messages">
+    <div id="email-collection">
+      <div class="icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+          <polyline points="22,6 12,13 2,6"></polyline>
+        </svg>
+      </div>
+      <h2>Welcome! Let's get started</h2>
+      <p>Please enter your email address to continue.</p>
+      
+      <form class="email-form" id="email-form">
+        <div class="form-group">
+          <label for="customer-email">Email Address *</label>
+          <input 
+            type="email" 
+            id="customer-email" 
+            placeholder="your@email.com"
+            required
+          >
+          <div class="error-text" id="email-error">Please enter a valid email</div>
+        </div>
+        
+        <div class="form-group">
+          <label for="customer-name">Name (Optional)</label>
+          <input 
+            type="text" 
+            id="customer-name" 
+            placeholder="Your name"
+          >
+        </div>
+        
+        <button type="submit" class="submit-button">Start Chat</button>
+        
+        <p class="privacy-note">Your information is secure.</p>
+      </form>
+    </div>
+
+    <div id="welcome-message">
+      <div class="welcome-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+        </svg>
+      </div>
+      <h2>Welcome!</h2>
+      <p>How can we help you today?</p>
+    </div>
+  </div>
+
+  <!-- FILE PREVIEW CONTAINER -->
+  <div id="file-preview">
+    <div id="preview-content"></div>
+    <div class="preview-info">
+      <div class="preview-name" id="preview-name"></div>
+      <div class="preview-size" id="preview-size"></div>
+      <div class="preview-progress" id="preview-progress"></div>
+    </div>
+    <button id="remove-file-btn" class="remove-file-btn" type="button">✕</button>
+  </div>
+
+  <div id="chat-input-container">
+    <!-- ATTACH BUTTON -->
+    <button id="attach-button" title="Attach file" type="button">📎</button>
+    <input 
+      type="file" 
+      id="file-input" 
+      accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx" 
+      style="display: none;"
+    >
+    
+    <textarea 
+      id="chat-input" 
+      placeholder="Type your message..."
+      rows="1"
+    ></textarea>
+    
+    <button id="send-button" disabled type="button">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="22" y1="2" x2="11" y2="13"></line>
+        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+      </svg>
+    </button>
+  </div>
+
+  <!-- IMAGE LIGHTBOX -->
+  <div id="image-lightbox">
+    <button class="close-lightbox" type="button">✕</button>
+    <img id="lightbox-image" src="" alt="Full size image">
+  </div>
+
+  <script>
+    console.log('[Widget] Starting...');
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const STORE_ID = urlParams.get('store');
+    const API_URL = window.location.origin;
+    const WS_URL = window.location.origin.replace(/^http/, 'ws') + '/ws';
+
+    let conversationId = null;
+    let ws = null;
+    let wsToken = null;
+    let tokenLastRefreshed = null;
+    const TOKEN_REFRESH_INTERVAL = 5 * 60 * 1000;
+    let customerEmail = null;
+    let customerName = null;
+    let customerData = null;
+    let customerOrders = [];
+    let customerCart = null;
+    let storeSettings = null;
+    let reconnectAttempts = 0;
+    let maxReconnectAttempts = 5;
+    let reconnectDelay = 2000;
+    let displayedMessageIds = new Set();
+    let typingTimeout = null;
+    let typingDebounceTimer = null;
+    let messageSource = null;
+    let historyLoaded = false;
+    
+    // FILE UPLOAD VARIABLES
+    let selectedFile = null;
+    let uploading = false;
+    let uploadProgress = 0;
+
+    // =========================================================
+    // CUSTOMER PRESENCE / ACTIVITY TRACKING
+    // =========================================================
+    const ACTIVITY_EVENTS = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click'];
+    const INACTIVE_THRESHOLD = 2 * 60 * 1000;
+    const HEARTBEAT_INTERVAL = 30 * 1000;
+    const PRESENCE_UPDATE_INTERVAL = 60 * 1000;
+
+    let lastActivityTime = Date.now();
+    let isPageVisible = true;
+    let isCustomerActive = true;
+    let heartbeatTimer = null;
+    let presenceApiTimer = null;
+    let activityThrottleTimer = null;
+
+    function onUserActivity() {
+      lastActivityTime = Date.now();
+      if (!isCustomerActive) {
+        isCustomerActive = true;
+        sendPresenceUpdate('online');
+      }
+    }
+
+    function startActivityTracking() {
+      ACTIVITY_EVENTS.forEach(function (evt) {
+        document.addEventListener(evt, function () {
+          if (activityThrottleTimer) return;
+          activityThrottleTimer = setTimeout(function () {
+            activityThrottleTimer = null;
+          }, 1000);
+          onUserActivity();
+        }, { passive: true });
+      });
+
+      document.addEventListener('visibilitychange', function () {
+        isPageVisible = !document.hidden;
+        if (isPageVisible) {
+          onUserActivity();
+        } else {
+          isCustomerActive = false;
+          sendPresenceUpdate('away');
+        }
+      });
+
+      window.addEventListener('focus', function () {
+        isPageVisible = true;
+        onUserActivity();
+      });
+      window.addEventListener('blur', function () {
+        isPageVisible = false;
+        isCustomerActive = false;
+        sendPresenceUpdate('away');
+      });
+
+      heartbeatTimer = setInterval(function () {
+        var now = Date.now();
+        var timeSinceActivity = now - lastActivityTime;
+
+        if (timeSinceActivity >= INACTIVE_THRESHOLD && isCustomerActive) {
+          isCustomerActive = false;
+          sendPresenceUpdate('away');
+        }
+
+        sendPresenceHeartbeat();
+      }, HEARTBEAT_INTERVAL);
+
+      presenceApiTimer = setInterval(function () {
+        sendPresenceViaApi();
+      }, PRESENCE_UPDATE_INTERVAL);
+    }
+
+    function stopActivityTracking() {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+      if (presenceApiTimer) clearInterval(presenceApiTimer);
+    }
+
+    function sendPresenceUpdate(status) {
+      if (!conversationId) return;
+      console.log('[Presence] Status →', status);
+
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'presence',
+          conversationId: parseInt(conversationId),
+          status: status,
+          customerEmail: customerEmail,
+          lastActivityAt: new Date(lastActivityTime).toISOString()
+        }));
+      } else {
+        sendPresenceViaApi(status);
+      }
+    }
+
+    function sendPresenceHeartbeat() {
+      if (ws && ws.readyState === WebSocket.OPEN && conversationId) {
+        ws.send(JSON.stringify({
+          type: 'heartbeat',
+          conversationId: parseInt(conversationId),
+          status: isCustomerActive ? 'online' : 'away',
+          customerEmail: customerEmail,
+          lastActivityAt: new Date(lastActivityTime).toISOString()
+        }));
+      }
+    }
+
+    function sendPresenceViaApi(statusOverride) {
+      if (!conversationId || !customerEmail || !STORE_ID) return;
+
+      var status = statusOverride || (isCustomerActive ? 'online' : 'away');
+
+      fetch(API_URL + '/api/widget/presence', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversationId: parseInt(conversationId),
+          customerEmail: customerEmail,
+          storeIdentifier: STORE_ID,
+          status: status,
+          lastActivityAt: new Date(lastActivityTime).toISOString()
+        })
+      }).catch(function (err) {
+        console.warn('[Presence API] Failed:', err.message);
+      });
+    }
+
+    window.addEventListener('beforeunload', function () {
+      if (conversationId && customerEmail) {
+        var payload = JSON.stringify({
+          conversationId: parseInt(conversationId),
+          customerEmail: customerEmail,
+          storeIdentifier: STORE_ID,
+          status: 'offline',
+          lastActivityAt: new Date(lastActivityTime).toISOString()
+        });
+
+        if (navigator.sendBeacon) {
+          navigator.sendBeacon(
+            API_URL + '/api/widget/presence',
+            new Blob([payload], { type: 'application/json' })
+          );
+        }
+
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'presence',
+            conversationId: parseInt(conversationId),
+            status: 'offline',
+            customerEmail: customerEmail
+          }));
+          ws.close();
+        }
+      }
+    });
+
+    // =========================================================
+    // END PRESENCE TRACKING
+    // =========================================================
+
+    const chatMessages = document.getElementById('chat-messages');
+    const chatInput = document.getElementById('chat-input');
+    const sendButton = document.getElementById('send-button');
+    const emailCollection = document.getElementById('email-collection');
+    const welcomeMessage = document.getElementById('welcome-message');
+    const chatInputContainer = document.getElementById('chat-input-container');
+    const emailForm = document.getElementById('email-form');
+    const statusText = document.getElementById('status-text');
+    const statusIndicator = document.getElementById('status-indicator');
+    const brandName = document.getElementById('brand-name');
+    const headerAvatar = document.getElementById('header-avatar');
+    
+    // FILE ELEMENTS
+    const attachButton = document.getElementById('attach-button');
+    const fileInput = document.getElementById('file-input');
+    const filePreview = document.getElementById('file-preview');
+    const previewContent = document.getElementById('preview-content');
+    const previewName = document.getElementById('preview-name');
+    const previewSize = document.getElementById('preview-size');
+    const previewProgress = document.getElementById('preview-progress');
+    const removeFileBtn = document.getElementById('remove-file-btn');
+    const imageLightbox = document.getElementById('image-lightbox');
+    const lightboxImage = document.getElementById('lightbox-image');
+
+    if (!STORE_ID) {
+      console.error('[Widget] No store ID');
+    }
+
+    // =========================================================
+    // TIMESTAMP FORMATTING FUNCTIONS
+    // =========================================================
+
+    // FORMAT TIME ONLY
+    function formatMessageTime(timestamp) {
+      const date = new Date(timestamp);
+      return date.toLocaleTimeString('en-US', { 
+        hour: 'numeric', 
+        minute: '2-digit',
+        hour12: true
+      });
+    }
+
+    // FORMAT DATE
+    function formatMessageDate(timestamp) {
+      const date = new Date(timestamp);
+      const today = new Date();
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      
+      const isToday = date.toDateString() === today.toDateString();
+      const isYesterday = date.toDateString() === yesterday.toDateString();
+      
+      if (isToday) {
+        return 'Today';
+      } else if (isYesterday) {
+        return 'Yesterday';
+      } else {
+        return date.toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: date.getFullYear() !== today.getFullYear() ? 'numeric' : undefined,
+        });
+      }
+    }
+
+    // CHECK IF WE SHOULD SHOW DATE (when day changes or last message)
+    function shouldShowDate(currentTimestamp, nextTimestamp) {
+      if (!nextTimestamp) return true; // Last message always shows date
+      
+      try {
+        const currentDate = new Date(currentTimestamp);
+        const nextDate = new Date(nextTimestamp);
+        
+        // Show date if next message is from a different day
+        return currentDate.toDateString() !== nextDate.toDateString();
+      } catch (e) {
+        return false;
+      }
+    }
+
+    // UPDATE DATE DISPLAY FOR ALL MESSAGES
+    function updateMessageDateDisplay() {
+      const messages = Array.from(chatMessages.querySelectorAll('.message:not(.system):not(#typing-indicator)'));
+      
+      messages.forEach((msg, index) => {
+        const dateSpan = msg.querySelector('.message-date');
+        if (!dateSpan) return;
+        
+        const timestamp = msg.dataset.timestamp;
+        if (!timestamp) return;
+        
+        const nextMsg = messages[index + 1];
+        const nextTimestamp = nextMsg ? nextMsg.dataset.timestamp : null;
+        
+        const showDate = shouldShowDate(timestamp, nextTimestamp);
+        const date = formatMessageDate(timestamp);
+        
+        if (showDate) {
+          dateSpan.textContent = '• ' + date;
+          dateSpan.style.display = 'inline';
+        } else {
+          dateSpan.style.display = 'none';
+        }
+      });
+    }
+
+    // =========================================================
+    // FILE HANDLING FUNCTIONS
+    // =========================================================
+
+    function formatFileSize(bytes) {
+      if (bytes === 0) return '0 Bytes';
+      const k = 1024;
+      const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+    }
+
+    attachButton.addEventListener('click', () => {
+      fileInput.click();
+    });
+
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const maxSize = 10 * 1024 * 1024;
+      if (file.size > maxSize) {
+        alert('File size must be less than 10MB');
+        fileInput.value = '';
+        return;
+      }
+
+      selectedFile = file;
+      showFilePreview(file);
+    });
+
+    function showFilePreview(file) {
+      filePreview.classList.add('visible');
+      previewName.textContent = file.name;
+      previewSize.textContent = formatFileSize(file.size);
+      previewProgress.textContent = '';
+
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          previewContent.innerHTML = '<img src="' + e.target.result + '" class="preview-image" alt="Preview">';
+        };
+        reader.readAsDataURL(file);
+      } else {
+        previewContent.innerHTML = '<div class="preview-file-icon">📎</div>';
+      }
+
+      updateSendButton();
+    }
+
+    removeFileBtn.addEventListener('click', () => {
+      removeFile();
+    });
+
+    function removeFile() {
+      selectedFile = null;
+      filePreview.classList.remove('visible');
+      fileInput.value = '';
+      previewContent.innerHTML = '';
+      previewName.textContent = '';
+      previewSize.textContent = '';
+      previewProgress.textContent = '';
+      updateSendButton();
+    }
+
+    function updateSendButton() {
+      sendButton.disabled = !chatInput.value.trim() && !selectedFile;
+    }
+
+    async function uploadFileToBunny(file) {
+      try {
+        uploading = true;
+        uploadProgress = 0;
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const xhr = new XMLHttpRequest();
+
+        xhr.upload.addEventListener('progress', (e) => {
+          if (e.lengthComputable) {
+            uploadProgress = Math.round((e.loaded * 100) / e.total);
+            previewProgress.textContent = uploadProgress + '%';
+          }
+        });
+
+        const uploadPromise = new Promise((resolve, reject) => {
+          xhr.addEventListener('load', () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              resolve(JSON.parse(xhr.responseText));
+            } else {
+              reject(new Error('Upload failed: ' + xhr.status));
+            }
+          });
+
+          xhr.addEventListener('error', () => {
+            reject(new Error('Upload failed'));
+          });
+
+          xhr.open('POST', API_URL + '/api/files/upload');
+          xhr.send(formData);
+        });
+
+        const response = await uploadPromise;
+        return response;
+      } catch (error) {
+        console.error('File upload failed:', error);
+        throw error;
+      } finally {
+        uploading = false;
+        uploadProgress = 0;
+        previewProgress.textContent = '';
+      }
+    }
+
+    // IMAGE LIGHTBOX
+    function openImageLightbox(imageUrl) {
+      lightboxImage.src = imageUrl;
+      imageLightbox.classList.add('visible');
+    }
+
+    imageLightbox.addEventListener('click', (e) => {
+      if (e.target === imageLightbox || e.target.classList.contains('close-lightbox')) {
+        imageLightbox.classList.remove('visible');
+      }
+    });
+
+    function createFileAttachmentHtml(fileData) {
+      if (!fileData || !fileData.url) return '';
+
+      const isImage = fileData.type && fileData.type.startsWith('image/');
+
+      if (isImage) {
+        return '<div class="file-attachment"><img src="' + escapeHtml(fileData.url) + '" alt="' + escapeHtml(fileData.name || 'Image') + '"></div>';
+      } else {
+        return '<div class="file-attachment file-doc">' +
+          '<div class="file-icon">📎</div>' +
+          '<div class="file-info">' +
+            '<div class="file-name">' + escapeHtml(fileData.name || 'File') + '</div>' +
+            (fileData.size ? '<div class="file-size">' + formatFileSize(fileData.size) + '</div>' : '') +
+          '</div></div>';
+      }
+    }
+
+    // =========================================================
+    // UTILITY FUNCTIONS
+    // =========================================================
+
+    function detectMessageSource() {
+      const source = urlParams.get('source') || urlParams.get('channel');
+      if (source) {
+        messageSource = source;
+      } else {
+        const referrer = document.referrer;
+        if (referrer) {
+          try {
+            const url = new URL(referrer);
+            messageSource = url.hostname;
+          } catch (e) {
+            messageSource = 'Website';
+          }
+        } else {
+          messageSource = 'Direct';
+        }
+      }
+      return messageSource;
+    }
+
+    function getInitials(name) {
+      if (!name) return 'CS';
+      const parts = name.trim().split(' ');
+      if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    }
+
+    function isValidEmail(email) {
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    }
+
+    function autoDetectCustomer() {
+      try {
+        if (window.parent && window.parent.chatCustomerData) {
+          const data = window.parent.chatCustomerData;
+          return {
+            email: data.email,
+            name: data.name || data.firstName,
+            autoDetected: true
+          };
+        }
+      } catch (e) {}
+      
+      const urlEmail = urlParams.get('email');
+      if (urlEmail && isValidEmail(urlEmail)) {
+        return {
+          email: urlEmail,
+          name: urlParams.get('name') || null,
+          autoDetected: true
+        };
+      }
+      
+      try {
+        const storedEmail = localStorage.getItem('chat_email_' + STORE_ID);
+        const storedName = localStorage.getItem('chat_name_' + STORE_ID);
+        
+        if (storedEmail && isValidEmail(storedEmail)) {
+          return {
+            email: storedEmail,
+            name: storedName || null,
+            autoDetected: true
+          };
+        }
+      } catch (e) {}
+
+      return null;
+    }
+
+    // =========================================================
+    // MESSAGE DISPLAY FUNCTIONS
+    // =========================================================
+
+    async function loadConversationHistory() {
+      if (!conversationId || historyLoaded || !STORE_ID) {
+        if (!conversationId || !STORE_ID) {
+          welcomeMessage.classList.add('visible');
+        }
+        return;
+      }
+
+      try {
+        showLoadingHistory();
+
+        const url = API_URL + '/api/widget/conversations/' + conversationId + '/messages?store=' + STORE_ID;
+
+        let response;
+        try {
+          response = await fetchWithRetry(url, {
+            headers: { 'Content-Type': 'application/json' }
+          }, 20000, 2);
+        } catch (fetchErr) {
+          hideLoadingHistory();
+          welcomeMessage.classList.add('visible');
+          return;
+        }
+
+        if (!response.ok) {
+          if (response.status === 404) {
+            localStorage.removeItem('chat_conv_' + STORE_ID);
+            conversationId = null;
+          }
+          hideLoadingHistory();
+          welcomeMessage.classList.add('visible');
+          return;
+        }
+
+        let data;
+        try {
+          const rawText = await response.text();
+          data = JSON.parse(rawText);
+        } catch (parseErr) {
+          hideLoadingHistory();
+          welcomeMessage.classList.add('visible');
+          return;
+        }
+
+        let messages = Array.isArray(data) ? data : (data.messages || data.data || []);
+
+        hideLoadingHistory();
+        
+        if (messages.length > 0) {
+          welcomeMessage.style.display = 'none';
+          
+          messages.forEach((msg) => {
+            displayHistoryMessage(msg);
+          });
+          
+          // Update date display for all messages
+          setTimeout(() => {
+            updateMessageDateDisplay();
+          }, 100);
+          
+          historyLoaded = true;
+          
+          setTimeout(() => {
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+          }, 100);
+        } else {
+          welcomeMessage.classList.add('visible');
+        }
+
+      } catch (error) {
+        console.error('[History] Error:', error);
+        hideLoadingHistory();
+        welcomeMessage.classList.add('visible');
+      }
+    }
+
+    function displayHistoryMessage(msg) {
+      const message = {
+        id: msg.id,
+        senderType: msg.senderType || msg.sender_type || msg.type || 'agent',
+        senderName: msg.senderName || msg.sender_name || msg.sender || 'Support',
+        content: msg.content || msg.message || msg.text || '',
+        timestamp: msg.createdAt || msg.created_at || msg.timestamp || new Date().toISOString(),
+        fileData: msg.fileData || msg.file_data || null
+      };
+
+      if (displayedMessageIds.has(message.id)) return;
+      displayedMessageIds.add(message.id);
+
+      const messageDiv = document.createElement('div');
+      messageDiv.className = 'message ' + message.senderType + ' history';
+      messageDiv.dataset.messageId = message.id;
+      messageDiv.dataset.timestamp = message.timestamp;
+      
+      const time = formatMessageTime(message.timestamp);
+      
+      const avatarText = message.senderType === 'customer' 
+        ? getInitials(customerName || message.senderName) 
+        : getInitials(message.senderName);
+      
+      const senderName = message.senderType !== 'system' 
+        ? '<div class="sender-name">' + escapeHtml(message.senderName) + '</div>' 
+        : '';
+      
+      let fileAttachmentHtml = '';
+      if (message.fileData) {
+        const fileData = typeof message.fileData === 'string' ? JSON.parse(message.fileData) : message.fileData;
+        fileAttachmentHtml = createFileAttachmentHtml(fileData);
+      }
+
+      messageDiv.innerHTML = 
+        '<div class="avatar">' + avatarText + '</div>' +
+        '<div class="message-content">' +
+          '<div class="bubble">' +
+            senderName +
+            (message.content ? '<div class="text">' + escapeHtml(message.content) + '</div>' : '') +
+            fileAttachmentHtml +
+          '</div>' +
+          '<div class="message-datetime">' +
+            '<span class="message-time">' + time + '</span>' +
+            '<span class="message-date" style="display: none;"></span>' +
+          '</div>' +
+        '</div>';
+      
+      chatMessages.appendChild(messageDiv);
+
+      const imgElement = messageDiv.querySelector('.file-attachment img');
+      if (imgElement) {
+        imgElement.addEventListener('click', () => {
+          openImageLightbox(imgElement.src);
+        });
+      }
+    }
+
+    function showLoadingHistory() {
+      hideLoadingHistory();
+      
+      const loadingDiv = document.createElement('div');
+      loadingDiv.className = 'loading-history';
+      loadingDiv.id = 'loading-history-indicator';
+      loadingDiv.innerHTML = '<div class="spinner"></div><span>Loading conversation...</span>';
+      
+      chatMessages.appendChild(loadingDiv);
+    }
+
+    function hideLoadingHistory() {
+      const loading = document.getElementById('loading-history-indicator');
+      if (loading) loading.remove();
+    }
+
+    function addMessage(type, text, sender, messageId, pending, fileData) {
+      const messageDiv = document.createElement('div');
+      messageDiv.className = 'message ' + type;
+      if (pending) {
+        messageDiv.classList.add('pending');
+      }
+      messageDiv.dataset.messageId = messageId || ('local-' + Date.now());
+      
+      const timestamp = new Date().toISOString();
+      messageDiv.dataset.timestamp = timestamp;
+      
+      const time = formatMessageTime(timestamp);
+      
+      const avatarText = type === 'customer' ? getInitials(customerName || sender) : 
+                         type === 'agent' ? getInitials(sender || 'Support') : 
+                         '!';
+      
+      const senderNameHtml = type !== 'system' && sender ? 
+        '<div class="sender-name">' + escapeHtml(sender) + '</div>' : '';
+      
+      let fileAttachmentHtml = '';
+      if (fileData) {
+        fileAttachmentHtml = createFileAttachmentHtml(fileData);
+      }
+
+      messageDiv.innerHTML = 
+        '<div class="avatar">' + avatarText + '</div>' +
+        '<div class="message-content">' +
+          '<div class="bubble">' +
+            senderNameHtml +
+            (text ? '<div class="text">' + escapeHtml(text) + '</div>' : '') +
+            fileAttachmentHtml +
+          '</div>' +
+          '<div class="message-datetime">' +
+            '<span class="message-time">' + time + '</span>' +
+            '<span class="message-date" style="display: none;"></span>' +
+          '</div>' +
+        '</div>';
+      
+      chatMessages.appendChild(messageDiv);
+      
+      // Update date visibility for all messages
+      updateMessageDateDisplay();
+      
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+
+      const imgElement = messageDiv.querySelector('.file-attachment img');
+      if (imgElement) {
+        imgElement.addEventListener('click', () => {
+          openImageLightbox(imgElement.src);
+        });
+      }
+      
+      return messageDiv;
+    }
+
+    // =========================================================
+    // EMAIL FORM & INITIALIZATION
+    // =========================================================
+
+    emailForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const email = document.getElementById('customer-email').value.trim();
+      const name = document.getElementById('customer-name').value.trim();
+      
+      if (!isValidEmail(email)) return;
+      
+      customerEmail = email;
+      customerName = name || 'Guest';
+      
+      localStorage.setItem('chat_email_' + STORE_ID, customerEmail);
+      localStorage.setItem('chat_name_' + STORE_ID, customerName);
+      
+      const submitBtn = emailForm.querySelector('.submit-button');
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="btn-spinner"></span> Connecting...';
+      
+      const lookedUp = await lookupConversation(customerEmail);
+      if (lookedUp) {
+        conversationId = String(lookedUp);
+        localStorage.setItem('chat_conv_' + STORE_ID, conversationId);
+      }
+      
+      showChatInterface();
+      loadCustomerData();
+    });
+
+    async function loadCustomerData() {
+      if (!customerEmail) return;
+      
+      try {
+        await Promise.all([
+          fetchCustomerData(customerEmail),
+          fetchCustomerOrders(customerEmail),
+          fetchCustomerCart(customerEmail)
+        ]);
+      } catch (error) {
+        console.error('Failed to load customer data:', error);
+      }
+    }
+
+    async function showChatInterface() {
+      emailCollection.classList.remove('visible');
+      chatInputContainer.classList.add('visible');
+      
+      if (conversationId && !historyLoaded) {
+        await loadConversationHistory();
+        await ensureFreshToken(true);
+      } else {
+        welcomeMessage.classList.add('visible');
+      }
+      
+      chatInput.focus();
+
+      startActivityTracking();
+      sendPresenceUpdate('online');
+      
+      if (conversationId && wsToken) {
+        setTimeout(() => connectWebSocket(), 500);
+      } else if (conversationId) {
+        updateStatus('connecting', 'Connecting...');
+        try {
+          await ensureFreshToken(true);
+          if (wsToken) {
+            connectWebSocket();
+          } else {
+            updateStatus('online', "We're online");
+          }
+        } catch (e) {
+          updateStatus('online', "We're online");
+        }
+      } else {
+        updateStatus('online', "We're online");
+      }
+    }
+
+    // =========================================================
+    // API FUNCTIONS
+    // =========================================================
+
+    async function fetchWithTimeout(url, options, timeout) {
+      if (timeout === undefined) timeout = 15000;
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), timeout);
+      
+      try {
+        const response = await fetch(url, Object.assign({}, options, { signal: controller.signal }));
+        clearTimeout(id);
+        return response;
+      } catch (error) {
+        clearTimeout(id);
+        if (error.name === 'AbortError') {
+          throw new Error('Request timeout');
+        }
+        throw error;
+      }
+    }
+
+    async function fetchWithRetry(url, options, timeout, retries) {
+      if (timeout === undefined) timeout = 15000;
+      if (retries === undefined) retries = 2;
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+          const attemptTimeout = attempt === 0 ? timeout + 15000 : timeout;
+          return await fetchWithTimeout(url, options, attemptTimeout);
+        } catch (error) {
+          if (attempt === retries) throw error;
+          await new Promise(function(r) { setTimeout(r, 1000 * (attempt + 1)); });
+        }
+      }
+    }
+
+    async function ensureFreshToken(forceRefresh) {
+      const now = Date.now();
+      
+      if (!forceRefresh && wsToken && tokenLastRefreshed && (now - tokenLastRefreshed) < TOKEN_REFRESH_INTERVAL) {
+        return wsToken;
+      }
+      
+      try {
+        const tokenUrl = API_URL + '/api/widget/session?store=' + STORE_ID + (conversationId ? '&conversationId=' + conversationId : '');
+        
+        const response = await fetchWithRetry(tokenUrl, {}, 10000, 1);
+        
+        if (response.ok) {
+          const data = await response.json();
+          wsToken = data.token;
+          tokenLastRefreshed = now;
+          return wsToken;
+        }
+      } catch (error) {
+        console.error('[Token] Error:', error);
+      }
+      return wsToken;
+    }
+
+    async function fetchCustomerData(email) {
+      if (!email) return null;
+      
+      try {
+        const response = await fetchWithTimeout(
+          API_URL + '/api/customers/lookup?store=' + STORE_ID + '&email=' + encodeURIComponent(email),
+          {},
+          12000
+        );
+        
+        if (response.ok) {
+          customerData = await response.json();
+          return customerData;
+        }
+      } catch (error) {
+        console.error('Failed to fetch customer:', error);
+      }
+      return null;
+    }
+
+    async function fetchCustomerOrders(email) {
+      if (!email) return [];
+      
+      try {
+        const response = await fetchWithTimeout(
+          API_URL + '/api/customers/orders?store=' + STORE_ID + '&email=' + encodeURIComponent(email),
+          {},
+          12000
+        );
+        
+        if (response.ok) {
+          customerOrders = await response.json();
+          return customerOrders;
+        }
+      } catch (error) {
+        console.error('Failed to fetch orders:', error);
+      }
+      return [];
+    }
+
+    async function lookupConversation(email) {
+      if (!email || !STORE_ID) return null;
+      
+      try {
+        const response = await fetchWithTimeout(
+          API_URL + '/api/widget/conversation/lookup?store=' + STORE_ID + '&email=' + encodeURIComponent(email),
+          {},
+          10000
+        );
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data.conversationId) {
+            return data.conversationId;
+          }
+        }
+      } catch (error) {
+        console.error('[Lookup] Error:', error);
+      }
+      return null;
+    }
+
+    async function fetchCustomerCart(email) {
+      if (!email) return null;
+      
+      try {
+        if (window.parent && window.parent.chatCartData) {
+          customerCart = window.parent.chatCartData;
+          return customerCart;
+        }
+      } catch (e) {}
+      
+      try {
+        const response = await fetchWithTimeout(
+          API_URL + '/api/customers/cart?store=' + STORE_ID + '&email=' + encodeURIComponent(email),
+          {},
+          12000
+        );
+        
+        if (response.ok) {
+          customerCart = await response.json();
+          return customerCart;
+        }
+      } catch (error) {
+        console.error('Failed to fetch cart:', error);
+      }
+      return null;
+    }
+
+    async function init() {
+      try {
+        detectMessageSource();
+        
+        await loadSettings();
+        setupEventListeners();
+        
+        const detected = autoDetectCustomer();
+        
+        if (detected) {
+          customerEmail = detected.email;
+          customerName = detected.name || 'Guest';
+          
+          localStorage.setItem('chat_email_' + STORE_ID, customerEmail);
+          if (customerName) localStorage.setItem('chat_name_' + STORE_ID, customerName);
+          
+          conversationId = localStorage.getItem('chat_conv_' + STORE_ID);
+          
+          if (!conversationId && customerEmail) {
+            const lookedUp = await lookupConversation(customerEmail);
+            if (lookedUp) {
+              conversationId = String(lookedUp);
+              localStorage.setItem('chat_conv_' + STORE_ID, conversationId);
+            }
+          }
+          
+          await loadCustomerData();
+          await showChatInterface();
+        } else {
+          emailCollection.classList.add('visible');
+          updateStatus('online', "We're online");
+        }
+      } catch (error) {
+        console.error('[Init] Fatal:', error);
+        updateStatus('offline', 'Offline');
+      }
+    }
+
+    function updateStatus(status, text) {
+      statusText.textContent = text;
+      statusIndicator.classList.remove('offline', 'connecting');
+      
+      if (status === 'connecting') {
+        statusIndicator.classList.add('connecting');
+      } else if (status === 'offline') {
+        statusIndicator.classList.add('offline');
+      }
+    }
+
+    async function loadSettings() {
+      try {
+        const response = await fetchWithRetry(API_URL + '/api/widget/settings?store=' + STORE_ID, {}, 15000, 2);
+        
+        if (response.ok) {
+          storeSettings = await response.json();
+          
+          brandName.textContent = storeSettings.brandName || 'Chat Support';
+          
+          document.documentElement.style.setProperty('--primary-color', '#3bbe28');
+          document.documentElement.style.setProperty('--primary-dark', '#2fa01e');
+          document.documentElement.style.setProperty('--primary-light', '#4cd938');
+          document.documentElement.style.setProperty('--success-color', '#3bbe28');
+          
+          if (storeSettings.widgetSettings && storeSettings.widgetSettings.greeting) {
+            welcomeMessage.querySelector('p').innerHTML = storeSettings.widgetSettings.greeting;
+          }
+          
+          if (storeSettings.widgetSettings && storeSettings.widgetSettings.placeholder) {
+            chatInput.placeholder = storeSettings.widgetSettings.placeholder;
+          }
+        }
+        
+        await ensureFreshToken(true);
+      } catch (error) {
+        console.error('[Settings] Error:', error);
+      }
+    }
+
+    // =========================================================
+    // WEBSOCKET FUNCTIONS
+    // =========================================================
+
+    async function connectWebSocket() {
+      if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+        return;
+      }
+
+      if (!conversationId) return;
+
+      try {
+        updateStatus('connecting', 'Connecting...');
+        
+        await ensureFreshToken(reconnectAttempts > 0);
+        
+        if (!wsToken) {
+          updateStatus('offline', 'No token');
+          return;
+        }
+        
+        if (ws) {
+          ws.close();
+          ws = null;
+        }
+        
+        ws = new WebSocket(WS_URL);
+        
+        ws.onopen = () => {
+          reconnectAttempts = 0;
+          
+          ws.send(JSON.stringify({
+            type: 'auth',
+            token: wsToken,
+            clientType: 'customer'
+          }));
+        };
+        
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            handleWebSocketMessage(data);
+          } catch (error) {
+            console.error('[WebSocket] Parse error:', error);
+          }
+        };
+        
+        ws.onerror = () => {
+          updateStatus('offline', 'Error');
+        };
+        
+        ws.onclose = (event) => {
+          updateStatus('offline', 'Disconnected');
+          ws = null;
+          
+          if (reconnectAttempts < maxReconnectAttempts && conversationId) {
+            reconnectAttempts++;
+            const delay = reconnectDelay * reconnectAttempts;
+            updateStatus('connecting', 'Reconnecting...');
+            setTimeout(() => connectWebSocket(), delay);
+          } else if (reconnectAttempts >= maxReconnectAttempts) {
+            updateStatus('offline', 'Offline');
+          }
+        };
+        
+      } catch (error) {
+        console.error('[WebSocket] Failed:', error);
+        updateStatus('offline', 'Failed');
+      }
+    }
+
+    function handleWebSocketMessage(data) {
+      switch (data.type) {
+        case 'connected':
+          break;
+          
+        case 'auth_ok':
+          updateStatus('online', "We're online");
+          
+          ws.send(JSON.stringify({
+            type: 'join_conversation',
+            conversationId: parseInt(conversationId),
+            role: 'customer',
+            token: wsToken,
+            customerEmail: customerEmail,
+            customerName: customerName,
+            storeId: storeSettings ? storeSettings.storeId : undefined
+          }));
+
+          sendPresenceUpdate('online');
+          break;
+          
+        case 'joined':
+          updateStatus('online', "We're online");
+          break;
+          
+        case 'new_message':
+          if (data.message) {
+            onUserActivity();
+            displayMessageFromWebSocket(data.message);
+          }
+          break;
+          
+        case 'message_confirmed':
+          updateMessageStatus(data.tempId, 'confirmed', data.message);
+          break;
+          
+        case 'message_failed':
+          updateMessageStatus(data.tempId, 'failed');
+          break;
+          
+        case 'typing':
+          if (data.isTyping && data.senderType === 'agent') {
+            showTypingIndicator();
+          } else if (!data.isTyping) {
+            hideTypingIndicator();
+          }
+          break;
+          
+        case 'error':
+          console.error('[WebSocket] Error:', data.message);
+          if (data.message && (data.message.includes('token') || data.message.includes('auth'))) {
+            wsToken = null;
+            tokenLastRefreshed = null;
+          }
+          break;
+      }
+    }
+
+    function displayMessageFromWebSocket(message) {
+      const msg = {
+        id: message.id,
+        senderType: message.senderType || message.sender_type,
+        senderName: message.senderName || message.sender_name,
+        content: message.content,
+        conversationId: message.conversationId || message.conversation_id,
+        pending: message.pending,
+        fileData: message.fileData || message.file_data || null,
+        timestamp: message.createdAt || message.created_at || new Date().toISOString()
+      };
+      
+      if (msg.conversationId && msg.conversationId !== parseInt(conversationId)) return;
+      if (displayedMessageIds.has(msg.id)) return;
+      if (msg.senderType === 'customer') {
+        displayedMessageIds.add(msg.id);
+        return;
+      }
+      
+      hideTypingIndicator();
+      displayedMessageIds.add(msg.id);
+      
+      addMessage(
+        msg.senderType,
+        msg.content,
+        msg.senderName || 'Support',
+        msg.id,
+        msg.pending,
+        msg.fileData
+      );
+    }
+
+    function updateMessageStatus(tempId, status, confirmedMessage) {
+      const elements = document.querySelectorAll('.message');
+      elements.forEach(function(el) {
+        if (el.dataset.messageId === tempId) {
+          if (status === 'confirmed') {
+            el.dataset.messageId = (confirmedMessage && confirmedMessage.id) || tempId;
+            el.classList.remove('pending');
+          } else if (status === 'failed') {
+            el.classList.remove('pending');
+            el.classList.add('failed');
+          }
+        }
+      });
+    }
+
+    // =========================================================
+    // EVENT LISTENERS & INPUT HANDLING
+    // =========================================================
+
+    function setupEventListeners() {
+      chatInput.addEventListener('input', () => {
+        updateSendButton();
+        autoResizeTextarea();
+        
+        clearTimeout(typingDebounceTimer);
+        typingDebounceTimer = setTimeout(() => {
+          if (ws && ws.readyState === WebSocket.OPEN && conversationId && chatInput.value.trim()) {
+            ws.send(JSON.stringify({
+              type: 'typing',
+              conversationId: parseInt(conversationId),
+              isTyping: true,
+              senderType: 'customer',
+              senderName: customerName || 'Customer'
+            }));
+            
+            clearTimeout(typingTimeout);
+            typingTimeout = setTimeout(() => {
+              if (ws && ws.readyState === WebSocket.OPEN && conversationId) {
+                ws.send(JSON.stringify({
+                  type: 'typing',
+                  conversationId: parseInt(conversationId),
+                  isTyping: false,
+                  senderType: 'customer'
+                }));
+              }
+            }, 3000);
+          }
+        }, 300);
+      });
+
+      chatInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          if (chatInput.value.trim() || selectedFile) {
+            sendMessage();
+          }
+        }
+      });
+
+      sendButton.addEventListener('click', sendMessage);
+    }
+
+    function autoResizeTextarea() {
+      chatInput.style.height = 'auto';
+      chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px';
+    }
+
+    async function sendMessage() {
+      const message = chatInput.value.trim();
+      
+      if (!message && !selectedFile) return;
+      if (uploading) return;
+
+      onUserActivity();
+
+      clearTimeout(typingTimeout);
+      clearTimeout(typingDebounceTimer);
+      
+      if (ws && ws.readyState === WebSocket.OPEN && conversationId) {
+        ws.send(JSON.stringify({
+          type: 'typing',
+          conversationId: parseInt(conversationId),
+          isTyping: false,
+          senderType: 'customer'
+        }));
+      }
+
+      chatInput.disabled = true;
+      sendButton.disabled = true;
+      attachButton.disabled = true;
+      removeFileBtn.disabled = true;
+
+      const tempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+
+      let fileData = null;
+      if (selectedFile) {
+        try {
+          const uploadResult = await uploadFileToBunny(selectedFile);
+          fileData = {
+            url: uploadResult.url,
+            name: selectedFile.name,
+            type: selectedFile.type,
+            size: selectedFile.size
+          };
+        } catch (error) {
+          addMessage('system', 'Failed to upload file. Please try again.', 'System');
+          chatInput.disabled = false;
+          sendButton.disabled = false;
+          attachButton.disabled = false;
+          removeFileBtn.disabled = false;
+          return;
+        }
+      }
+
+      addMessage('customer', message, customerName || 'You', tempId, true, fileData);
+      
+      chatInput.value = '';
+      chatInput.style.height = 'auto';
+      removeFile();
+
+      if (welcomeMessage.style.display !== 'none') {
+        welcomeMessage.style.display = 'none';
+      }
+
+      try {
+        if (!conversationId) {
+          await ensureFreshToken(true);
+          
+          const response = await fetchWithRetry(API_URL + '/api/conversations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              storeIdentifier: STORE_ID,
+              customerEmail: customerEmail,
+              customerName: customerName,
+              initialMessage: message || (fileData ? '📎 ' + fileData.name : ''),
+              customerData: customerData,
+              hasOrders: customerOrders.length > 0,
+              orderCount: customerOrders.length,
+              cartSubtotal: customerCart ? customerCart.subtotal || 0 : 0,
+              source: messageSource || 'website',
+              fileData: fileData
+            })
+          }, 15000, 2);
+
+          if (!response.ok) {
+            throw new Error('Failed to create conversation');
+          }
+
+          const conv = await response.json();
+          conversationId = conv.id;
+          
+          localStorage.setItem('chat_conv_' + STORE_ID, conversationId);
+          
+          updateMessageStatus(tempId, 'confirmed', { id: tempId });
+
+          sendPresenceUpdate('online');
+          
+          if (wsToken && !ws) {
+            connectWebSocket().catch(function() {});
+          }
+          
+          let autoReply = 'Thanks for reaching out! An agent will be with you shortly.';
+          if (customerData && customerData.name) {
+            autoReply = 'Hi ' + customerData.name + '! ' + autoReply;
+          }
+          if (customerOrders.length > 0) {
+            autoReply += ' We can see you have ' + customerOrders.length + ' order' + (customerOrders.length !== 1 ? 's' : '') + ' with us.';
+          }
+          
+          addMessage('agent', autoReply, 'Support Team');
+          
+        } else {
+          await ensureFreshToken(false);
+          
+          const response = await fetchWithRetry(API_URL + '/api/widget/messages', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              conversationId: parseInt(conversationId),
+              customerEmail: customerEmail,
+              customerName: customerName,
+              content: message || '',
+              storeIdentifier: STORE_ID,
+              tempId: tempId,
+              customerData: customerData,
+              hasOrders: customerOrders.length > 0,
+              cartSubtotal: customerCart ? customerCart.subtotal || 0 : 0,
+              source: messageSource || 'website',
+              fileData: fileData
+            })
+          }, 15000, 2);
+
+          if (!response.ok) {
+            const errorData = await response.json().catch(function() { return {}; });
+            
+            updateMessageStatus(tempId, 'failed');
+            
+            if (errorData.error && (
+              errorData.error.includes('conversation') || 
+              errorData.error === 'conversation_not_found' ||
+              errorData.error.includes('token') ||
+              errorData.error.includes('unauthorized')
+            )) {
+              localStorage.removeItem('chat_conv_' + STORE_ID);
+              conversationId = null;
+              wsToken = null;
+              tokenLastRefreshed = null;
+              historyLoaded = false;
+              
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.close();
+                ws = null;
+              }
+              
+              const failedMsg = document.querySelector('[data-message-id="' + tempId + '"]');
+              if (failedMsg) failedMsg.remove();
+              
+              addMessage('system', 'Session expired. Creating new conversation...', 'System');
+              
+              await new Promise(function(resolve) { setTimeout(resolve, 800); });
+              
+              const systemMsg = chatMessages.lastElementChild;
+              if (systemMsg && systemMsg.classList.contains('system')) {
+                systemMsg.remove();
+              }
+              
+              chatInput.value = message;
+              chatInput.disabled = false;
+              sendButton.disabled = false;
+              attachButton.disabled = false;
+              
+              return sendMessage();
+            } else {
+              throw new Error(errorData.error || 'Failed to send');
+            }
+          } else {
+            const sentMessage = await response.json();
+            updateMessageStatus(tempId, 'confirmed', sentMessage);
+            if (sentMessage.id) {
+              displayedMessageIds.add(sentMessage.id);
+            }
+          }
+        }
+
+        chatInput.disabled = false;
+        sendButton.disabled = false;
+        attachButton.disabled = false;
+        removeFileBtn.disabled = false;
+        chatInput.focus();
+        
+      } catch (error) {
+        console.error('Send failed:', error);
+        
+        if (error.message.includes('token') || error.message.includes('unauthorized')) {
+          wsToken = null;
+          tokenLastRefreshed = null;
+        }
+        
+        updateMessageStatus(tempId, 'failed');
+        
+        var errorMsg = error.message === 'Request timeout' 
+          ? 'Connection is slow. Please try sending again.'
+          : 'Failed to send. Please try again.';
+        
+        addMessage('system', errorMsg, 'System');
+        
+        chatInput.disabled = false;
+        sendButton.disabled = false;
+        attachButton.disabled = false;
+        removeFileBtn.disabled = false;
+        chatInput.focus();
+      }
+    }
+
+    function showTypingIndicator() {
+      hideTypingIndicator();
+      
+      const indicator = document.createElement('div');
+      indicator.className = 'message agent';
+      indicator.id = 'typing-indicator';
+      indicator.innerHTML = 
+        '<div class="avatar">SA</div>' +
+        '<div class="typing-indicator">' +
+          '<div class="dots"><span></span><span></span><span></span></div>' +
+        '</div>';
+      chatMessages.appendChild(indicator);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    function hideTypingIndicator() {
+      const indicator = document.getElementById('typing-indicator');
+      if (indicator) indicator.remove();
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    init();
+  </script>
+</body>
+</html>
