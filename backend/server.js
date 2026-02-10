@@ -1468,7 +1468,7 @@ const { hashPassword, verifyPassword, generateToken, authenticateToken } = requi
 const session = require('express-session');
 const shopifyAppRoutes = require('./routes/shopify-app-routes');
 const fileRoutes = require('./routes/fileroutes');
-const { handleOfflineEmailNotification } = require('../frontend/src/admin/services/emailService');
+const { handleOfflineEmailNotification, cancelPendingEmail, startEmailSweep, stopEmailSweep } = require('../frontend/src/admin/services/emailService');
 
 const app = express();
 const server = http.createServer(app);
@@ -2555,6 +2555,11 @@ app.post('/api/widget/presence', async (req, res) => {
         updated_at = NOW()
     `, [conversationId, customerEmail, storeId || null, safeStatus, lastActivityAt || new Date()]);
 
+    // Cancel pending offline email if customer came back online
+    if (safeStatus === 'online') {
+      cancelPendingEmail(conversationId);
+    }
+
     res.json({ ok: true });
   } catch (error) {
     console.error('[Presence REST] Error:', error);
@@ -2896,6 +2901,7 @@ async function startServer() {
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
       
       setupKeepAlive();
+      startEmailSweep(db.pool);
       
       // Clean up stale presence records every 2 minutes
       setInterval(async () => {
