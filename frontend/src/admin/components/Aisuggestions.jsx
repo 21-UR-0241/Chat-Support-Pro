@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import '../styles/Aisuggestions';
+import '../styles/Aisuggestions.css';
 
 
 function AISuggestions({ conversation, messages, onSelectSuggestion }) {
