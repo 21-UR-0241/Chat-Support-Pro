@@ -3741,9 +3741,4 @@ module.exports = {
 
 
 
-
-// UPDATE stores 
-// SET email_from_name = brand_name, 
-//     email_from_address = 'support@send.montrealpeptides.ca', 
-//     email_brand_color = primary_color 
-// WHERE email_from_address IS NULL;
+// UPDATE stores SET email_from_address = 'support@montrealpeptides.ca', email_brand_color = primary_color WHERE store_identifier = 'hc4ajx-c0';

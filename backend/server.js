@@ -1,5 +1,4 @@
 
-
 // require('dotenv').config();
 // const express = require('express');
 // const cors = require('cors');
@@ -15,7 +14,7 @@
 // const session = require('express-session');
 // const shopifyAppRoutes = require('./routes/shopify-app-routes');
 // const fileRoutes = require('./routes/fileroutes');
-// const { handleOfflineEmailNotification } = require('./services/emailService');
+// const { handleOfflineEmailNotification, cancelPendingEmail, startEmailSweep, stopEmailSweep } = require('../frontend/src/admin/services/emailService');
 
 // const app = express();
 // const server = http.createServer(app);
@@ -825,8 +824,8 @@
 //     }
 
 //     // db may return snake_case or camelCase depending on driver - handle both
-// const convStoreId = conversation.shop_id ?? conversation.shopId ?? conversation.store_id ?? conversation.storeId;
-// const convStoreIdentifier = conversation.shop_domain ?? conversation.shopDomain ?? conversation.store_identifier ?? conversation.storeIdentifier;
+//     const convStoreId = conversation.shop_id ?? conversation.shopId ?? conversation.store_id ?? conversation.storeId;
+//     const convStoreIdentifier = conversation.shop_domain ?? conversation.shopDomain ?? conversation.store_identifier ?? conversation.storeIdentifier;
 
 //     // Security check: verify conversation belongs to this store
 //     const storeIdMatch = String(convStoreId) === String(storeRecord.id);
@@ -942,6 +941,13 @@
 //           conversationId,
 //           storeId
 //         });
+        
+//         // Send offline email notification if customer is inactive
+//         if (senderType === 'agent') {
+//           handleOfflineEmailNotification(db.pool, savedMessage).catch(err =>
+//             console.error('[Offline Email] Failed:', err)
+//           );
+//         }
         
 //       } catch (error) {
 //         console.error('Failed to save agent message:', error);
@@ -1070,7 +1076,7 @@
 //   }
 // });
 
-
+// // ============ WIDGET PRESENCE TRACKING ============
 
 // app.post('/api/widget/presence', async (req, res) => {
 //   try {
@@ -1095,13 +1101,17 @@
 //         updated_at = NOW()
 //     `, [conversationId, customerEmail, storeId || null, safeStatus, lastActivityAt || new Date()]);
 
+//     // Cancel pending offline email if customer came back online
+//     if (safeStatus === 'online') {
+//       cancelPendingEmail(conversationId);
+//     }
+
 //     res.json({ ok: true });
 //   } catch (error) {
 //     console.error('[Presence REST] Error:', error);
 //     res.status(500).json({ error: 'Failed to update presence' });
 //   }
 // });
-
 
 // // ============ EMPLOYEE ENDPOINTS ============
 
@@ -1433,9 +1443,29 @@
 //       console.log(`🔐 OAuth: http://localhost:${PORT}/auth?shop=STORE.myshopify.com`);
 //       console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
 //       console.log(`📎 File Upload: Enabled with Bunny.net`);
+//       console.log(`📧 Email Notifications: Enabled`);
 //       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
       
 //       setupKeepAlive();
+//       startEmailSweep(db.pool);
+      
+//       // Clean up stale presence records every 2 minutes
+//       setInterval(async () => {
+//         try {
+//           const result = await db.pool.query(`
+//             UPDATE customer_presence
+//             SET status = 'offline', ws_connected = FALSE, updated_at = NOW()
+//             WHERE status != 'offline'
+//               AND last_heartbeat_at < NOW() - INTERVAL '3 minutes'
+//             RETURNING conversation_id
+//           `);
+//           if (result.rowCount > 0) {
+//             console.log(`[Presence] Marked ${result.rowCount} stale sessions offline`);
+//           }
+//         } catch (err) {
+//           console.error('[Presence] Stale cleanup error:', err);
+//         }
+//       }, 2 * 60 * 1000);
 //     });
 //   } catch (error) {
 //     console.error('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -1587,7 +1617,6 @@ const limiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => {
-    // Skip rate limiting for authenticated employees (agents/admins)
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
       try {
@@ -1618,7 +1647,6 @@ const widgetLimiter = rateLimit({
   }
 });
 
-// Apply widget limiter to widget-specific routes BEFORE the general limiter
 app.use('/api/widget/', widgetLimiter);
 app.use('/api/customers/', widgetLimiter);
 app.use('/api/', limiter);
@@ -1776,7 +1804,6 @@ app.get('/api/widget/session', async (req, res) => {
   }
 });
 
-// Look up existing conversation for a returning customer
 app.get('/api/widget/conversation/lookup', async (req, res) => {
   try {
     const { store, email } = req.query;
@@ -1793,14 +1820,11 @@ app.get('/api/widget/conversation/lookup', async (req, res) => {
     }
     console.log(`✅ [Widget Lookup] Store found: id=${storeRecord.id}, identifier=${storeRecord.store_identifier}, domain=${storeRecord.shop_domain}`);
     
-    // Get conversations for this store
     let conversations = await db.getConversations({ storeId: storeRecord.id });
     console.log(`📋 [Widget Lookup] getConversations returned ${conversations.length} conversations for storeId=${storeRecord.id}`);
     
-    // Helper to get field value regardless of case (db may return snake or camel)
     const getField = (obj, snake, camel) => obj[snake] ?? obj[camel];
     
-    // Find matching email - prefer open, then most recent
     let match = conversations.find(c => 
       getField(c, 'customer_email', 'customerEmail') === email && getField(c, 'status', 'status') === 'open'
     );
@@ -1808,7 +1832,6 @@ app.get('/api/widget/conversation/lookup', async (req, res) => {
       match = conversations.find(c => getField(c, 'customer_email', 'customerEmail') === email);
     }
     
-    // If not found, try broader search without storeId filter
     if (!match) {
       console.log(`⚠️ [Widget Lookup] Not found in store-filtered results, trying broader search...`);
       const allConversations = await db.getConversations({});
@@ -1817,7 +1840,6 @@ app.get('/api/widget/conversation/lookup', async (req, res) => {
       const emailMatches = allConversations.filter(c => getField(c, 'customer_email', 'customerEmail') === email);
       console.log(`📋 [Widget Lookup] Found ${emailMatches.length} conversations with email=${email}`);
       
-      // Accept any conversation from this store (by id or identifier)
       const storeMatches = emailMatches.filter(c => {
         const cStoreId = getField(c, 'store_id', 'storeId');
         const cStoreIdent = getField(c, 'store_identifier', 'storeIdentifier');
@@ -2169,10 +2191,8 @@ app.post('/api/conversations', async (req, res) => {
       priority: 'normal'
     });
     
-    // Respond IMMEDIATELY
     res.json(snakeToCamel(conversation));
     
-    // Save initial message and broadcast in background
     setImmediate(async () => {
       try {
         if (initialMessage) {
@@ -2187,7 +2207,6 @@ app.post('/api/conversations', async (req, res) => {
           
           const camelMessage = snakeToCamel(message);
           
-          // Only broadcastToAgents - no one has joined the conversation yet
           broadcastToAgents({
             type: 'new_message',
             message: camelMessage,
@@ -2256,7 +2275,6 @@ app.put('/api/conversations/:id/close', authenticateToken, async (req, res) => {
 
 // ============ MESSAGE ENDPOINTS ============
 
-// Widget-accessible message history (validates by store, no employee auth needed)
 app.get('/api/widget/conversations/:id/messages', async (req, res) => {
   try {
     const { store } = req.query;
@@ -2277,11 +2295,9 @@ app.get('/api/widget/conversations/:id/messages', async (req, res) => {
       return res.status(404).json({ error: 'Conversation not found' });
     }
 
-    // db may return snake_case or camelCase depending on driver - handle both
     const convStoreId = conversation.shop_id ?? conversation.shopId ?? conversation.store_id ?? conversation.storeId;
     const convStoreIdentifier = conversation.shop_domain ?? conversation.shopDomain ?? conversation.store_identifier ?? conversation.storeIdentifier;
 
-    // Security check: verify conversation belongs to this store
     const storeIdMatch = String(convStoreId) === String(storeRecord.id);
     const identifierMatch = convStoreIdentifier && (
       convStoreIdentifier === storeRecord.shop_domain ||
@@ -2351,7 +2367,6 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
       pending: true
     };
     
-    // Broadcast through BOTH channels for reliable delivery
     sendToConversation(conversationId, {
       type: 'new_message',
       message: snakeToCamel(tempMessage)
@@ -2364,10 +2379,8 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
       storeId
     });
     
-    // Respond to admin IMMEDIATELY
     res.json(snakeToCamel(tempMessage));
     
-    // Then save to DB in background
     setImmediate(async () => {
       try {
         const savedMessage = await db.saveMessage({
@@ -2380,14 +2393,12 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
           sent_at: timestamp
         });
         
-        // Confirm to customer widget (update temp → real ID)
         sendToConversation(conversationId, {
           type: 'message_confirmed',
           tempId: tempId,
           message: snakeToCamel(savedMessage)
         });
         
-        // Confirm to all agents (update temp → real ID, update sidebar)
         broadcastToAgents({
           type: 'message_confirmed',
           tempId: tempId,
@@ -2396,7 +2407,6 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
           storeId
         });
         
-        // Send offline email notification if customer is inactive
         if (senderType === 'agent') {
           handleOfflineEmailNotification(db.pool, savedMessage).catch(err =>
             console.error('[Offline Email] Failed:', err)
@@ -2460,8 +2470,6 @@ app.post('/api/widget/messages', async (req, res) => {
       pending: true
     };
     
-    // Broadcast through BOTH channels for reliable delivery
-    // Client-side dedup prevents duplicates
     sendToConversation(conversationId, {
       type: 'new_message',
       message: snakeToCamel(tempMessage)
@@ -2474,10 +2482,8 @@ app.post('/api/widget/messages', async (req, res) => {
       storeId: store.id
     });
     
-    // Respond to widget
     res.json(snakeToCamel(tempMessage));
     
-    // Save to DB in background
     setImmediate(async () => {
       try {
         const savedMessage = await db.saveMessage({
@@ -2493,14 +2499,12 @@ app.post('/api/widget/messages', async (req, res) => {
         
         const confirmedMessage = snakeToCamel(savedMessage);
         
-        // Confirm to customer widget
         sendToConversation(conversationId, {
           type: 'message_confirmed',
           tempId: tempId,
           message: confirmedMessage
         });
         
-        // Confirm to agents (update temp ID → real ID)
         broadcastToAgents({
           type: 'message_confirmed',
           tempId: tempId,
@@ -2555,7 +2559,6 @@ app.post('/api/widget/presence', async (req, res) => {
         updated_at = NOW()
     `, [conversationId, customerEmail, storeId || null, safeStatus, lastActivityAt || new Date()]);
 
-    // Cancel pending offline email if customer came back online
     if (safeStatus === 'online') {
       cancelPendingEmail(conversationId);
     }
@@ -2566,6 +2569,400 @@ app.post('/api/widget/presence', async (req, res) => {
     res.status(500).json({ error: 'Failed to update presence' });
   }
 });
+
+// ============ AI SUGGESTIONS ENDPOINT ============
+
+app.post('/api/ai/suggestions', authenticateToken, async (req, res) => {
+  try {
+    const {
+      clientMessage,
+      chatHistory,
+      conversationId,
+      customerName,
+      customerEmail,
+      storeName,
+      storeIdentifier,
+      analysis,
+      adminNote,
+      messageEdited
+    } = req.body;
+
+    if (!clientMessage) {
+      return res.status(400).json({ error: 'clientMessage is required' });
+    }
+
+    console.log(`✦ [AI] Request — edited: ${!!messageEdited}, note: "${adminNote || ''}", text: "${clientMessage.substring(0, 80)}..."`);
+
+    const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+
+    // If no API key configured, return context-aware fallback suggestions
+    if (!ANTHROPIC_API_KEY) {
+      console.log('✦ [AI] No ANTHROPIC_API_KEY set, using smart fallback suggestions');
+      const suggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
+      return res.json({ suggestions });
+    }
+
+    // ── Build a highly contextual system prompt ──
+    const analysisBlock = buildAnalysisBlock(analysis);
+
+    const systemPrompt = `You are an expert customer support reply assistant for an e-commerce store. Your job is to suggest exactly 3 reply options that the support agent can immediately send to the customer.
+
+STORE: ${storeName || 'N/A'}
+CUSTOMER: ${customerName || 'Guest'}${customerEmail ? ` (${customerEmail})` : ''}
+
+${analysisBlock}
+
+RULES — follow these strictly:
+1. Write as the human support agent, NEVER as an AI or bot.
+2. Each reply must be 1-3 sentences. Be specific and actionable, not vague.
+3. Base every reply on what the customer actually said and the conversation history. Reference specific details they mentioned (order numbers, product names, issues described).
+4. Vary the 3 suggestions strategically:
+   - Suggestion 1: The most direct, helpful answer to what the customer just asked.
+   - Suggestion 2: A slightly different angle, or addresses a secondary concern.
+   - Suggestion 3: If info is missing, ask a specific follow-up question. If info is complete, offer an extra step (escalation, follow-up check, additional help).
+5. NEVER repeat something the agent already said or already asked for. Read the chat history carefully.
+6. Match the customer's energy: if they're upset, acknowledge it with empathy first. If they're casual, be friendly. If they're formal, be professional.
+7. If the customer provided an order number, reference it. Do NOT ask for it again.
+8. If the customer attached a file/image, acknowledge you've seen it.
+9. Do not use emojis unless the customer used them first.
+10. Do not make promises about timelines, refund amounts, or outcomes you cannot guarantee.
+11. Never say "I understand your frustration" robotically — use natural, varied empathy language.
+
+Respond ONLY with valid JSON: {"suggestions": ["reply 1", "reply 2", "reply 3"]}`;
+
+    // Build the user prompt with optional admin edits/notes
+    let userPrompt = chatHistory
+      ? `FULL CONVERSATION:\n${chatHistory}\n\nCUSTOMER'S LATEST MESSAGE: ${clientMessage}`
+      : `CUSTOMER'S MESSAGE: ${clientMessage}`;
+
+    if (messageEdited) {
+      userPrompt += `\n\n⚠️ NOTE: The agent EDITED the customer's message above to clarify or add context. Use the edited version as the basis for your reply suggestions.`;
+    }
+
+    if (adminNote && adminNote.trim()) {
+      userPrompt += `\n\n📌 AGENT INSTRUCTIONS: ${adminNote.trim()}\n— The agent wants you to incorporate the above instructions into all 3 suggested replies. Follow them carefully.`;
+    }
+
+    const anthropicResponse = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: process.env.AI_MODEL || 'claude-sonnet-4-20250514',
+        max_tokens: 600,
+        system: systemPrompt,
+        messages: [
+          { role: 'user', content: userPrompt },
+        ],
+      }),
+    });
+
+    if (!anthropicResponse.ok) {
+      const errorBody = await anthropicResponse.text();
+      console.error('✦ [AI] Anthropic API error:', anthropicResponse.status, errorBody);
+      const suggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis);
+      return res.json({ suggestions, fallback: true });
+    }
+
+    const data = await anthropicResponse.json();
+    const rawContent = data.content?.[0]?.text || '';
+
+    let parsed;
+    try {
+      const cleaned = rawContent.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+      parsed = JSON.parse(cleaned);
+    } catch (parseErr) {
+      console.error('✦ [AI] Failed to parse response:', rawContent);
+      const suggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis);
+      return res.json({ suggestions, fallback: true });
+    }
+
+    const suggestions = Array.isArray(parsed.suggestions)
+      ? parsed.suggestions.slice(0, 3)
+      : Array.isArray(parsed)
+        ? parsed.slice(0, 3)
+        : generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis);
+
+    res.json({ suggestions });
+
+  } catch (error) {
+    console.error('✦ [AI] Suggestions endpoint error:', error);
+    const suggestions = generateSmartFallbackSuggestions(
+      req.body?.clientMessage || '',
+      req.body?.chatHistory || '',
+      req.body?.analysis || {}
+    );
+    res.json({ suggestions, fallback: true });
+  }
+});
+
+/**
+ * Build an analysis context block for the AI prompt from the frontend's conversation analysis.
+ */
+function buildAnalysisBlock(analysis) {
+  if (!analysis) return '';
+
+  const lines = ['CONVERSATION ANALYSIS (use this to inform your replies):'];
+
+  if (analysis.detectedTopics?.length > 0) {
+    const topicLabels = {
+      order_status: 'Order Status / Tracking',
+      refund_return: 'Refund / Return / Cancellation',
+      product_issue: 'Product Issue / Damaged / Defective',
+      payment: 'Payment / Billing',
+      discount_promo: 'Discount / Promo Code',
+      product_inquiry: 'Product Inquiry',
+      shipping: 'Shipping Questions',
+      account: 'Account Issue',
+      complaint: 'Complaint / Escalation',
+      gratitude: 'Customer Expressing Thanks',
+      greeting: 'Greeting / Opening'
+    };
+    const labels = analysis.detectedTopics.map(t => topicLabels[t] || t).join(', ');
+    lines.push(`- Topics discussed: ${labels}`);
+  }
+
+  if (analysis.sentiment) {
+    const sentimentLabels = {
+      very_negative: 'Very upset / angry — lead with strong empathy and urgency',
+      negative: 'Frustrated / unhappy — acknowledge their concern with empathy',
+      neutral: 'Neutral tone',
+      positive: 'Positive / friendly',
+      very_positive: 'Very happy / grateful — match their positive energy'
+    };
+    lines.push(`- Customer sentiment: ${sentimentLabels[analysis.sentiment] || analysis.sentiment}`);
+  }
+
+  if (analysis.isUrgent) lines.push('- ⚠️ Customer marked this as URGENT — respond with priority');
+  if (analysis.isRepeat) lines.push('- ⚠️ Customer is REPEATING themselves or following up — they feel unheard. Acknowledge this directly and move forward with action.');
+  if (analysis.isQuestion) lines.push('- Customer is asking a direct question — answer it specifically');
+  if (analysis.hasOrderNumber) lines.push('- Customer already provided an order number — DO NOT ask for it again, reference it');
+  if (analysis.hasEmail) lines.push('- Customer already shared their email — DO NOT ask for it again');
+  if (analysis.hasAttachment) lines.push('- Customer sent a file/image — acknowledge you have reviewed it');
+  if (analysis.agentAskedForOrder) lines.push('- Agent already asked for order number in a previous message — do NOT ask again');
+  if (analysis.agentAlreadyApologized) lines.push('- Agent already apologized — avoid repeating the same apology, focus on action');
+  if (analysis.agentAskedForEmail) lines.push('- Agent already asked for email — do NOT ask again');
+  if (analysis.agentAskedForPhoto) lines.push('- Agent already asked for a photo — do NOT ask again');
+  if (analysis.agentOfferedRefund) lines.push('- Agent already mentioned a refund — build on that, don\'t re-introduce');
+  if (analysis.agentOfferedReplacement) lines.push('- Agent already offered a replacement — build on that');
+  if (analysis.isLongConversation) lines.push(`- This is a long conversation (${analysis.turnCount} messages) — the customer may be losing patience. Be efficient and solution-oriented.`);
+  if (analysis.lastAgentText) lines.push(`- Agent's last message was: "${analysis.lastAgentText.substring(0, 150)}"`);
+
+  return lines.length > 1 ? lines.join('\n') : '';
+}
+
+/**
+ * Generate smart context-aware fallback suggestions when the AI API is unavailable.
+ * Uses the conversation analysis from the frontend to produce relevant replies.
+ */
+function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis) {
+  const lower = (customerMsg || '').toLowerCase();
+  const topics = analysis?.detectedTopics || [];
+  const sentiment = analysis?.sentiment || 'neutral';
+  const isRepeat = analysis?.isRepeat || false;
+  const hasOrderNumber = analysis?.hasOrderNumber || false;
+  const hasAttachment = analysis?.hasAttachment || false;
+  const agentAskedForOrder = analysis?.agentAskedForOrder || false;
+  const agentAlreadyApologized = analysis?.agentAlreadyApologized || false;
+  const isUrgent = analysis?.isUrgent || false;
+  const isLongConversation = analysis?.isLongConversation || false;
+
+  // ── Empathy prefix based on sentiment ──
+  let empathyPrefix = '';
+  if (sentiment === 'very_negative' && !agentAlreadyApologized) {
+    const options = [
+      'I completely understand how frustrating this must be.',
+      'I sincerely apologize for this experience.',
+      'I can see this has been really frustrating, and I want to make it right.',
+    ];
+    empathyPrefix = options[Math.floor(Math.random() * options.length)] + ' ';
+  } else if (sentiment === 'negative' && !agentAlreadyApologized) {
+    const options = [
+      'I\'m sorry about that.',
+      'I understand your concern.',
+      'I appreciate your patience with this.',
+    ];
+    empathyPrefix = options[Math.floor(Math.random() * options.length)] + ' ';
+  }
+
+  // ── Repeat/follow-up prefix ──
+  const repeatPrefix = isRepeat ? 'I apologize for the delay in getting this resolved. ' : '';
+
+  // ── Urgency suffix ──
+  const urgencySuffix = isUrgent ? ' I\'m treating this as a priority.' : '';
+
+  // ── GRATITUDE ──
+  if (topics.includes('gratitude') && !topics.includes('complaint')) {
+    return [
+      'You\'re welcome! Is there anything else I can help you with?',
+      'Happy to help! Don\'t hesitate to reach out if you need anything else.',
+      'Glad we could get that sorted for you! Have a great day.'
+    ];
+  }
+
+  // ── GREETING ONLY ──
+  if (topics.length === 1 && topics.includes('greeting')) {
+    return [
+      'Hello! How can I help you today?',
+      'Hi there! Welcome — what can I assist you with?',
+      'Hello! Thanks for reaching out. How can I help?'
+    ];
+  }
+
+  // ── PRODUCT ISSUE ──
+  if (topics.includes('product_issue')) {
+    if (hasOrderNumber && hasAttachment) {
+      return [
+        `${empathyPrefix}${repeatPrefix}Thank you for sharing the photo and your order details. I've reviewed the issue and I'm looking into the best resolution for you right away.${urgencySuffix}`,
+        `${empathyPrefix}I can see the issue clearly from the photo you sent. Let me check what options we have — would you prefer a replacement or a refund?`,
+        `${empathyPrefix}${repeatPrefix}I've noted the issue with your order. I'm escalating this now to get it resolved as quickly as possible.${urgencySuffix}`
+      ];
+    }
+    if (hasOrderNumber && !hasAttachment && !analysis?.agentAskedForPhoto) {
+      return [
+        `${empathyPrefix}Thank you for your order details. Could you send a photo of the issue? That will help me process this faster.`,
+        `${empathyPrefix}I've located your order. To help resolve this quickly, could you share a picture of the damage or defect?`,
+        `${empathyPrefix}${repeatPrefix}I want to get this sorted for you. A quick photo of the issue would help me determine the best next step.${urgencySuffix}`
+      ];
+    }
+    if (!hasOrderNumber && !agentAskedForOrder) {
+      return [
+        `${empathyPrefix}I'd like to help resolve this. Could you share your order number so I can pull up the details?`,
+        `${empathyPrefix}That's not the experience we want you to have. Could you provide your order number and a brief description of the issue?`,
+        `${empathyPrefix}${repeatPrefix}Let me look into this for you. Can you share your order number and, if possible, a photo of the problem?${urgencySuffix}`
+      ];
+    }
+    return [
+      `${empathyPrefix}I'm looking into this for you now. I'll have an update shortly.${urgencySuffix}`,
+      `${empathyPrefix}Thank you for your patience. I'm checking the available options to resolve this.`,
+      `${empathyPrefix}${repeatPrefix}I want to make sure we get this right. Let me review your case and get back to you with a solution.${urgencySuffix}`
+    ];
+  }
+
+  // ── ORDER STATUS / SHIPPING ──
+  if (topics.includes('order_status') || topics.includes('shipping')) {
+    if (hasOrderNumber) {
+      return [
+        `${repeatPrefix}Thank you for sharing your order number. Let me check the current status and tracking information for you now.${urgencySuffix}`,
+        `${repeatPrefix}I'm pulling up your order details right now. I'll have the latest shipping update for you shortly.${urgencySuffix}`,
+        `${repeatPrefix}I can see your order in our system. Let me check with our fulfillment team for the most up-to-date status.${urgencySuffix}`
+      ];
+    }
+    if (!agentAskedForOrder) {
+      return [
+        `${empathyPrefix}I'd be happy to check on that for you. Could you share your order number?`,
+        'Of course! To look up your order status, I\'ll need your order number or the email address you used at checkout.',
+        `${empathyPrefix}${repeatPrefix}Let me find your order. Could you provide the order number? It usually starts with # and was included in your confirmation email.${urgencySuffix}`
+      ];
+    }
+    return [
+      `${repeatPrefix}I'm currently looking into your order. I'll update you as soon as I have the tracking details.${urgencySuffix}`,
+      'Thank you for your patience. I\'m checking with our shipping team to get you the latest update.',
+      `${repeatPrefix}I want to make sure I give you accurate information. Give me just a moment to verify the shipping status.${urgencySuffix}`
+    ];
+  }
+
+  // ── REFUND / RETURN ──
+  if (topics.includes('refund_return')) {
+    if (hasOrderNumber) {
+      return [
+        `${empathyPrefix}${repeatPrefix}I've located your order. Let me review the details and check what options are available for you.${urgencySuffix}`,
+        `${empathyPrefix}Thank you for providing your order details. I'm checking the return/refund eligibility now and will let you know the next steps.`,
+        `${empathyPrefix}I have your order pulled up. Could you let me know the reason for the return? That helps me process it faster.`
+      ];
+    }
+    if (!agentAskedForOrder) {
+      return [
+        `${empathyPrefix}I'd be happy to help with that. Could you share your order number so I can review the return options?`,
+        `${empathyPrefix}To get started on the return process, I'll need your order number. You can find it in your confirmation email.`,
+        `${empathyPrefix}${repeatPrefix}I want to help resolve this. Could you provide your order number and the reason for the return?${urgencySuffix}`
+      ];
+    }
+    return [
+      `${empathyPrefix}I'm reviewing your return request now. I'll update you with the available options shortly.${urgencySuffix}`,
+      `${empathyPrefix}Thank you for your patience. I'm checking the return policy details for your specific order.`,
+      `${empathyPrefix}${repeatPrefix}I'm working on this for you. Would you prefer a refund to your original payment method or a store credit?${urgencySuffix}`
+    ];
+  }
+
+  // ── PAYMENT / BILLING ──
+  if (topics.includes('payment')) {
+    if (hasOrderNumber) {
+      return [
+        `${empathyPrefix}I can see your order. Let me review the payment details and get back to you.${urgencySuffix}`,
+        `${empathyPrefix}Thank you for the details. I'm checking the billing records for your order now.`,
+        `${empathyPrefix}${repeatPrefix}I'm looking into the payment issue on your order. I'll have an update for you shortly.${urgencySuffix}`
+      ];
+    }
+    return [
+      `${empathyPrefix}I'd like to help sort out this billing issue. Could you share your order number or the email associated with the charge?`,
+      `${empathyPrefix}To investigate the payment concern, could you provide the order number and the approximate date and amount of the charge?`,
+      `${empathyPrefix}${repeatPrefix}I want to get to the bottom of this. Could you share any details about the charge — the date, amount, and last four digits of the card used?${urgencySuffix}`
+    ];
+  }
+
+  // ── DISCOUNT / PROMO ──
+  if (topics.includes('discount_promo')) {
+    return [
+      'Let me check on that promo code for you. Could you share the code you\'re trying to use and the items in your cart?',
+      'I\'d be happy to help with that! Could you tell me which promotion you\'re referring to, or share the code?',
+      `${empathyPrefix}Let me look into the available promotions for you. What product or category are you interested in?`
+    ];
+  }
+
+  // ── PRODUCT INQUIRY ──
+  if (topics.includes('product_inquiry')) {
+    return [
+      'Great question! Let me check that information for you. Which specific product are you asking about?',
+      'I\'d be happy to help with product details. Could you share the product name or a link so I can look it up?',
+      'Let me find the most accurate information for you. Can you tell me more about what you\'re looking for?'
+    ];
+  }
+
+  // ── ACCOUNT ISSUES ──
+  if (topics.includes('account')) {
+    return [
+      `${empathyPrefix}I can help with your account. For security, could you confirm the email address associated with your account?`,
+      `${empathyPrefix}Let me look into the account issue. Could you describe what's happening when you try to log in?`,
+      `${empathyPrefix}${repeatPrefix}I'll get this sorted for you. Could you share the email address on your account so I can investigate?${urgencySuffix}`
+    ];
+  }
+
+  // ── COMPLAINT / ESCALATION ──
+  if (topics.includes('complaint')) {
+    if (isLongConversation) {
+      return [
+        `${empathyPrefix}${repeatPrefix}I understand this has been a long process and I want to get it resolved for you now. Let me escalate this to ensure it's handled promptly.${urgencySuffix}`,
+        `${empathyPrefix}I can see this hasn't been resolved to your satisfaction. Let me personally make sure we get this taken care of right away.`,
+        `${empathyPrefix}You've been more than patient. I'm going to escalate this and ensure you get a resolution today.${urgencySuffix}`
+      ];
+    }
+    return [
+      `${empathyPrefix}${repeatPrefix}I take your feedback seriously and I want to resolve this for you. Could you share the specific details so I can take action?${urgencySuffix}`,
+      `${empathyPrefix}I hear you, and I want to make this right. Let me look into this and find the best solution.`,
+      `${empathyPrefix}Thank you for letting us know. I'm going to look into this personally and follow up with you.${urgencySuffix}`
+    ];
+  }
+
+  // ── CUSTOMER ASKED A QUESTION ──
+  if (analysis?.isQuestion) {
+    return [
+      `${empathyPrefix}${repeatPrefix}That's a great question. Let me find the answer for you — one moment.${urgencySuffix}`,
+      `${empathyPrefix}I'd be happy to help with that. Let me check and get back to you with the details.`,
+      `${empathyPrefix}${repeatPrefix}Let me look into that for you. Could you provide any additional details that might help me find the answer faster?${urgencySuffix}`
+    ];
+  }
+
+  // ── GENERIC FALLBACK ──
+  return [
+    `${empathyPrefix}${repeatPrefix}Thank you for your message. Let me look into this and get back to you shortly.${urgencySuffix}`,
+    `${empathyPrefix}I appreciate you reaching out. Could you provide a bit more detail so I can assist you better?`,
+    `${empathyPrefix}${repeatPrefix}I want to make sure I help you with the right information. Could you tell me a bit more about what you need?${urgencySuffix}`
+  ];
+}
 
 // ============ EMPLOYEE ENDPOINTS ============
 
@@ -2821,7 +3218,6 @@ app.use((err, req, res, next) => {
 // ============ KEEP-ALIVE MECHANISM ============
 
 function setupKeepAlive() {
-  // Enable by default - critical for preventing cold starts on Render
   if (process.env.KEEP_ALIVE === 'false') {
     console.log('⏰ Keep-alive disabled');
     return;
@@ -2898,12 +3294,12 @@ async function startServer() {
       console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`📎 File Upload: Enabled with Bunny.net`);
       console.log(`📧 Email Notifications: Enabled`);
+      console.log(`✦  AI Suggestions: ${process.env.ANTHROPIC_API_KEY ? 'Enabled (Claude)' : 'Fallback mode (no API key)'}`);
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
       
       setupKeepAlive();
       startEmailSweep(db.pool);
       
-      // Clean up stale presence records every 2 minutes
       setInterval(async () => {
         try {
           const result = await db.pool.query(`

@@ -1,0 +1,425 @@
+/* ============================================
+   QUICK REPLIES — POPUP STYLE
+   Triggered by a button in the input bar.
+   Floats above the input area.
+   ============================================ */
+
+/* ── Overlay (click-away backdrop) ── */
+.qr-popup-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+  pointer-events: none;
+}
+
+/* ── Popup panel ── */
+.qr-popup {
+  position: absolute;
+  bottom: 62px;
+  left: 12px;
+  width: 380px;
+  max-width: calc(100% - 24px);
+  max-height: 480px;
+  background: white;
+  border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  pointer-events: auto;
+  animation: qr-popupSlide 0.18s ease-out;
+}
+
+@keyframes qr-popupSlide {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ── Header ── */
+.qr-popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid #f0f2f5;
+}
+
+.qr-popup-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #111b21;
+}
+
+.qr-popup-icon {
+  font-size: 16px;
+}
+
+.qr-popup-count {
+  background: #e7f8f2;
+  color: #00a884;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 10px;
+  min-width: 20px;
+  text-align: center;
+}
+
+.qr-popup-close {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: #f0f2f5;
+  border-radius: 50%;
+  font-size: 13px;
+  color: #667781;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.qr-popup-close:hover {
+  background: #e2e5e9;
+  color: #111b21;
+}
+
+/* ── Search ── */
+.qr-popup-search {
+  padding: 8px 12px;
+  position: relative;
+}
+
+.qr-search-input {
+  width: 100%;
+  padding: 8px 32px 8px 12px;
+  border: 1px solid #e9edef;
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: inherit;
+  background: #f0f2f5;
+  outline: none;
+  transition: border-color 0.15s, background 0.15s;
+  box-sizing: border-box;
+}
+
+.qr-search-input:focus {
+  border-color: #00a884;
+  background: white;
+}
+
+.qr-search-input::placeholder {
+  color: #8696a0;
+}
+
+.qr-search-clear {
+  position: absolute;
+  right: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: #d1d7db;
+  border-radius: 50%;
+  font-size: 10px;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.qr-search-clear:hover {
+  background: #8696a0;
+}
+
+/* ── Scrollable list ── */
+.qr-popup-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 8px;
+  scrollbar-width: thin;
+  scrollbar-color: #d1d7db transparent;
+}
+
+.qr-popup-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.qr-popup-list::-webkit-scrollbar-thumb {
+  background: #d1d7db;
+  border-radius: 4px;
+}
+
+/* ── Empty state ── */
+.qr-popup-empty {
+  padding: 32px 16px;
+  text-align: center;
+}
+
+.qr-popup-empty p {
+  margin: 0 0 12px;
+  color: #8696a0;
+  font-size: 13px;
+}
+
+.qr-popup-empty-add {
+  padding: 8px 18px;
+  border: 2px dashed #00a884;
+  background: transparent;
+  color: #00a884;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+
+.qr-popup-empty-add:hover {
+  background: #e7f8f2;
+}
+
+/* ── Reply item ── */
+.qr-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.12s;
+  margin-bottom: 2px;
+}
+
+.qr-item:hover {
+  background: #f0f2f5;
+}
+
+.qr-item:active {
+  background: #e7f8f2;
+}
+
+.qr-item-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.qr-item-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #111b21;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qr-item-preview {
+  font-size: 12px;
+  color: #667781;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── Item action buttons (edit / delete) ── */
+.qr-item-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.12s;
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
+.qr-item:hover .qr-item-actions {
+  opacity: 1;
+}
+
+.qr-item-btn {
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #8696a0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.12s;
+}
+
+.qr-item-btn.edit:hover {
+  background: #e7f8f2;
+  color: #00a884;
+}
+
+.qr-item-btn.delete:hover {
+  background: #fce8e8;
+  color: #e74c3c;
+}
+
+/* ── Inline form (add / edit) ── */
+.qr-item-form {
+  padding: 10px 12px;
+  margin: 4px 0;
+  background: #f7faf9;
+  border: 1px solid #c8e6de;
+  border-radius: 10px;
+}
+
+.qr-item-form.add-form {
+  background: #f0f7ff;
+  border-color: #b8d4f0;
+}
+
+.qr-form-name {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid #e0e3e6;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  margin-bottom: 6px;
+  outline: none;
+  background: white;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+
+.qr-form-name:focus {
+  border-color: #00a884;
+}
+
+.qr-form-name::placeholder {
+  color: #8696a0;
+  font-weight: 400;
+}
+
+.qr-form-content {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid #e0e3e6;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+  outline: none;
+  background: white;
+  box-sizing: border-box;
+  line-height: 1.5;
+  min-height: 56px;
+  transition: border-color 0.15s;
+}
+
+.qr-form-content:focus {
+  border-color: #00a884;
+}
+
+.qr-form-content::placeholder {
+  color: #8696a0;
+}
+
+.qr-form-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.qr-form-cancel {
+  padding: 5px 14px;
+  border: 1px solid #d1d7db;
+  background: white;
+  color: #667781;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.12s;
+}
+
+.qr-form-cancel:hover {
+  border-color: #8696a0;
+  color: #111b21;
+}
+
+.qr-form-save {
+  padding: 5px 14px;
+  border: none;
+  background: #00a884;
+  color: white;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.12s;
+}
+
+.qr-form-save:hover:not(:disabled) {
+  background: #008f72;
+}
+
+.qr-form-save:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Footer ── */
+.qr-popup-footer {
+  padding: 8px 12px 10px;
+  border-top: 1px solid #f0f2f5;
+}
+
+.qr-popup-add-btn {
+  width: 100%;
+  padding: 9px;
+  border: 2px dashed #d1d7db;
+  background: transparent;
+  color: #00a884;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+
+.qr-popup-add-btn:hover {
+  border-color: #00a884;
+  background: #e7f8f2;
+}
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .qr-popup {
+    left: 8px;
+    right: 8px;
+    bottom: 58px;
+    width: auto;
+    max-height: 60vh;
+    border-radius: 12px;
+  }
+}
