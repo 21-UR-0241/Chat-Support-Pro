@@ -1481,12 +1481,11 @@
 // startServer();
 
 // module.exports = { app, server };
-
-
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const http = require('http');
+const https = require('https');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const db = require('./database');
@@ -2643,32 +2642,66 @@ Respond ONLY with valid JSON: {"suggestions": ["reply 1", "reply 2", "reply 3"]}
       userPrompt += `\n\n📌 AGENT INSTRUCTIONS: ${adminNote.trim()}\n— The agent wants you to incorporate the above instructions into all 3 suggested replies. Follow them carefully.`;
     }
 
-    const anthropicResponse = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: process.env.AI_MODEL || 'claude-sonnet-4-20250514',
-        max_tokens: 600,
-        system: systemPrompt,
-        messages: [
-          { role: 'user', content: userPrompt },
-        ],
-      }),
+    // ── Call Anthropic Claude API (uses built-in https, works on all Node versions) ──
+    const requestBody = JSON.stringify({
+      model: process.env.AI_MODEL || 'claude-sonnet-4-20250514',
+      max_tokens: 600,
+      system: systemPrompt,
+      messages: [
+        { role: 'user', content: userPrompt },
+      ],
     });
 
-    if (!anthropicResponse.ok) {
-      const errorBody = await anthropicResponse.text();
-      console.error('✦ [AI] Anthropic API error:', anthropicResponse.status, errorBody);
-      const suggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis);
-      return res.json({ suggestions, fallback: true });
-    }
+    console.log(`✦ [AI] Calling Anthropic API — model: ${process.env.AI_MODEL || 'claude-sonnet-4-20250514'}, key: ${ANTHROPIC_API_KEY.substring(0, 12)}...`);
 
-    const data = await anthropicResponse.json();
-    const rawContent = data.content?.[0]?.text || '';
+    const anthropicData = await new Promise((resolve, reject) => {
+      const options = {
+        hostname: 'api.anthropic.com',
+        path: '/v1/messages',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01',
+          'Content-Length': Buffer.byteLength(requestBody),
+        },
+      };
+
+      const apiReq = https.request(options, (apiRes) => {
+        let body = '';
+        apiRes.on('data', (chunk) => { body += chunk; });
+        apiRes.on('end', () => {
+          console.log(`✦ [AI] Anthropic response status: ${apiRes.statusCode}`);
+          if (apiRes.statusCode !== 200) {
+            console.error(`✦ [AI] Anthropic API error ${apiRes.statusCode}:`, body.substring(0, 500));
+            reject(new Error(`Anthropic API ${apiRes.statusCode}: ${body.substring(0, 200)}`));
+            return;
+          }
+          try {
+            resolve(JSON.parse(body));
+          } catch (e) {
+            console.error('✦ [AI] Failed to parse Anthropic response:', body.substring(0, 500));
+            reject(new Error('Invalid JSON from Anthropic'));
+          }
+        });
+      });
+
+      apiReq.on('error', (err) => {
+        console.error('✦ [AI] HTTPS request failed:', err.message);
+        reject(err);
+      });
+
+      apiReq.setTimeout(15000, () => {
+        apiReq.destroy();
+        reject(new Error('Anthropic API timeout (15s)'));
+      });
+
+      apiReq.write(requestBody);
+      apiReq.end();
+    });
+
+    const rawContent = anthropicData.content?.[0]?.text || '';
+    console.log(`✦ [AI] Raw response (first 200 chars): ${rawContent.substring(0, 200)}`);
 
     let parsed;
     try {

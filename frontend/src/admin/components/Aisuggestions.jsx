@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import api from '../services/api'
 import '../styles/Aisuggestions.css';
-
 
 function AISuggestions({ conversation, messages, onSelectSuggestion }) {
   const [suggestions, setSuggestions] = useState([]);
@@ -187,7 +187,12 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
     try {
       const { chatHistory, analysis } = buildConversationContext();
 
-      const response = await fetch('/api/ai/suggestions', {
+      // Use the same base URL as the rest of the app
+      const baseUrl = api.baseUrl || import.meta.env.VITE_API_URL || '';
+      const url = `${baseUrl}/api/ai/suggestions`;
+      console.log(`✦ [AI] Fetching suggestions from: ${url}`);
+
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -207,13 +212,18 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
         }),
       });
 
-      if (!response.ok) throw new Error('Failed to get suggestions');
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`✦ [AI] Server returned ${response.status}:`, errorText);
+        throw new Error(`Server ${response.status}: ${errorText.substring(0, 100)}`);
+      }
 
       const data = await response.json();
+      console.log('✦ [AI] Got suggestions:', data.suggestions?.length, data.fallback ? '(fallback)' : '');
       setSuggestions(data.suggestions || []);
     } catch (err) {
-      console.error('AI suggestion error:', err);
-      setError('Could not generate suggestions');
+      console.error('✦ [AI] Suggestion error:', err.message || err);
+      setError(`Could not generate suggestions: ${err.message || 'Unknown error'}`);
       setSuggestions([]);
     } finally {
       setLoading(false);
