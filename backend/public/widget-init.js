@@ -24,7 +24,7 @@
       #chat-widget-button {
         position: fixed;
         bottom: 80px;
-        right: 20px;
+        left: 20px;
         height: 52px;
         border-radius: 26px;
         background: #3bbe28;
@@ -86,7 +86,7 @@
       #chat-widget-iframe {
         position: fixed;
         bottom: 144px;
-        right: 20px;
+        left: 20px;
         width: 380px;
         height: 560px;
         border: none;
@@ -109,13 +109,13 @@
           width: 100vw;
           height: 100vh;
           bottom: 0;
-          right: 0;
+          left: 0;
           border-radius: 0;
           transform: none;
         }
         #chat-widget-button.active {
           bottom: 16px;
-          right: 16px;
+          left: 16px;
           z-index: 10000;
           background: rgba(0, 0, 0, 0.5);
           box-shadow: none;
