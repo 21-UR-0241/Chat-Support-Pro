@@ -1189,3 +1189,61 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+
+/* Add these styles to your ChatWindow.css or main stylesheet */
+
+/* Notes Button in Chat Header */
+.btn-notes {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #374151;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.btn-notes:hover {
+  background: #e5e7eb;
+  border-color: #d1d5db;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+.btn-notes:active {
+  transform: translateY(0);
+}
+
+/* Update chat-header-actions to support the new button */
+.chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  .btn-notes {
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+  
+  .btn-notes span {
+    display: none; /* Hide "Notes" text on very small screens */
+  }
+}
+
+@media (max-width: 480px) {
+  .btn-notes {
+    padding: 8px;
+    min-width: 36px;
+    justify-content: center;
+  }
+}

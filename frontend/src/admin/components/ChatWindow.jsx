@@ -967,19 +967,19 @@ function ChatWindow({
               </div>
             ) : (
               <>
-{groupedMessages.map((message, index) => (
-  <MessageBubble
-    key={message.id || `msg-${index}`}
-    message={message}
-    nextMessage={index < groupedMessages.length - 1 ? groupedMessages[index + 1] : null}
-    isAgent={message.senderType === 'agent'}
-    isCustomer={message.senderType === 'customer'}
-    showAvatar={true}
-    isFirstInGroup={message.isFirstInGroup}
-    isLastInGroup={message.isLastInGroup}
-    sending={message.sending || message._optimistic}
-  />
-))}
+              {groupedMessages.map((message, index) => (
+                <MessageBubble
+                  key={message.id || `msg-${index}`}
+                  message={message}
+                  nextMessage={index < groupedMessages.length - 1 ? groupedMessages[index + 1] : null}
+                  isAgent={message.senderType === 'agent'}
+                  isCustomer={message.senderType === 'customer'}
+                  showAvatar={true}
+                  isFirstInGroup={message.isFirstInGroup}
+                  isLastInGroup={message.isLastInGroup}
+                  sending={message.sending || message._optimistic}
+                />
+              ))}
                 
                 {typingUsers.size > 0 && (
                   <div className="typing-indicator">

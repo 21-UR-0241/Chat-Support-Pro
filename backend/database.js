@@ -395,7 +395,11 @@ async function runMigrations() {
     await migration_004_add_last_message_fields();
     await migration_005_add_message_templates();
     await migration_006_add_file_data_column();
-    await migration_007_add_email_notifications()
+    await migration_007_add_email_notifications();
+    await migration_008_add_conversation_notes();
+    await migration_009_add_employee_notes();
+    
+
     
     // Add future migrations here:
     // await migration_006_add_new_feature();
@@ -839,6 +843,179 @@ async function migration_007_add_email_notifications() {
   }
 }
 
+async function migration_008_add_conversation_notes() {
+  const client = await pool.connect();
+  
+  try {
+    console.log('📝 [Migration 008] Adding conversation_notes support...');
+    
+    // Check if table exists
+    const tableExists = await client.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' AND table_name = 'conversation_notes'
+      )
+    `);
+    
+    if (tableExists.rows[0].exists) {
+      console.log('⏭️  [Migration 008] conversation_notes table already exists, skipping');
+      return;
+    }
+    
+    // Create conversation_notes table
+    await client.query(`
+      CREATE TABLE conversation_notes (
+        id SERIAL PRIMARY KEY,
+        conversation_id INTEGER NOT NULL,
+        employee_id INTEGER NOT NULL,
+        employee_name VARCHAR(255) NOT NULL,
+        content TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        
+        -- Foreign key constraints
+        CONSTRAINT fk_conversation_notes_conversation
+          FOREIGN KEY (conversation_id) 
+          REFERENCES conversations(id) 
+          ON DELETE CASCADE,
+          
+        CONSTRAINT fk_conversation_notes_employee
+          FOREIGN KEY (employee_id) 
+          REFERENCES employees(id) 
+          ON DELETE CASCADE
+      )
+    `);
+    
+    console.log('   Created conversation_notes table');
+    
+    // Create indexes
+    await client.query(`
+      CREATE INDEX idx_conversation_notes_conversation_id 
+        ON conversation_notes(conversation_id);
+      
+      CREATE INDEX idx_conversation_notes_employee_id 
+        ON conversation_notes(employee_id);
+      
+      CREATE INDEX idx_conversation_notes_created_at 
+        ON conversation_notes(created_at DESC);
+      
+      CREATE INDEX idx_conversation_notes_lookup 
+        ON conversation_notes(conversation_id, employee_id, created_at DESC);
+    `);
+    
+    console.log('   Created indexes for conversation_notes');
+    
+    // Create trigger for updated_at
+    await client.query(`
+      CREATE OR REPLACE FUNCTION update_conversation_notes_updated_at()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        NEW.updated_at = CURRENT_TIMESTAMP;
+        RETURN NEW;
+      END;
+      $$ language 'plpgsql';
+      
+      CREATE TRIGGER trigger_conversation_notes_updated_at 
+        BEFORE UPDATE ON conversation_notes 
+        FOR EACH ROW 
+        EXECUTE FUNCTION update_conversation_notes_updated_at();
+    `);
+    
+    console.log('   Created updated_at trigger');
+    
+    console.log('✅ [Migration 008] Conversation notes support added successfully');
+  } catch (error) {
+    console.error('❌ [Migration 008] Failed:', error);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+
+
+async function migration_009_add_employee_notes() {
+  const migrationName = 'Migration 009';
+  
+  try {
+    const tableCheck = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'employee_notes'
+      );
+    `);
+
+    if (tableCheck.rows[0].exists) {
+      console.log(`✅ [${migrationName}] employee_notes table already exists`);
+      
+      // Check if title column exists, add if missing
+      const titleColumnCheck = await pool.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.columns 
+          WHERE table_schema = 'public' 
+          AND table_name = 'employee_notes'
+          AND column_name = 'title'
+        );
+      `);
+      
+      if (!titleColumnCheck.rows[0].exists) {
+        console.log(`🔄 [${migrationName}] Adding title column...`);
+        await pool.query(`
+          ALTER TABLE employee_notes 
+          ADD COLUMN title VARCHAR(200) DEFAULT 'Untitled';
+        `);
+        console.log(`✅ [${migrationName}] Title column added`);
+      }
+      
+      return;
+    }
+
+    console.log(`🔄 [${migrationName}] Creating employee_notes table...`);
+
+    // Create employee_notes table with title field
+    await pool.query(`
+      CREATE TABLE employee_notes (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL,
+        employee_name VARCHAR(255) NOT NULL,
+        title VARCHAR(200) DEFAULT 'Untitled',
+        content TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+      );
+    `);
+
+    // Create indexes
+    await pool.query(`
+      CREATE INDEX idx_employee_notes_employee_id ON employee_notes(employee_id);
+      CREATE INDEX idx_employee_notes_created_at ON employee_notes(created_at);
+      CREATE INDEX idx_employee_notes_title ON employee_notes(title);
+    `);
+
+    // Create trigger for updated_at
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION update_employee_notes_updated_at()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        NEW.updated_at = CURRENT_TIMESTAMP;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+
+      CREATE TRIGGER trigger_employee_notes_updated_at
+        BEFORE UPDATE ON employee_notes
+        FOR EACH ROW
+        EXECUTE FUNCTION update_employee_notes_updated_at();
+    `);
+
+    console.log(`✅ [${migrationName}] Employee notes table created with title support`);
+  } catch (error) {
+    console.error(`❌ [${migrationName}] Failed:`, error);
+    throw error;
+  }
+}
 
 // ============================================
 // STORE FUNCTIONS

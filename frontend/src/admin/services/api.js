@@ -322,6 +322,30 @@ class ApiService {
     });
   }
 
+
+  // ============ Conversation Notes ============
+
+  async getConversationNotes(conversationId) {
+    return this.fetch(`/api/conversations/${conversationId}/notes`);
+  }
+
+  async getEmployeeNotes(employeeId) {
+    return this.fetch(`/api/employees/${employeeId}/notes`);
+  }
+
+  async createNote(data) {
+    return this.fetch('/api/conversation-notes', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteNote(noteId) {
+    return this.fetch(`/api/conversation-notes/${noteId}`, {
+      method: 'DELETE',
+    });
+  }
+  
   // ============ Health Check ============
 
   async healthCheck() {
