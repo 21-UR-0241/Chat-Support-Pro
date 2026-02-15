@@ -4045,7 +4045,7 @@
           await showChatInterface();
         } else {
           emailCollection.classList.add('visible');
-          updateStatus('online', "We're online");
+          updateStatus('online', "We answer in 2-4 hours");
         }
       } catch (error) {
         console.error('[Init] Fatal:', error);
@@ -4170,7 +4170,7 @@
           break;
           
         case 'auth_ok':
-          updateStatus('online', "We're online");
+          updateStatus('online', "We answer in 2-4 hours");
           
           ws.send(JSON.stringify({
             type: 'join_conversation',
@@ -4186,7 +4186,7 @@
           break;
           
         case 'joined':
-          updateStatus('online', "We're online");
+          updateStatus('online', "We answer in 2-4 hours");
           break;
           
         case 'new_message':
