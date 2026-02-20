@@ -179,8 +179,7 @@ function ChatWindow({
       setUploadProgress(0);
     }
   };
-
-  // AI Suggestion handler — fills the textbox when admin clicks a suggestion
+  
   const handleSelectSuggestion = (suggestion) => {
     setMessageText(suggestion);
     if (textareaRef.current) {

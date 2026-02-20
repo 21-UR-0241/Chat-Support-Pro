@@ -8,7 +8,7 @@ Data persists for 30 days to support return customers
 {%- endcomment -%}
 
 {%- comment -%} ⭐ CONFIGURATION - CHANGE THESE VALUES {%- endcomment -%}
-{%- assign chat_store_id = 'hc4ajx-c0' -%}
+{%- assign chat_store_id = 'mxf8ga-uu' -%}
 {%- assign chat_api_url = 'https://chat-support-pro.onrender.com' -%}
 
 {%- comment -%} LOGGED-IN CUSTOMER DATA {%- endcomment -%}

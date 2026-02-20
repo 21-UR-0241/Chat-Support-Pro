@@ -37,6 +37,7 @@
   "author": "Your Name",
   "license": "MIT",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.77.0",
     "@shopify/shopify-api": "^9.7.2",
     "@vitejs/plugin-react": "^4.2.1",
     "axios": "^1.13.2",
