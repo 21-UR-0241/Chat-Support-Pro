@@ -1315,11 +1315,17 @@ async function getConversations(filters = {}) {
     }
     
     // Pagination
-    const limit = filters.limit || 50;
+    const limit = filters.limit;
     const offset = filters.offset || 0;
     
-    query += ` ORDER BY c.updated_at DESC LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
-    params.push(limit, offset);
+    if (limit) {
+  query += ` ORDER BY c.updated_at DESC LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
+  params.push(limit, offset);
+} else {
+  query += ` ORDER BY c.updated_at DESC`;
+}
+    // query += ` ORDER BY c.updated_at DESC LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
+    // params.push(limit, offset);
     
     const result = await pool.query(query, params);
     return result.rows;
