@@ -1,4 +1,5 @@
 
+
 // // module.exports = { app, server };
 // require('dotenv').config();
 // const express = require('express');
@@ -651,6 +652,132 @@
 //   }
 // });
 
+
+
+
+
+// // ============ CONVERSATION NOTES ENDPOINTS ============
+
+// app.get('/api/employees/:employeeId/notes', authenticateToken, async (req, res) => {
+//   try {
+//     const employeeId = parseInt(req.params.employeeId);
+//     const requestingUserId = req.user.id;
+
+//     if (employeeId !== requestingUserId) {
+//       return res.status(403).json({ error: 'You can only view your own notes' });
+//     }
+
+//     const result = await db.pool.query(
+//       `SELECT 
+//         id,
+//         employee_id,
+//         employee_name,
+//         title,
+//         content,
+//         created_at,
+//         updated_at
+//       FROM employee_notes
+//       WHERE employee_id = $1
+//       ORDER BY created_at DESC`,
+//       [employeeId]
+//     );
+
+//     console.log(`✅ [Notes] Found ${result.rows.length} notes for employee ${employeeId}`);
+//     res.json(result.rows.map(snakeToCamel));
+//   } catch (error) {
+//     console.error('❌ Error fetching employee notes:', error);
+//     res.status(500).json({ error: 'Failed to fetch notes' });
+//   }
+// });
+
+// // Create a new note with title
+// app.post('/api/conversation-notes', authenticateToken, async (req, res) => {
+//   try {
+//     if (req.user.role !== 'admin') {
+//       return res.status(403).json({ error: 'Admin access required' });
+//     }
+
+//     const { employeeId, title, content } = req.body;
+
+//     if (!employeeId) {
+//       return res.status(400).json({ error: 'Missing employeeId' });
+//     }
+
+//     if (!title && !content) {
+//       return res.status(400).json({ error: 'Note must have a title or content' });
+//     }
+
+//     const noteTitle = (title && title.trim()) || 'Untitled';
+//     const noteContent = (content && content.trim()) || '';
+
+//     if (noteTitle.length > 200) {
+//       return res.status(400).json({ error: 'Title exceeds 200 characters' });
+//     }
+
+//     if (noteContent.length > 5000) {
+//       return res.status(400).json({ error: 'Content exceeds 5000 characters' });
+//     }
+
+//     const employeeResult = await db.pool.query(
+//       'SELECT name FROM employees WHERE id = $1',
+//       [employeeId]
+//     );
+
+//     if (employeeResult.rows.length === 0) {
+//       return res.status(404).json({ error: 'Employee not found' });
+//     }
+
+//     const employeeName = employeeResult.rows[0].name;
+
+//     const result = await db.pool.query(
+//       `INSERT INTO employee_notes 
+//         (employee_id, employee_name, title, content, created_at, updated_at)
+//       VALUES ($1, $2, $3, $4, NOW(), NOW())
+//       RETURNING id, employee_id, employee_name, title, content, created_at, updated_at`,
+//       [employeeId, employeeName, noteTitle, noteContent]
+//     );
+
+//     console.log('✅ Note created:', result.rows[0].id, '- Title:', noteTitle);
+//     res.status(201).json(snakeToCamel(result.rows[0]));
+//   } catch (error) {
+//     console.error('Error creating note:', error);
+//     res.status(500).json({ error: 'Failed to create note' });
+//   }
+// });
+
+// // Delete a note (unchanged)
+// app.delete('/api/conversation-notes/:noteId', authenticateToken, async (req, res) => {
+//   try {
+//     if (req.user.role !== 'admin') {
+//       return res.status(403).json({ error: 'Admin access required' });
+//     }
+
+//     const noteId = parseInt(req.params.noteId);
+//     const employeeId = req.user.id;
+
+//     const noteResult = await db.pool.query(
+//       'SELECT employee_id FROM employee_notes WHERE id = $1',
+//       [noteId]
+//     );
+
+//     if (noteResult.rows.length === 0) {
+//       return res.status(404).json({ error: 'Note not found' });
+//     }
+
+//     if (noteResult.rows[0].employee_id !== employeeId) {
+//       return res.status(403).json({ error: 'You can only delete your own notes' });
+//     }
+
+//     await db.pool.query('DELETE FROM employee_notes WHERE id = $1', [noteId]);
+
+//     console.log('✅ Note deleted:', noteId);
+//     res.json({ success: true, message: 'Note deleted' });
+//   } catch (error) {
+//     console.error('Error deleting note:', error);
+//     res.status(500).json({ error: 'Failed to delete note' });
+//   }
+// });
+
 // // ============ CONVERSATION ENDPOINTS ============
 
 // app.get('/api/conversations', authenticateToken, async (req, res) => {
@@ -1094,11 +1221,440 @@
 
 // // ============ AI SUGGESTIONS ENDPOINT ============
 
+// // app.post('/api/ai/suggestions', authenticateToken, async (req, res) => {
+// //   try {
+// //     const {
+// //       clientMessage,
+// //       chatHistory,
+// //       conversationId,
+// //       customerName,
+// //       customerEmail,
+// //       storeName,
+// //       storeIdentifier,
+// //       analysis,
+// //       adminNote,
+// //       messageEdited
+// //     } = req.body;
+
+// //     if (!clientMessage) {
+// //       return res.status(400).json({ error: 'clientMessage is required' });
+// //     }
+
+// //     console.log(`✦ [AI] Request — edited: ${!!messageEdited}, note: "${adminNote || ''}", text: "${clientMessage.substring(0, 80)}..."`);
+
+// //     const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+
+// //     // If no API key configured, return context-aware fallback suggestions
+// //     if (!ANTHROPIC_API_KEY) {
+// //       console.log('✦ [AI] No ANTHROPIC_API_KEY set, using smart fallback suggestions');
+// //       const suggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
+// //       return res.json({ suggestions });
+// //     }
+
+// //     // ── Build a highly contextual system prompt ──
+// //     const analysisBlock = buildAnalysisBlock(analysis);
+
+// //     const systemPrompt = `You are an expert customer support reply assistant for an e-commerce store. Your job is to suggest exactly 3 reply options that the support agent can immediately send to the customer.
+
+// // STORE: ${storeName || 'N/A'}
+// // CUSTOMER: ${customerName || 'Guest'}${customerEmail ? ` (${customerEmail})` : ''}
+
+// // ${analysisBlock}
+
+// // RULES — follow these strictly:
+// // 1. Write as the human support agent, NEVER as an AI or bot.
+// // 2. Each reply must be 1-3 sentences. Be specific and actionable, not vague.
+// // 3. Base every reply on what the customer actually said and the conversation history. Reference specific details they mentioned (order numbers, product names, issues described).
+// // 4. Vary the 3 suggestions strategically:
+// //    - Suggestion 1: The most direct, helpful answer to what the customer just asked.
+// //    - Suggestion 2: A slightly different angle, or addresses a secondary concern.
+// //    - Suggestion 3: If info is missing, ask a specific follow-up question. If info is complete, offer an extra step (escalation, follow-up check, additional help).
+// // 5. NEVER repeat something the agent already said or already asked for. Read the chat history carefully.
+// // 6. Match the customer's energy: if they're upset, acknowledge it with empathy first. If they're casual, be friendly. If they're formal, be professional.
+// // 7. If the customer provided an order number, reference it. Do NOT ask for it again.
+// // 8. If the customer attached a file/image, acknowledge you've seen it.
+// // 9. Do not use emojis unless the customer used them first.
+// // 10. Do not make promises about timelines, refund amounts, or outcomes you cannot guarantee.
+// // 11. Never say "I understand your frustration" robotically — use natural, varied empathy language.
+
+// // Respond ONLY with valid JSON: {"suggestions": ["reply 1", "reply 2", "reply 3"]}`;
+
+// //     // Build the user prompt with optional admin edits/notes
+// //     let userPrompt = chatHistory
+// //       ? `FULL CONVERSATION:\n${chatHistory}\n\nCUSTOMER'S LATEST MESSAGE: ${clientMessage}`
+// //       : `CUSTOMER'S MESSAGE: ${clientMessage}`;
+
+// //     if (messageEdited) {
+// //       userPrompt += `\n\n⚠️ NOTE: The agent EDITED the customer's message above to clarify or add context. Use the edited version as the basis for your reply suggestions.`;
+// //     }
+
+// //     if (adminNote && adminNote.trim()) {
+// //       userPrompt += `\n\n📌 AGENT INSTRUCTIONS: ${adminNote.trim()}\n— The agent wants you to incorporate the above instructions into all 3 suggested replies. Follow them carefully.`;
+// //     }
+
+// //     // ── Call Anthropic Claude API (uses built-in https, works on all Node versions) ──
+// //     const requestBody = JSON.stringify({
+// //       model: process.env.AI_MODEL || 'claude-sonnet-4-20250514',
+// //       max_tokens: 600,
+// //       system: systemPrompt,
+// //       messages: [
+// //         { role: 'user', content: userPrompt },
+// //       ],
+// //     });
+
+// //     console.log(`✦ [AI] Calling Anthropic API — model: ${process.env.AI_MODEL || 'claude-sonnet-4-20250514'}, key: ${ANTHROPIC_API_KEY.substring(0, 12)}...`);
+
+// //     const anthropicData = await new Promise((resolve, reject) => {
+// //       const options = {
+// //         hostname: 'api.anthropic.com',
+// //         path: '/v1/messages',
+// //         method: 'POST',
+// //         headers: {
+// //           'Content-Type': 'application/json',
+// //           'x-api-key': ANTHROPIC_API_KEY,
+// //           'anthropic-version': '2023-06-01',
+// //           'Content-Length': Buffer.byteLength(requestBody),
+// //         },
+// //       };
+
+// //       const apiReq = https.request(options, (apiRes) => {
+// //         let body = '';
+// //         apiRes.on('data', (chunk) => { body += chunk; });
+// //         apiRes.on('end', () => {
+// //           console.log(`✦ [AI] Anthropic response status: ${apiRes.statusCode}`);
+// //           if (apiRes.statusCode !== 200) {
+// //             console.error(`✦ [AI] Anthropic API error ${apiRes.statusCode}:`, body.substring(0, 500));
+// //             reject(new Error(`Anthropic API ${apiRes.statusCode}: ${body.substring(0, 200)}`));
+// //             return;
+// //           }
+// //           try {
+// //             resolve(JSON.parse(body));
+// //           } catch (e) {
+// //             console.error('✦ [AI] Failed to parse Anthropic response:', body.substring(0, 500));
+// //             reject(new Error('Invalid JSON from Anthropic'));
+// //           }
+// //         });
+// //       });
+
+// //       apiReq.on('error', (err) => {
+// //         console.error('✦ [AI] HTTPS request failed:', err.message);
+// //         reject(err);
+// //       });
+
+// //       apiReq.setTimeout(15000, () => {
+// //         apiReq.destroy();
+// //         reject(new Error('Anthropic API timeout (15s)'));
+// //       });
+
+// //       apiReq.write(requestBody);
+// //       apiReq.end();
+// //     });
+
+// //     const rawContent = anthropicData.content?.[0]?.text || '';
+// //     console.log(`✦ [AI] Raw response (first 200 chars): ${rawContent.substring(0, 200)}`);
+
+// //     let parsed;
+// //     try {
+// //       const cleaned = rawContent.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+// //       parsed = JSON.parse(cleaned);
+// //     } catch (parseErr) {
+// //       console.error('✦ [AI] Failed to parse response:', rawContent);
+// //       const suggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis);
+// //       return res.json({ suggestions, fallback: true });
+// //     }
+
+// //     const suggestions = Array.isArray(parsed.suggestions)
+// //       ? parsed.suggestions.slice(0, 3)
+// //       : Array.isArray(parsed)
+// //         ? parsed.slice(0, 3)
+// //         : generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis);
+
+// //     res.json({ suggestions });
+
+// //   } catch (error) {
+// //     console.error('✦ [AI] Suggestions endpoint error:', error);
+// //     const suggestions = generateSmartFallbackSuggestions(
+// //       req.body?.clientMessage || '',
+// //       req.body?.chatHistory || '',
+// //       req.body?.analysis || {}
+// //     );
+// //     res.json({ suggestions, fallback: true });
+// //   }
+// // });
+
+// // /**
+// //  * Build an analysis context block for the AI prompt from the frontend's conversation analysis.
+// //  */
+// // function buildAnalysisBlock(analysis) {
+// //   if (!analysis) return '';
+
+// //   const lines = ['CONVERSATION ANALYSIS (use this to inform your replies):'];
+
+// //   if (analysis.detectedTopics?.length > 0) {
+// //     const topicLabels = {
+// //       order_status: 'Order Status / Tracking',
+// //       refund_return: 'Refund / Return / Cancellation',
+// //       product_issue: 'Product Issue / Damaged / Defective',
+// //       payment: 'Payment / Billing',
+// //       discount_promo: 'Discount / Promo Code',
+// //       product_inquiry: 'Product Inquiry',
+// //       shipping: 'Shipping Questions',
+// //       account: 'Account Issue',
+// //       complaint: 'Complaint / Escalation',
+// //       gratitude: 'Customer Expressing Thanks',
+// //       greeting: 'Greeting / Opening'
+// //     };
+// //     const labels = analysis.detectedTopics.map(t => topicLabels[t] || t).join(', ');
+// //     lines.push(`- Topics discussed: ${labels}`);
+// //   }
+
+// //   if (analysis.sentiment) {
+// //     const sentimentLabels = {
+// //       very_negative: 'Very upset / angry — lead with strong empathy and urgency',
+// //       negative: 'Frustrated / unhappy — acknowledge their concern with empathy',
+// //       neutral: 'Neutral tone',
+// //       positive: 'Positive / friendly',
+// //       very_positive: 'Very happy / grateful — match their positive energy'
+// //     };
+// //     lines.push(`- Customer sentiment: ${sentimentLabels[analysis.sentiment] || analysis.sentiment}`);
+// //   }
+
+// //   if (analysis.isUrgent) lines.push('- ⚠️ Customer marked this as URGENT — respond with priority');
+// //   if (analysis.isRepeat) lines.push('- ⚠️ Customer is REPEATING themselves or following up — they feel unheard. Acknowledge this directly and move forward with action.');
+// //   if (analysis.isQuestion) lines.push('- Customer is asking a direct question — answer it specifically');
+// //   if (analysis.hasOrderNumber) lines.push('- Customer already provided an order number — DO NOT ask for it again, reference it');
+// //   if (analysis.hasEmail) lines.push('- Customer already shared their email — DO NOT ask for it again');
+// //   if (analysis.hasAttachment) lines.push('- Customer sent a file/image — acknowledge you have reviewed it');
+// //   if (analysis.agentAskedForOrder) lines.push('- Agent already asked for order number in a previous message — do NOT ask again');
+// //   if (analysis.agentAlreadyApologized) lines.push('- Agent already apologized — avoid repeating the same apology, focus on action');
+// //   if (analysis.agentAskedForEmail) lines.push('- Agent already asked for email — do NOT ask again');
+// //   if (analysis.agentAskedForPhoto) lines.push('- Agent already asked for a photo — do NOT ask again');
+// //   if (analysis.agentOfferedRefund) lines.push('- Agent already mentioned a refund — build on that, don\'t re-introduce');
+// //   if (analysis.agentOfferedReplacement) lines.push('- Agent already offered a replacement — build on that');
+// //   if (analysis.isLongConversation) lines.push(`- This is a long conversation (${analysis.turnCount} messages) — the customer may be losing patience. Be efficient and solution-oriented.`);
+// //   if (analysis.lastAgentText) lines.push(`- Agent's last message was: "${analysis.lastAgentText.substring(0, 150)}"`);
+
+// //   return lines.length > 1 ? lines.join('\n') : '';
+// // }
+
+// // /**
+// //  * Generate smart context-aware fallback suggestions when the AI API is unavailable.
+// //  * Uses the conversation analysis from the frontend to produce relevant replies.
+// //  */
+// // function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis) {
+// //   const lower = (customerMsg || '').toLowerCase();
+// //   const topics = analysis?.detectedTopics || [];
+// //   const sentiment = analysis?.sentiment || 'neutral';
+// //   const isRepeat = analysis?.isRepeat || false;
+// //   const hasOrderNumber = analysis?.hasOrderNumber || false;
+// //   const hasAttachment = analysis?.hasAttachment || false;
+// //   const agentAskedForOrder = analysis?.agentAskedForOrder || false;
+// //   const agentAlreadyApologized = analysis?.agentAlreadyApologized || false;
+// //   const isUrgent = analysis?.isUrgent || false;
+// //   const isLongConversation = analysis?.isLongConversation || false;
+
+// //   // ── Empathy prefix based on sentiment ──
+// //   let empathyPrefix = '';
+// //   if (sentiment === 'very_negative' && !agentAlreadyApologized) {
+// //     const options = [
+// //       'I completely understand how frustrating this must be.',
+// //       'I sincerely apologize for this experience.',
+// //       'I can see this has been really frustrating, and I want to make it right.',
+// //     ];
+// //     empathyPrefix = options[Math.floor(Math.random() * options.length)] + ' ';
+// //   } else if (sentiment === 'negative' && !agentAlreadyApologized) {
+// //     const options = [
+// //       'I\'m sorry about that.',
+// //       'I understand your concern.',
+// //       'I appreciate your patience with this.',
+// //     ];
+// //     empathyPrefix = options[Math.floor(Math.random() * options.length)] + ' ';
+// //   }
+
+// //   // ── Repeat/follow-up prefix ──
+// //   const repeatPrefix = isRepeat ? 'I apologize for the delay in getting this resolved. ' : '';
+
+// //   // ── Urgency suffix ──
+// //   const urgencySuffix = isUrgent ? ' I\'m treating this as a priority.' : '';
+
+// //   // ── GRATITUDE ──
+// //   if (topics.includes('gratitude') && !topics.includes('complaint')) {
+// //     return [
+// //       'You\'re welcome! Is there anything else I can help you with?',
+// //       'Happy to help! Don\'t hesitate to reach out if you need anything else.',
+// //       'Glad we could get that sorted for you! Have a great day.'
+// //     ];
+// //   }
+
+// //   // ── GREETING ONLY ──
+// //   if (topics.length === 1 && topics.includes('greeting')) {
+// //     return [
+// //       'Hello! How can I help you today?',
+// //       'Hi there! Welcome — what can I assist you with?',
+// //       'Hello! Thanks for reaching out. How can I help?'
+// //     ];
+// //   }
+
+// //   // ── PRODUCT ISSUE ──
+// //   if (topics.includes('product_issue')) {
+// //     if (hasOrderNumber && hasAttachment) {
+// //       return [
+// //         `${empathyPrefix}${repeatPrefix}Thank you for sharing the photo and your order details. I've reviewed the issue and I'm looking into the best resolution for you right away.${urgencySuffix}`,
+// //         `${empathyPrefix}I can see the issue clearly from the photo you sent. Let me check what options we have — would you prefer a replacement or a refund?`,
+// //         `${empathyPrefix}${repeatPrefix}I've noted the issue with your order. I'm escalating this now to get it resolved as quickly as possible.${urgencySuffix}`
+// //       ];
+// //     }
+// //     if (hasOrderNumber && !hasAttachment && !analysis?.agentAskedForPhoto) {
+// //       return [
+// //         `${empathyPrefix}Thank you for your order details. Could you send a photo of the issue? That will help me process this faster.`,
+// //         `${empathyPrefix}I've located your order. To help resolve this quickly, could you share a picture of the damage or defect?`,
+// //         `${empathyPrefix}${repeatPrefix}I want to get this sorted for you. A quick photo of the issue would help me determine the best next step.${urgencySuffix}`
+// //       ];
+// //     }
+// //     if (!hasOrderNumber && !agentAskedForOrder) {
+// //       return [
+// //         `${empathyPrefix}I'd like to help resolve this. Could you share your order number so I can pull up the details?`,
+// //         `${empathyPrefix}That's not the experience we want you to have. Could you provide your order number and a brief description of the issue?`,
+// //         `${empathyPrefix}${repeatPrefix}Let me look into this for you. Can you share your order number and, if possible, a photo of the problem?${urgencySuffix}`
+// //       ];
+// //     }
+// //     return [
+// //       `${empathyPrefix}I'm looking into this for you now. I'll have an update shortly.${urgencySuffix}`,
+// //       `${empathyPrefix}Thank you for your patience. I'm checking the available options to resolve this.`,
+// //       `${empathyPrefix}${repeatPrefix}I want to make sure we get this right. Let me review your case and get back to you with a solution.${urgencySuffix}`
+// //     ];
+// //   }
+
+// //   // ── ORDER STATUS / SHIPPING ──
+// //   if (topics.includes('order_status') || topics.includes('shipping')) {
+// //     if (hasOrderNumber) {
+// //       return [
+// //         `${repeatPrefix}Thank you for sharing your order number. Let me check the current status and tracking information for you now.${urgencySuffix}`,
+// //         `${repeatPrefix}I'm pulling up your order details right now. I'll have the latest shipping update for you shortly.${urgencySuffix}`,
+// //         `${repeatPrefix}I can see your order in our system. Let me check with our fulfillment team for the most up-to-date status.${urgencySuffix}`
+// //       ];
+// //     }
+// //     if (!agentAskedForOrder) {
+// //       return [
+// //         `${empathyPrefix}I'd be happy to check on that for you. Could you share your order number?`,
+// //         'Of course! To look up your order status, I\'ll need your order number or the email address you used at checkout.',
+// //         `${empathyPrefix}${repeatPrefix}Let me find your order. Could you provide the order number? It usually starts with # and was included in your confirmation email.${urgencySuffix}`
+// //       ];
+// //     }
+// //     return [
+// //       `${repeatPrefix}I'm currently looking into your order. I'll update you as soon as I have the tracking details.${urgencySuffix}`,
+// //       'Thank you for your patience. I\'m checking with our shipping team to get you the latest update.',
+// //       `${repeatPrefix}I want to make sure I give you accurate information. Give me just a moment to verify the shipping status.${urgencySuffix}`
+// //     ];
+// //   }
+
+// //   // ── REFUND / RETURN ──
+// //   if (topics.includes('refund_return')) {
+// //     if (hasOrderNumber) {
+// //       return [
+// //         `${empathyPrefix}${repeatPrefix}I've located your order. Let me review the details and check what options are available for you.${urgencySuffix}`,
+// //         `${empathyPrefix}Thank you for providing your order details. I'm checking the return/refund eligibility now and will let you know the next steps.`,
+// //         `${empathyPrefix}I have your order pulled up. Could you let me know the reason for the return? That helps me process it faster.`
+// //       ];
+// //     }
+// //     if (!agentAskedForOrder) {
+// //       return [
+// //         `${empathyPrefix}I'd be happy to help with that. Could you share your order number so I can review the return options?`,
+// //         `${empathyPrefix}To get started on the return process, I'll need your order number. You can find it in your confirmation email.`,
+// //         `${empathyPrefix}${repeatPrefix}I want to help resolve this. Could you provide your order number and the reason for the return?${urgencySuffix}`
+// //       ];
+// //     }
+// //     return [
+// //       `${empathyPrefix}I'm reviewing your return request now. I'll update you with the available options shortly.${urgencySuffix}`,
+// //       `${empathyPrefix}Thank you for your patience. I'm checking the return policy details for your specific order.`,
+// //       `${empathyPrefix}${repeatPrefix}I'm working on this for you. Would you prefer a refund to your original payment method or a store credit?${urgencySuffix}`
+// //     ];
+// //   }
+
+// //   // ── PAYMENT / BILLING ──
+// //   if (topics.includes('payment')) {
+// //     if (hasOrderNumber) {
+// //       return [
+// //         `${empathyPrefix}I can see your order. Let me review the payment details and get back to you.${urgencySuffix}`,
+// //         `${empathyPrefix}Thank you for the details. I'm checking the billing records for your order now.`,
+// //         `${empathyPrefix}${repeatPrefix}I'm looking into the payment issue on your order. I'll have an update for you shortly.${urgencySuffix}`
+// //       ];
+// //     }
+// //     return [
+// //       `${empathyPrefix}I'd like to help sort out this billing issue. Could you share your order number or the email associated with the charge?`,
+// //       `${empathyPrefix}To investigate the payment concern, could you provide the order number and the approximate date and amount of the charge?`,
+// //       `${empathyPrefix}${repeatPrefix}I want to get to the bottom of this. Could you share any details about the charge — the date, amount, and last four digits of the card used?${urgencySuffix}`
+// //     ];
+// //   }
+
+// //   // ── DISCOUNT / PROMO ──
+// //   if (topics.includes('discount_promo')) {
+// //     return [
+// //       'Let me check on that promo code for you. Could you share the code you\'re trying to use and the items in your cart?',
+// //       'I\'d be happy to help with that! Could you tell me which promotion you\'re referring to, or share the code?',
+// //       `${empathyPrefix}Let me look into the available promotions for you. What product or category are you interested in?`
+// //     ];
+// //   }
+
+// //   // ── PRODUCT INQUIRY ──
+// //   if (topics.includes('product_inquiry')) {
+// //     return [
+// //       'Great question! Let me check that information for you. Which specific product are you asking about?',
+// //       'I\'d be happy to help with product details. Could you share the product name or a link so I can look it up?',
+// //       'Let me find the most accurate information for you. Can you tell me more about what you\'re looking for?'
+// //     ];
+// //   }
+
+// //   // ── ACCOUNT ISSUES ──
+// //   if (topics.includes('account')) {
+// //     return [
+// //       `${empathyPrefix}I can help with your account. For security, could you confirm the email address associated with your account?`,
+// //       `${empathyPrefix}Let me look into the account issue. Could you describe what's happening when you try to log in?`,
+// //       `${empathyPrefix}${repeatPrefix}I'll get this sorted for you. Could you share the email address on your account so I can investigate?${urgencySuffix}`
+// //     ];
+// //   }
+
+// //   // ── COMPLAINT / ESCALATION ──
+// //   if (topics.includes('complaint')) {
+// //     if (isLongConversation) {
+// //       return [
+// //         `${empathyPrefix}${repeatPrefix}I understand this has been a long process and I want to get it resolved for you now. Let me escalate this to ensure it's handled promptly.${urgencySuffix}`,
+// //         `${empathyPrefix}I can see this hasn't been resolved to your satisfaction. Let me personally make sure we get this taken care of right away.`,
+// //         `${empathyPrefix}You've been more than patient. I'm going to escalate this and ensure you get a resolution today.${urgencySuffix}`
+// //       ];
+// //     }
+// //     return [
+// //       `${empathyPrefix}${repeatPrefix}I take your feedback seriously and I want to resolve this for you. Could you share the specific details so I can take action?${urgencySuffix}`,
+// //       `${empathyPrefix}I hear you, and I want to make this right. Let me look into this and find the best solution.`,
+// //       `${empathyPrefix}Thank you for letting us know. I'm going to look into this personally and follow up with you.${urgencySuffix}`
+// //     ];
+// //   }
+
+// //   // ── CUSTOMER ASKED A QUESTION ──
+// //   if (analysis?.isQuestion) {
+// //     return [
+// //       `${empathyPrefix}${repeatPrefix}That's a great question. Let me find the answer for you — one moment.${urgencySuffix}`,
+// //       `${empathyPrefix}I'd be happy to help with that. Let me check and get back to you with the details.`,
+// //       `${empathyPrefix}${repeatPrefix}Let me look into that for you. Could you provide any additional details that might help me find the answer faster?${urgencySuffix}`
+// //     ];
+// //   }
+
+// //   // ── GENERIC FALLBACK ──
+// //   return [
+// //     `${empathyPrefix}${repeatPrefix}Thank you for your message. Let me look into this and get back to you shortly.${urgencySuffix}`,
+// //     `${empathyPrefix}I appreciate you reaching out. Could you provide a bit more detail so I can assist you better?`,
+// //     `${empathyPrefix}${repeatPrefix}I want to make sure I help you with the right information. Could you tell me a bit more about what you need?${urgencySuffix}`
+// //   ];
+// // }
+
+
+
 // app.post('/api/ai/suggestions', authenticateToken, async (req, res) => {
 //   try {
 //     const {
 //       clientMessage,
 //       chatHistory,
+//       recentContext, // NEW: Focused context from frontend
 //       conversationId,
 //       customerName,
 //       customerEmail,
@@ -1113,7 +1669,10 @@
 //       return res.status(400).json({ error: 'clientMessage is required' });
 //     }
 
-//     console.log(`✦ [AI] Request — edited: ${!!messageEdited}, note: "${adminNote || ''}", text: "${clientMessage.substring(0, 80)}..."`);
+//     const contextQuality = recentContext?.contextQuality || 'minimal';
+//     const messageRichness = recentContext?.messageRichness || 'brief';
+    
+//     console.log(`✦ [AI] Request — context: ${contextQuality}, richness: ${messageRichness}, edited: ${!!messageEdited}, note: "${adminNote || ''}", text: "${clientMessage.substring(0, 80)}..."`);
 
 //     const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
@@ -1124,104 +1683,34 @@
 //       return res.json({ suggestions });
 //     }
 
-//     // ── Build a highly contextual system prompt ──
-//     const analysisBlock = buildAnalysisBlock(analysis);
+//     // ── Enhanced conversation state analysis ──
+//     const conversationState = analyzeConversationState(chatHistory, clientMessage, analysis);
 
-//     const systemPrompt = `You are an expert customer support reply assistant for an e-commerce store. Your job is to suggest exactly 3 reply options that the support agent can immediately send to the customer.
+//     // ── Build enhanced context blocks ──
+//     const analysisBlock = buildEnhancedAnalysisBlock(analysis, conversationState, recentContext);
+//     const customerContext = buildCustomerContext(customerName, customerEmail, conversationState);
+//     const policyBlock = buildPolicyBlock();
 
-// STORE: ${storeName || 'N/A'}
-// CUSTOMER: ${customerName || 'Guest'}${customerEmail ? ` (${customerEmail})` : ''}
+//     // ── Build comprehensive system prompt with examples ──
+//     const systemPrompt = buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness);
 
-// ${analysisBlock}
+//     // ── Build structured user prompt with XML tags ──
+//     const userPrompt = buildUserPrompt(chatHistory, clientMessage, messageEdited, adminNote, conversationState, recentContext);
 
-// RULES — follow these strictly:
-// 1. Write as the human support agent, NEVER as an AI or bot.
-// 2. Each reply must be 1-3 sentences. Be specific and actionable, not vague.
-// 3. Base every reply on what the customer actually said and the conversation history. Reference specific details they mentioned (order numbers, product names, issues described).
-// 4. Vary the 3 suggestions strategically:
-//    - Suggestion 1: The most direct, helpful answer to what the customer just asked.
-//    - Suggestion 2: A slightly different angle, or addresses a secondary concern.
-//    - Suggestion 3: If info is missing, ask a specific follow-up question. If info is complete, offer an extra step (escalation, follow-up check, additional help).
-// 5. NEVER repeat something the agent already said or already asked for. Read the chat history carefully.
-// 6. Match the customer's energy: if they're upset, acknowledge it with empathy first. If they're casual, be friendly. If they're formal, be professional.
-// 7. If the customer provided an order number, reference it. Do NOT ask for it again.
-// 8. If the customer attached a file/image, acknowledge you've seen it.
-// 9. Do not use emojis unless the customer used them first.
-// 10. Do not make promises about timelines, refund amounts, or outcomes you cannot guarantee.
-// 11. Never say "I understand your frustration" robotically — use natural, varied empathy language.
-
-// Respond ONLY with valid JSON: {"suggestions": ["reply 1", "reply 2", "reply 3"]}`;
-
-//     // Build the user prompt with optional admin edits/notes
-//     let userPrompt = chatHistory
-//       ? `FULL CONVERSATION:\n${chatHistory}\n\nCUSTOMER'S LATEST MESSAGE: ${clientMessage}`
-//       : `CUSTOMER'S MESSAGE: ${clientMessage}`;
-
-//     if (messageEdited) {
-//       userPrompt += `\n\n⚠️ NOTE: The agent EDITED the customer's message above to clarify or add context. Use the edited version as the basis for your reply suggestions.`;
-//     }
-
-//     if (adminNote && adminNote.trim()) {
-//       userPrompt += `\n\n📌 AGENT INSTRUCTIONS: ${adminNote.trim()}\n— The agent wants you to incorporate the above instructions into all 3 suggested replies. Follow them carefully.`;
-//     }
-
-//     // ── Call Anthropic Claude API (uses built-in https, works on all Node versions) ──
+//     // ── Call Anthropic Claude API with optimized parameters ──
 //     const requestBody = JSON.stringify({
 //       model: process.env.AI_MODEL || 'claude-sonnet-4-20250514',
-//       max_tokens: 600,
+//       max_tokens: 800,
+//       temperature: 0.7, // Balanced creativity and consistency
 //       system: systemPrompt,
 //       messages: [
 //         { role: 'user', content: userPrompt },
 //       ],
 //     });
 
-//     console.log(`✦ [AI] Calling Anthropic API — model: ${process.env.AI_MODEL || 'claude-sonnet-4-20250514'}, key: ${ANTHROPIC_API_KEY.substring(0, 12)}...`);
+//     console.log(`✦ [AI] Calling Anthropic API — model: ${process.env.AI_MODEL || 'claude-sonnet-4-20250514'}`);
 
-//     const anthropicData = await new Promise((resolve, reject) => {
-//       const options = {
-//         hostname: 'api.anthropic.com',
-//         path: '/v1/messages',
-//         method: 'POST',
-//         headers: {
-//           'Content-Type': 'application/json',
-//           'x-api-key': ANTHROPIC_API_KEY,
-//           'anthropic-version': '2023-06-01',
-//           'Content-Length': Buffer.byteLength(requestBody),
-//         },
-//       };
-
-//       const apiReq = https.request(options, (apiRes) => {
-//         let body = '';
-//         apiRes.on('data', (chunk) => { body += chunk; });
-//         apiRes.on('end', () => {
-//           console.log(`✦ [AI] Anthropic response status: ${apiRes.statusCode}`);
-//           if (apiRes.statusCode !== 200) {
-//             console.error(`✦ [AI] Anthropic API error ${apiRes.statusCode}:`, body.substring(0, 500));
-//             reject(new Error(`Anthropic API ${apiRes.statusCode}: ${body.substring(0, 200)}`));
-//             return;
-//           }
-//           try {
-//             resolve(JSON.parse(body));
-//           } catch (e) {
-//             console.error('✦ [AI] Failed to parse Anthropic response:', body.substring(0, 500));
-//             reject(new Error('Invalid JSON from Anthropic'));
-//           }
-//         });
-//       });
-
-//       apiReq.on('error', (err) => {
-//         console.error('✦ [AI] HTTPS request failed:', err.message);
-//         reject(err);
-//       });
-
-//       apiReq.setTimeout(15000, () => {
-//         apiReq.destroy();
-//         reject(new Error('Anthropic API timeout (15s)'));
-//       });
-
-//       apiReq.write(requestBody);
-//       apiReq.end();
-//     });
+//     const anthropicData = await callAnthropicAPI(requestBody, ANTHROPIC_API_KEY);
 
 //     const rawContent = anthropicData.content?.[0]?.text || '';
 //     console.log(`✦ [AI] Raw response (first 200 chars): ${rawContent.substring(0, 200)}`);
@@ -1232,15 +1721,24 @@
 //       parsed = JSON.parse(cleaned);
 //     } catch (parseErr) {
 //       console.error('✦ [AI] Failed to parse response:', rawContent);
-//       const suggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis);
+//       const suggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
 //       return res.json({ suggestions, fallback: true });
 //     }
 
-//     const suggestions = Array.isArray(parsed.suggestions)
+//     let suggestions = Array.isArray(parsed.suggestions)
 //       ? parsed.suggestions.slice(0, 3)
 //       : Array.isArray(parsed)
 //         ? parsed.slice(0, 3)
-//         : generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis);
+//         : generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
+
+//     // ── Validate and filter suggestions ──
+//     suggestions = validateSuggestions(suggestions, conversationState, chatHistory);
+
+//     // ── Ensure we always return 3 suggestions ──
+//     if (suggestions.length < 3) {
+//       const fallbackSuggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
+//       suggestions = [...suggestions, ...fallbackSuggestions].slice(0, 3);
+//     }
 
 //     res.json({ suggestions });
 
@@ -1249,21 +1747,254 @@
 //     const suggestions = generateSmartFallbackSuggestions(
 //       req.body?.clientMessage || '',
 //       req.body?.chatHistory || '',
-//       req.body?.analysis || {}
+//       req.body?.analysis || {},
+//       req.body?.adminNote || ''
 //     );
 //     res.json({ suggestions, fallback: true });
 //   }
 // });
 
 // /**
-//  * Build an analysis context block for the AI prompt from the frontend's conversation analysis.
+//  * Build comprehensive system prompt with examples and guidelines
 //  */
-// function buildAnalysisBlock(analysis) {
-//   if (!analysis) return '';
+// function buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness) {
+//   // Add context-specific guidance
+//   let contextGuidance = '';
+  
+//   if (contextQuality === 'minimal') {
+//     if (messageRichness === 'very_brief' || messageRichness === 'brief') {
+//       contextGuidance = `
+// ⚠️ LIMITED CONTEXT: Customer's first brief message with no conversation history yet.
+// - This is likely a greeting or very general inquiry
+// - Your suggestions should be opening responses: greet professionally, ask what they need help with
+// - Don't make assumptions - gather information first
+// - Keep it friendly and welcoming
+// `;
+//     } else {
+//       contextGuidance = `
+// ℹ️ DETAILED FIRST MESSAGE: Customer provided substantial information in their first message.
+// - They've given you good context to work with despite no conversation history
+// - Focus on addressing their specific concern directly
+// - Ask for any missing critical information (order number, photos, etc.)
+// - Show you understand their issue and are taking action
+// `;
+//     }
+//   } else if (contextQuality === 'basic') {
+//     contextGuidance = `
+// ℹ️ BASIC CONTEXT: Early in the conversation (1-2 exchanges).
+// - Build on what's been discussed so far
+// - Continue gathering information if needed
+// - Start moving toward solutions if you have enough details
+// - Reference specific things they've mentioned
+// `;
+//   } else if (contextQuality === 'good') {
+//     contextGuidance = `
+// ✓ GOOD CONTEXT: You have sufficient conversation history (2+ exchanges each side).
+// - Base suggestions on the full conversation context
+// - Avoid repeating what's already been asked or said
+// - Focus on moving toward resolution
+// - Be specific and reference prior discussion points
+// `;
+//   } else if (contextQuality === 'excellent') {
+//     contextGuidance = `
+// ✓ EXCELLENT CONTEXT: Rich conversation history with multiple exchanges.
+// - You have deep context - use it to provide highly relevant suggestions
+// - The customer may be losing patience - be efficient and solution-oriented
+// - Avoid any repetition - you know what's been discussed
+// - Focus on concrete next steps and resolution
+// `;
+//   }
 
-//   const lines = ['CONVERSATION ANALYSIS (use this to inform your replies):'];
+//   return `You are an expert customer support reply assistant for ${storeName || 'an e-commerce store'}. Your job is to suggest exactly 3 reply options that the support agent can immediately send to the customer.
 
-//   if (analysis.detectedTopics?.length > 0) {
+// ${contextGuidance}
+
+// ${customerContext}
+
+// ${analysisBlock}
+
+// ${policyBlock}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CORE RULES — Follow these strictly:
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// 1. **Write as a human support agent**, NEVER as an AI or bot. Use first person ("I'll check", "Let me help").
+
+// 2. **Each reply must be 1-4 sentences.** Be specific and actionable, not vague or generic.
+
+// 3. **Base every reply on actual details** from the conversation:
+//    - Reference specific order numbers, product names, or issues they mentioned
+//    - Never ask for information the customer already provided
+//    - Never repeat what the agent already said or asked
+
+// 4. **Vary the 3 suggestions strategically:**
+//    - Suggestion 1: Direct, helpful answer to their main question
+//    - Suggestion 2: Different angle or addresses a secondary concern
+//    - Suggestion 3: If info is missing, ask a specific follow-up. If info is complete, offer next step (escalation, confirmation, additional help)
+
+// 5. **Match the customer's emotional state:**
+//    - Very upset → Lead with strong empathy, show urgency, take immediate action
+//    - Frustrated → Acknowledge concern with empathy, then solution
+//    - Neutral → Be professional and efficient
+//    - Positive → Match their friendly energy
+//    - Grateful → Be warm but brief
+
+// 6. **Never use these robotic phrases:**
+//    - "I understand your frustration" (too generic)
+//    - "I apologize for any inconvenience"
+//    - "Please be advised"
+//    - "Kindly"
+//    - "As per our policy"
+//    - "I appreciate your patience" (unless they've actually been patient)
+
+// 7. **Use natural, varied empathy language:**
+//    - "I'm so sorry this happened"
+//    - "That's not the experience we want for you"
+//    - "I can see how frustrating this must be"
+//    - "I completely understand"
+
+// 8. **Don't make promises you can't keep:**
+//    - Never promise specific timeframes unless confirmed
+//    - Don't promise refund amounts or outcomes
+//    - Use phrases like "I'll check" or "Let me review" instead
+
+// 9. **No emojis** unless the customer used them first.
+
+// 10. **If customer is repeating themselves or following up:**
+//     - Acknowledge they've been waiting: "I apologize for the delay getting this resolved"
+//     - Show action: "Let me prioritize this" or "I'm escalating this now"
+//     - Don't make them explain again
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// EXAMPLES OF EXCELLENT REPLIES:
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Example 1 - Product Damage:
+// Customer: "My order #12345 arrived completely damaged! The box was crushed and the ceramic vase is in pieces."
+// Agent should say:
+// ✓ "I'm so sorry your order arrived damaged. I've pulled up order #12345 and can see the vase set you ordered. Could you send a quick photo of the damage? I'll get a replacement shipped out right away."
+// ✗ "I understand your frustration. Can you provide your order number?"
+
+// Example 2 - Angry Customer:
+// Customer: "WHERE IS MY PACKAGE?? I ordered 2 weeks ago and NOTHING! This is ridiculous!"
+// Agent should say:
+// ✓ "I completely understand your frustration — 2 weeks is too long. Let me check the status of your order right now. Could you share your order number? It's in your confirmation email and starts with #."
+// ✗ "I apologize for any inconvenience. Please provide your order number so I can look into this."
+
+// Example 3 - Follow-up (customer already asked):
+// Customer: "I'm still waiting for an update on my refund. I asked about this yesterday."
+// Agent should say:
+// ✓ "I apologize for the delay getting this resolved. Let me check the status of your refund right now and get you an answer within the hour."
+// ✗ "Thank you for your patience. Can you provide your order number?"
+
+// Example 4 - Simple Gratitude:
+// Customer: "Thanks so much for the refund!"
+// Agent should say:
+// ✓ "You're very welcome! Don't hesitate to reach out if you need anything else."
+// ✗ "I'm glad I could assist you today. Is there anything else I can help you with regarding your order?"
+
+// Example 5 - Multiple Issues:
+// Customer: "My order #98765 is late AND I was charged twice! This is unacceptable."
+// Agent should say:
+// ✓ "I sincerely apologize — that's definitely not right. I've pulled up order #98765 and I can see both issues. Let me check the shipping status and the duplicate charge right now. I'll have answers for you within 10 minutes."
+// ✗ "I understand your concern. Let me look into this for you."
+
+// Example 6 - Product Question:
+// Customer: "Does the blue hoodie come in size XL?"
+// Agent should say:
+// ✓ "Great question! Let me check the current stock on the blue hoodie in XL. Which specific style are you looking at — the Classic or the Premium?"
+// ✗ "Thank you for your inquiry. Can you provide more details about which product you're interested in?"
+
+// Example 7 - Detailed First Message:
+// Customer: "Hi, my order #12345 arrived damaged. The box was crushed and the ceramic vase inside is broken into pieces. I need a refund or replacement ASAP."
+// Agent should say:
+// ✓ "I'm so sorry your ceramic vase from order #12345 arrived damaged. Could you send a quick photo of the damage? I'll process a replacement for you right away."
+// ✗ "Hello! Thank you for contacting us. Can you provide your order number?"
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// THINKING PROCESS:
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Before generating replies, quickly think through:
+// 1. What is the customer's primary need right now?
+// 2. What information do we have vs. what's missing?
+// 3. What tone matches their emotional state?
+// 4. What has the agent already tried/said/asked?
+// 5. Is this a repeat question or follow-up?
+
+// Then generate your 3 suggestions.
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Respond ONLY with valid JSON in this exact format:
+// {"suggestions": ["reply 1", "reply 2", "reply 3"]}`;
+// }
+
+// /**
+//  * Build enhanced analysis block with actionable context
+//  */
+// function buildEnhancedAnalysisBlock(analysis, conversationState, recentContext) {
+//   if (!analysis && !conversationState && !recentContext) return '';
+
+//   const lines = ['━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'];
+//   lines.push('CONVERSATION ANALYSIS (use this to inform your replies):');
+//   lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+//   // Message richness indicator
+//   if (recentContext?.messageRichness) {
+//     const richnessLabels = {
+//       'very_detailed': '📝 VERY DETAILED MESSAGE - Customer provided extensive information, use it all',
+//       'detailed': '📝 Detailed message - Good context to work with',
+//       'brief': '💬 Brief message - May need to ask for more information',
+//       'very_brief': '💬 Very brief message - Likely a greeting or need to ask follow-up questions',
+//     };
+//     if (richnessLabels[recentContext.messageRichness]) {
+//       lines.push(richnessLabels[recentContext.messageRichness]);
+//     }
+//   }
+
+//   // Detected issue type
+//   if (recentContext?.detectedIssue) {
+//     const issueLabels = {
+//       'damaged': '📦 Issue Type: DAMAGED/BROKEN item - Offer replacement or refund, ask for photo if not provided',
+//       'wrong_item': '📦 Issue Type: WRONG ITEM received - Apologize, offer replacement with return label',
+//       'missing': '📦 Issue Type: MISSING/NOT RECEIVED - Check tracking, offer reship or refund',
+//       'late': '📦 Issue Type: LATE DELIVERY - Check tracking, explain delay, offer compensation if significant',
+//       'quality': '📦 Issue Type: QUALITY concerns - Gather details, offer refund or replacement',
+//     };
+//     lines.push(issueLabels[recentContext.detectedIssue] || `📦 Issue: ${recentContext.detectedIssue}`);
+//   }
+
+//   // What customer wants
+//   if (recentContext?.customerWants) {
+//     const wants = [];
+//     if (recentContext.customerWants.refund) wants.push('REFUND');
+//     if (recentContext.customerWants.replacement) wants.push('REPLACEMENT');
+//     if (recentContext.customerWants.tracking) wants.push('TRACKING INFO');
+//     if (recentContext.customerWants.help) wants.push('GENERAL HELP');
+    
+//     if (wants.length > 0) {
+//       lines.push(`🎯 Customer explicitly wants: ${wants.join(' or ')} - Address this directly`);
+//     }
+//   }
+
+//   // Extracted entities
+//   if (conversationState?.orderNumber || analysis?.orderNumber) {
+//     const orderNum = conversationState?.orderNumber || analysis?.orderNumber;
+//     lines.push(`📦 Order Number: ${orderNum} — MUST reference this in your replies, DO NOT ask for it again`);
+//   }
+
+//   if (conversationState?.productName) {
+//     lines.push(`🏷️  Product: ${conversationState.productName} — Reference this specifically`);
+//   }
+
+//   if (conversationState?.customerEmail && conversationState.customerEmail !== 'unknown') {
+//     lines.push(`📧 Email: ${conversationState.customerEmail} — DO NOT ask for email again`);
+//   }
+
+//   // Topics
+//   if (analysis?.detectedTopics?.length > 0) {
 //     const topicLabels = {
 //       order_status: 'Order Status / Tracking',
 //       refund_return: 'Refund / Return / Cancellation',
@@ -1278,49 +2009,402 @@
 //       greeting: 'Greeting / Opening'
 //     };
 //     const labels = analysis.detectedTopics.map(t => topicLabels[t] || t).join(', ');
-//     lines.push(`- Topics discussed: ${labels}`);
+//     lines.push(`🏷️  Topics: ${labels}`);
 //   }
 
-//   if (analysis.sentiment) {
+//   // Sentiment with actionable guidance
+//   if (analysis?.sentiment) {
 //     const sentimentLabels = {
-//       very_negative: 'Very upset / angry — lead with strong empathy and urgency',
-//       negative: 'Frustrated / unhappy — acknowledge their concern with empathy',
-//       neutral: 'Neutral tone',
-//       positive: 'Positive / friendly',
-//       very_positive: 'Very happy / grateful — match their positive energy'
+//       very_negative: '😡 VERY UPSET / ANGRY — Lead with strong empathy, show urgency, take immediate action',
+//       negative: '😟 FRUSTRATED / UNHAPPY — Acknowledge their concern with genuine empathy first',
+//       neutral: '😐 NEUTRAL — Be professional and efficient',
+//       positive: '😊 POSITIVE / FRIENDLY — Match their positive energy',
+//       very_positive: '🎉 VERY HAPPY / GRATEFUL — Be warm and brief, match their enthusiasm'
 //     };
-//     lines.push(`- Customer sentiment: ${sentimentLabels[analysis.sentiment] || analysis.sentiment}`);
+//     lines.push(`${sentimentLabels[analysis.sentiment] || analysis.sentiment}`);
 //   }
 
-//   if (analysis.isUrgent) lines.push('- ⚠️ Customer marked this as URGENT — respond with priority');
-//   if (analysis.isRepeat) lines.push('- ⚠️ Customer is REPEATING themselves or following up — they feel unheard. Acknowledge this directly and move forward with action.');
-//   if (analysis.isQuestion) lines.push('- Customer is asking a direct question — answer it specifically');
-//   if (analysis.hasOrderNumber) lines.push('- Customer already provided an order number — DO NOT ask for it again, reference it');
-//   if (analysis.hasEmail) lines.push('- Customer already shared their email — DO NOT ask for it again');
-//   if (analysis.hasAttachment) lines.push('- Customer sent a file/image — acknowledge you have reviewed it');
-//   if (analysis.agentAskedForOrder) lines.push('- Agent already asked for order number in a previous message — do NOT ask again');
-//   if (analysis.agentAlreadyApologized) lines.push('- Agent already apologized — avoid repeating the same apology, focus on action');
-//   if (analysis.agentAskedForEmail) lines.push('- Agent already asked for email — do NOT ask again');
-//   if (analysis.agentAskedForPhoto) lines.push('- Agent already asked for a photo — do NOT ask again');
-//   if (analysis.agentOfferedRefund) lines.push('- Agent already mentioned a refund — build on that, don\'t re-introduce');
-//   if (analysis.agentOfferedReplacement) lines.push('- Agent already offered a replacement — build on that');
-//   if (analysis.isLongConversation) lines.push(`- This is a long conversation (${analysis.turnCount} messages) — the customer may be losing patience. Be efficient and solution-oriented.`);
-//   if (analysis.lastAgentText) lines.push(`- Agent's last message was: "${analysis.lastAgentText.substring(0, 150)}"`);
+//   // Critical flags
+//   if (analysis?.isUrgent || conversationState?.isEscalating) {
+//     lines.push('⚠️  URGENT / ESCALATING — Respond with priority, show immediate action, use phrases like "right now" or "immediately"');
+//   }
 
-//   return lines.length > 1 ? lines.join('\n') : '';
+//   if (analysis?.isRepeat || conversationState?.customerMessageCount >= 3) {
+//     lines.push('🔁 CUSTOMER REPEATING / FOLLOWING UP — They feel unheard. Acknowledge the delay and take action NOW. Don\'t make them explain again.');
+//   }
+
+//   if (conversationState?.isLongConversation) {
+//     lines.push(`⏰ LONG CONVERSATION (${conversationState.turnCount} messages) — Customer may be losing patience. Be efficient and solution-oriented.`);
+//   }
+
+//   // Information status
+//   if (analysis?.isQuestion) {
+//     lines.push('❓ Direct question asked — Answer it specifically, don\'t deflect');
+//   }
+
+//   if (analysis?.hasAttachment || conversationState?.hasAttachment) {
+//     lines.push('📎 Customer sent file/image — Acknowledge you\'ve reviewed it in your response');
+//   }
+
+//   // What agent already did (critical to avoid repetition)
+//   if (analysis?.agentAskedForOrder || conversationState?.agentAskedForOrder) {
+//     lines.push('🚫 Agent ALREADY asked for order number — DO NOT ask again, move forward with the information you have');
+//   }
+
+//   if (analysis?.agentAskedForEmail || conversationState?.agentAskedForEmail) {
+//     lines.push('🚫 Agent ALREADY asked for email — DO NOT ask again');
+//   }
+
+//   if (analysis?.agentAskedForPhoto || conversationState?.agentAskedForPhoto) {
+//     lines.push('🚫 Agent ALREADY asked for photo — DO NOT ask again, work with what you have or escalate');
+//   }
+
+//   if (analysis?.agentAlreadyApologized || conversationState?.agentAlreadyApologized) {
+//     lines.push('🚫 Agent ALREADY apologized — Don\'t repeat the same apology, focus on action and solutions');
+//   }
+
+//   if (analysis?.agentOfferedRefund) {
+//     lines.push('💰 Agent already mentioned refund — Build on that, confirm next steps, don\'t re-introduce the concept');
+//   }
+
+//   if (analysis?.agentOfferedReplacement) {
+//     lines.push('🔄 Agent already offered replacement — Build on that, confirm shipping details or next steps');
+//   }
+
+//   // Last agent message for context
+//   if (analysis?.lastAgentText || conversationState?.lastAgentMessage) {
+//     const lastMsg = (analysis?.lastAgentText || conversationState?.lastAgentMessage || '').substring(0, 150);
+//     if (lastMsg) {
+//       lines.push(`💬 Agent's last message: "${lastMsg}${lastMsg.length >= 150 ? '...' : ''}" — Don't repeat this`);
+//     }
+//   }
+
+//   return lines.length > 2 ? lines.join('\n') : '';
+// }
+
+// /**
+//  * Build customer context block
+//  */
+// function buildCustomerContext(customerName, customerEmail, conversationState) {
+//   const lines = [];
+  
+//   lines.push(`CUSTOMER: ${customerName || 'Guest'}${customerEmail ? ` (${customerEmail})` : ''}`);
+  
+//   if (conversationState?.customerHistory) {
+//     const history = conversationState.customerHistory;
+//     lines.push(`Customer History: ${history.totalOrders || 0} previous orders, ${history.issueCount || 0} past support tickets`);
+//   }
+
+//   return lines.join('\n');
+// }
+
+// /**
+//  * Build policy and brand voice guidelines
+//  */
+// function buildPolicyBlock() {
+//   return `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// COMPANY POLICIES & BRAND VOICE:
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Policies:
+// - Refund window: 30 days from delivery date
+// - Always offer replacement before refund for damaged items
+// - Free return shipping for defective/damaged products
+// - Escalate to supervisor if customer has contacted 3+ times about same issue
+// - Price match: Match competitors within 7 days of purchase
+
+// Brand Voice:
+// - Friendly but professional — never overly casual or use slang
+// - Empathetic without being robotic
+// - Action-oriented — always indicate next steps
+// - Transparent — if you don't know, say you'll find out
+
+// Auto-Escalation Triggers:
+// - Customer uses words like "lawyer", "sue", "fraud", "scam"
+// - Customer explicitly asks for manager/supervisor
+// - 3+ messages about same unresolved issue
+// - Very negative sentiment + repeat customer`;
+// }
+
+// /**
+//  * Build structured user prompt with XML tags for better parsing
+//  */
+// function buildUserPrompt(chatHistory, clientMessage, messageEdited, adminNote, conversationState, recentContext) {
+//   let prompt = '';
+
+//   // Emphasize the last 2 customer and 2 agent messages if available
+//   if (recentContext?.lastCustomerMessages && recentContext?.lastAgentMessages) {
+//     const customerMsgs = recentContext.lastCustomerMessages;
+//     const agentMsgs = recentContext.lastAgentMessages;
+    
+//     if (customerMsgs.length > 0 || agentMsgs.length > 0) {
+//       prompt += `<recent_conversation_focus>
+// MOST RECENT EXCHANGE (prioritize this context):
+
+// `;
+//       if (customerMsgs.length > 0) {
+//         prompt += `Last ${customerMsgs.length} Customer Message(s):
+// ${customerMsgs.map((msg, i) => `${i + 1}. ${msg}`).join('\n')}
+
+// `;
+//       }
+      
+//       if (agentMsgs.length > 0) {
+//         prompt += `Last ${agentMsgs.length} Agent Response(s):
+// ${agentMsgs.map((msg, i) => `${i + 1}. ${msg}`).join('\n')}
+
+// `;
+//       }
+      
+//       prompt += `⚠️ IMPORTANT: Base your suggestions primarily on this recent exchange. The customer's latest concerns and the agent's recent responses are your top priority.
+// </recent_conversation_focus>
+
+// `;
+//     }
+//   }
+
+//   if (chatHistory && chatHistory.trim()) {
+//     prompt += `<full_conversation_history>
+// ${chatHistory}
+// </full_conversation_history>
+
+// `;
+//   }
+
+//   prompt += `<customer_latest_message>
+// ${clientMessage}
+// </customer_latest_message>`;
+
+//   if (conversationState?.extractedEntities && Object.keys(conversationState.extractedEntities).length > 0) {
+//     prompt += `
+
+// <extracted_information>
+// ${Object.entries(conversationState.extractedEntities)
+//   .map(([key, value]) => `- ${key}: ${value}`)
+//   .join('\n')}
+// </extracted_information>`;
+//   }
+
+//   if (messageEdited) {
+//     prompt += `
+
+// <important_note>
+// ⚠️ The agent EDITED the customer's message above to clarify or add context. Use the edited version as the basis for your reply suggestions.
+// </important_note>`;
+//   }
+
+//   if (adminNote && adminNote.trim()) {
+//     prompt += `
+
+// <agent_special_instructions>
+// 📌 ${adminNote.trim()}
+
+// The agent wants you to incorporate the above instructions into ALL 3 suggested replies. This is a high-priority requirement.
+// </agent_special_instructions>`;
+//   }
+
+//   prompt += `
+
+// Generate 3 reply suggestions as JSON: {"suggestions": ["reply 1", "reply 2", "reply 3"]}`;
+
+//   return prompt;
+// }
+
+// /**
+//  * Analyze conversation state to extract entities and detect patterns
+//  */
+// function analyzeConversationState(chatHistory, clientMessage, analysis) {
+//   const fullText = `${chatHistory || ''} ${clientMessage || ''}`.toLowerCase();
+//   const messages = (chatHistory || '').split('\n').filter(m => m.trim());
+  
+//   // Extract order number
+//   const orderMatch = fullText.match(/(?:order|#)\s*#?(\d{5,})/i);
+//   const orderNumber = orderMatch ? orderMatch[1] : null;
+
+//   // Extract email
+//   const emailMatch = fullText.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
+//   const customerEmail = emailMatch ? emailMatch[0] : null;
+
+//   // Extract product name (simple heuristic)
+//   const productMatch = clientMessage.match(/(blue|red|black|white|green|yellow|purple|pink|orange|brown|gray|grey)\s+(hoodie|shirt|pants|shoes|dress|jacket|sweater|hat|shorts|jeans|blouse|skirt|coat|boots|sneakers|sandals|watch|bag|backpack|wallet|belt|sunglasses|vase|mug|plate|bowl|pillow|blanket|towel|lamp|chair|table|desk|mirror)/i);
+//   const productName = productMatch ? productMatch[0] : null;
+
+//   // Count messages
+//   const customerMessages = messages.filter(m => m.startsWith('Customer:') || m.startsWith('Client:'));
+//   const agentMessages = messages.filter(m => m.startsWith('Agent:') || m.startsWith('Support:'));
+//   const customerMessageCount = customerMessages.length;
+
+//   // Detect agent actions
+//   const lastAgentMessage = agentMessages[agentMessages.length - 1] || '';
+//   const agentAskedForOrder = /order number|order #|order id/i.test(lastAgentMessage);
+//   const agentAskedForEmail = /email|e-mail address/i.test(lastAgentMessage);
+//   const agentAskedForPhoto = /photo|picture|image|screenshot/i.test(lastAgentMessage);
+//   const agentAlreadyApologized = /sorry|apologize|apologies/i.test(lastAgentMessage);
+
+//   // Detect escalation signals
+//   const isEscalating = /manager|supervisor|escalate|unacceptable|ridiculous|lawsuit|lawyer|sue|fraud|scam|bbb|attorney general/i.test(clientMessage);
+
+//   // Detect attachments
+//   const hasAttachment = /attached|attachment|photo|image|screenshot|picture|file/i.test(clientMessage);
+
+//   // Long conversation detection
+//   const isLongConversation = customerMessageCount >= 4;
+//   const turnCount = Math.max(customerMessageCount, agentMessages.length);
+
+//   return {
+//     orderNumber,
+//     customerEmail: customerEmail || 'unknown',
+//     productName,
+//     customerMessageCount,
+//     lastAgentMessage,
+//     agentAskedForOrder,
+//     agentAskedForEmail,
+//     agentAskedForPhoto,
+//     agentAlreadyApologized,
+//     isEscalating,
+//     hasAttachment,
+//     isLongConversation,
+//     turnCount,
+//     extractedEntities: {
+//       ...(orderNumber && { order_number: orderNumber }),
+//       ...(productName && { product: productName }),
+//       ...(customerEmail && customerEmail !== 'unknown' && { email: customerEmail }),
+//     },
+//   };
+// }
+
+// /**
+//  * Validate suggestions to ensure quality and avoid common mistakes
+//  */
+// function validateSuggestions(suggestions, conversationState, chatHistory) {
+//   if (!Array.isArray(suggestions)) return [];
+
+//   const lastAgentMessage = (conversationState?.lastAgentMessage || '').toLowerCase();
+//   const hasOrderNumber = !!conversationState?.orderNumber || conversationState?.hasOrderNumber;
+//   const hasEmail = conversationState?.customerEmail && conversationState.customerEmail !== 'unknown';
+
+//   return suggestions.filter((suggestion, index) => {
+//     if (!suggestion || typeof suggestion !== 'string') return false;
+
+//     const lowerSuggestion = suggestion.toLowerCase();
+
+//     // Don't ask for info we already have
+//     if (hasOrderNumber && /(?:could you|can you|please|would you mind).*(?:order number|order #|order id)/i.test(suggestion)) {
+//       console.log(`✦ [AI] Filtered suggestion ${index + 1}: asking for order number we already have`);
+//       return false;
+//     }
+
+//     if (hasEmail && /(?:could you|can you|please|would you mind).*(?:email|e-mail)/i.test(suggestion)) {
+//       console.log(`✦ [AI] Filtered suggestion ${index + 1}: asking for email we already have`);
+//       return false;
+//     }
+
+//     // Don't repeat what agent just said (check first 50 chars)
+//     if (lastAgentMessage && lastAgentMessage.length > 20) {
+//       const agentStart = lastAgentMessage.substring(0, 50);
+//       const suggestionStart = lowerSuggestion.substring(0, 50);
+//       if (agentStart.includes(suggestionStart.substring(0, 30)) || 
+//           suggestionStart.includes(agentStart.substring(0, 30))) {
+//         console.log(`✦ [AI] Filtered suggestion ${index + 1}: too similar to agent's last message`);
+//         return false;
+//       }
+//     }
+
+//     // Check length (5-60 words)
+//     const wordCount = suggestion.split(/\s+/).length;
+//     if (wordCount < 5 || wordCount > 60) {
+//       console.log(`✦ [AI] Filtered suggestion ${index + 1}: word count ${wordCount} out of range`);
+//       return false;
+//     }
+
+//     // Avoid robotic phrases
+//     const roboticPhrases = [
+//       /i apologize for any inconvenience/i,
+//       /please be advised/i,
+//       /kindly provide/i,
+//       /as per our policy/i,
+//       /we regret to inform/i,
+//     ];
+    
+//     for (const phrase of roboticPhrases) {
+//       if (phrase.test(suggestion)) {
+//         console.log(`✦ [AI] Filtered suggestion ${index + 1}: contains robotic phrase`);
+//         return false;
+//       }
+//     }
+
+//     // Avoid AI-like phrases
+//     if (/as an ai|i'm a bot|i'm an assistant/i.test(suggestion)) {
+//       console.log(`✦ [AI] Filtered suggestion ${index + 1}: mentions being AI`);
+//       return false;
+//     }
+
+//     return true;
+//   });
+// }
+
+// /**
+//  * Call Anthropic API with proper error handling
+//  */
+// function callAnthropicAPI(requestBody, apiKey) {
+//   return new Promise((resolve, reject) => {
+//     const options = {
+//       hostname: 'api.anthropic.com',
+//       path: '/v1/messages',
+//       method: 'POST',
+//       headers: {
+//         'Content-Type': 'application/json',
+//         'x-api-key': apiKey,
+//         'anthropic-version': '2023-06-01',
+//         'Content-Length': Buffer.byteLength(requestBody),
+//       },
+//     };
+
+//     const apiReq = https.request(options, (apiRes) => {
+//       let body = '';
+//       apiRes.on('data', (chunk) => { body += chunk; });
+//       apiRes.on('end', () => {
+//         console.log(`✦ [AI] Anthropic response status: ${apiRes.statusCode}`);
+//         if (apiRes.statusCode !== 200) {
+//           console.error(`✦ [AI] Anthropic API error ${apiRes.statusCode}:`, body.substring(0, 500));
+//           reject(new Error(`Anthropic API ${apiRes.statusCode}: ${body.substring(0, 200)}`));
+//           return;
+//         }
+//         try {
+//           resolve(JSON.parse(body));
+//         } catch (e) {
+//           console.error('✦ [AI] Failed to parse Anthropic response:', body.substring(0, 500));
+//           reject(new Error('Invalid JSON from Anthropic'));
+//         }
+//       });
+//     });
+
+//     apiReq.on('error', (err) => {
+//       console.error('✦ [AI] HTTPS request failed:', err.message);
+//       reject(err);
+//     });
+
+//     apiReq.setTimeout(20000, () => {
+//       apiReq.destroy();
+//       reject(new Error('Anthropic API timeout (20s)'));
+//     });
+
+//     apiReq.write(requestBody);
+//     apiReq.end();
+//   });
 // }
 
 // /**
 //  * Generate smart context-aware fallback suggestions when the AI API is unavailable.
-//  * Uses the conversation analysis from the frontend to produce relevant replies.
+//  * Enhanced version with better context awareness.
 //  */
-// function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis) {
+// function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis, adminNote) {
 //   const lower = (customerMsg || '').toLowerCase();
 //   const topics = analysis?.detectedTopics || [];
 //   const sentiment = analysis?.sentiment || 'neutral';
 //   const isRepeat = analysis?.isRepeat || false;
-//   const hasOrderNumber = analysis?.hasOrderNumber || false;
-//   const hasAttachment = analysis?.hasAttachment || false;
+//   const hasOrderNumber = analysis?.hasOrderNumber || /\b\d{5,}\b/.test(customerMsg + chatHistory);
+//   const hasAttachment = analysis?.hasAttachment || /attach|photo|image/i.test(customerMsg);
 //   const agentAskedForOrder = analysis?.agentAskedForOrder || false;
 //   const agentAlreadyApologized = analysis?.agentAlreadyApologized || false;
 //   const isUrgent = analysis?.isUrgent || false;
@@ -1330,8 +2414,8 @@
 //   let empathyPrefix = '';
 //   if (sentiment === 'very_negative' && !agentAlreadyApologized) {
 //     const options = [
-//       'I completely understand how frustrating this must be.',
 //       'I sincerely apologize for this experience.',
+//       'I completely understand how frustrating this must be.',
 //       'I can see this has been really frustrating, and I want to make it right.',
 //     ];
 //     empathyPrefix = options[Math.floor(Math.random() * options.length)] + ' ';
@@ -1339,13 +2423,13 @@
 //     const options = [
 //       'I\'m sorry about that.',
 //       'I understand your concern.',
-//       'I appreciate your patience with this.',
+//       'I appreciate you bringing this to my attention.',
 //     ];
 //     empathyPrefix = options[Math.floor(Math.random() * options.length)] + ' ';
 //   }
 
 //   // ── Repeat/follow-up prefix ──
-//   const repeatPrefix = isRepeat ? 'I apologize for the delay in getting this resolved. ' : '';
+//   const repeatPrefix = isRepeat ? 'I apologize for the delay getting this resolved. ' : '';
 
 //   // ── Urgency suffix ──
 //   const urgencySuffix = isUrgent ? ' I\'m treating this as a priority.' : '';
@@ -1353,9 +2437,9 @@
 //   // ── GRATITUDE ──
 //   if (topics.includes('gratitude') && !topics.includes('complaint')) {
 //     return [
-//       'You\'re welcome! Is there anything else I can help you with?',
-//       'Happy to help! Don\'t hesitate to reach out if you need anything else.',
-//       'Glad we could get that sorted for you! Have a great day.'
+//       'You\'re very welcome! Don\'t hesitate to reach out if you need anything else.',
+//       'Happy to help! Have a great day.',
+//       'Glad we could get that sorted for you!'
 //     ];
 //   }
 
@@ -1363,8 +2447,8 @@
 //   if (topics.length === 1 && topics.includes('greeting')) {
 //     return [
 //       'Hello! How can I help you today?',
-//       'Hi there! Welcome — what can I assist you with?',
-//       'Hello! Thanks for reaching out. How can I help?'
+//       'Hi there! What can I assist you with?',
+//       'Hello! Thanks for reaching out. What do you need help with?'
 //     ];
 //   }
 
@@ -1372,22 +2456,22 @@
 //   if (topics.includes('product_issue')) {
 //     if (hasOrderNumber && hasAttachment) {
 //       return [
-//         `${empathyPrefix}${repeatPrefix}Thank you for sharing the photo and your order details. I've reviewed the issue and I'm looking into the best resolution for you right away.${urgencySuffix}`,
-//         `${empathyPrefix}I can see the issue clearly from the photo you sent. Let me check what options we have — would you prefer a replacement or a refund?`,
-//         `${empathyPrefix}${repeatPrefix}I've noted the issue with your order. I'm escalating this now to get it resolved as quickly as possible.${urgencySuffix}`
+//         `${empathyPrefix}${repeatPrefix}Thank you for the photo and order details. I'm reviewing the issue and will get back to you with a solution right away.${urgencySuffix}`,
+//         `${empathyPrefix}I can see the issue clearly from the photo. Let me check the best resolution for you — would you prefer a replacement or a refund?`,
+//         `${empathyPrefix}${repeatPrefix}I've noted the issue with your order. Let me escalate this to get it resolved as quickly as possible.${urgencySuffix}`
 //       ];
 //     }
 //     if (hasOrderNumber && !hasAttachment && !analysis?.agentAskedForPhoto) {
 //       return [
-//         `${empathyPrefix}Thank you for your order details. Could you send a photo of the issue? That will help me process this faster.`,
+//         `${empathyPrefix}Thank you for your order details. Could you send a quick photo of the issue? That will help me process this faster.`,
 //         `${empathyPrefix}I've located your order. To help resolve this quickly, could you share a picture of the damage or defect?`,
-//         `${empathyPrefix}${repeatPrefix}I want to get this sorted for you. A quick photo of the issue would help me determine the best next step.${urgencySuffix}`
+//         `${empathyPrefix}${repeatPrefix}A photo would help me determine the best solution for you. Could you send one when you get a chance?${urgencySuffix}`
 //       ];
 //     }
 //     if (!hasOrderNumber && !agentAskedForOrder) {
 //       return [
 //         `${empathyPrefix}I'd like to help resolve this. Could you share your order number so I can pull up the details?`,
-//         `${empathyPrefix}That's not the experience we want you to have. Could you provide your order number and a brief description of the issue?`,
+//         `${empathyPrefix}That's not the experience we want for you. Could you provide your order number and a brief description of the issue?`,
 //         `${empathyPrefix}${repeatPrefix}Let me look into this for you. Can you share your order number and, if possible, a photo of the problem?${urgencySuffix}`
 //       ];
 //     }
@@ -1402,22 +2486,22 @@
 //   if (topics.includes('order_status') || topics.includes('shipping')) {
 //     if (hasOrderNumber) {
 //       return [
-//         `${repeatPrefix}Thank you for sharing your order number. Let me check the current status and tracking information for you now.${urgencySuffix}`,
-//         `${repeatPrefix}I'm pulling up your order details right now. I'll have the latest shipping update for you shortly.${urgencySuffix}`,
-//         `${repeatPrefix}I can see your order in our system. Let me check with our fulfillment team for the most up-to-date status.${urgencySuffix}`
+//         `${repeatPrefix}Thank you for your order number. Let me check the current status and tracking information for you now.${urgencySuffix}`,
+//         `${repeatPrefix}I'm pulling up your order details right now. I'll have the latest shipping update for you in just a moment.${urgencySuffix}`,
+//         `${repeatPrefix}I can see your order. Let me check with our fulfillment team for the most up-to-date status.${urgencySuffix}`
 //       ];
 //     }
 //     if (!agentAskedForOrder) {
 //       return [
 //         `${empathyPrefix}I'd be happy to check on that for you. Could you share your order number?`,
-//         'Of course! To look up your order status, I\'ll need your order number or the email address you used at checkout.',
-//         `${empathyPrefix}${repeatPrefix}Let me find your order. Could you provide the order number? It usually starts with # and was included in your confirmation email.${urgencySuffix}`
+//         'I can look that up! I\'ll need your order number or the email address you used at checkout.',
+//         `${empathyPrefix}${repeatPrefix}Let me find your order. Could you provide the order number? It should be in your confirmation email.${urgencySuffix}`
 //       ];
 //     }
 //     return [
-//       `${repeatPrefix}I'm currently looking into your order. I'll update you as soon as I have the tracking details.${urgencySuffix}`,
-//       'Thank you for your patience. I\'m checking with our shipping team to get you the latest update.',
-//       `${repeatPrefix}I want to make sure I give you accurate information. Give me just a moment to verify the shipping status.${urgencySuffix}`
+//       `${repeatPrefix}I'm checking on your order now. I'll update you with the tracking details as soon as I have them.${urgencySuffix}`,
+//       'Thank you for your patience. I\'m looking into the shipping status with our team.',
+//       `${repeatPrefix}I want to give you accurate information. Give me just a moment to verify the shipping status.${urgencySuffix}`
 //     ];
 //   }
 
@@ -1425,16 +2509,16 @@
 //   if (topics.includes('refund_return')) {
 //     if (hasOrderNumber) {
 //       return [
-//         `${empathyPrefix}${repeatPrefix}I've located your order. Let me review the details and check what options are available for you.${urgencySuffix}`,
-//         `${empathyPrefix}Thank you for providing your order details. I'm checking the return/refund eligibility now and will let you know the next steps.`,
+//         `${empathyPrefix}${repeatPrefix}I've located your order. Let me review the details and check what return options are available for you.${urgencySuffix}`,
+//         `${empathyPrefix}Thank you for your order number. I'm checking the return eligibility now and will let you know the next steps.`,
 //         `${empathyPrefix}I have your order pulled up. Could you let me know the reason for the return? That helps me process it faster.`
 //       ];
 //     }
 //     if (!agentAskedForOrder) {
 //       return [
 //         `${empathyPrefix}I'd be happy to help with that. Could you share your order number so I can review the return options?`,
-//         `${empathyPrefix}To get started on the return process, I'll need your order number. You can find it in your confirmation email.`,
-//         `${empathyPrefix}${repeatPrefix}I want to help resolve this. Could you provide your order number and the reason for the return?${urgencySuffix}`
+//         `${empathyPrefix}To get started on the return, I'll need your order number. You can find it in your confirmation email.`,
+//         `${empathyPrefix}${repeatPrefix}I want to help resolve this. Could you provide your order number and let me know the reason for the return?${urgencySuffix}`
 //       ];
 //     }
 //     return [
@@ -1455,16 +2539,16 @@
 //     }
 //     return [
 //       `${empathyPrefix}I'd like to help sort out this billing issue. Could you share your order number or the email associated with the charge?`,
-//       `${empathyPrefix}To investigate the payment concern, could you provide the order number and the approximate date and amount of the charge?`,
-//       `${empathyPrefix}${repeatPrefix}I want to get to the bottom of this. Could you share any details about the charge — the date, amount, and last four digits of the card used?${urgencySuffix}`
+//       `${empathyPrefix}To investigate the payment concern, could you provide the order number, date, and amount of the charge?`,
+//       `${empathyPrefix}${repeatPrefix}I want to get to the bottom of this. Could you share the order number and the last four digits of the card used?${urgencySuffix}`
 //     ];
 //   }
 
 //   // ── DISCOUNT / PROMO ──
 //   if (topics.includes('discount_promo')) {
 //     return [
-//       'Let me check on that promo code for you. Could you share the code you\'re trying to use and the items in your cart?',
-//       'I\'d be happy to help with that! Could you tell me which promotion you\'re referring to, or share the code?',
+//       'Let me check on that promo code for you. Could you share the code and the items you\'re trying to apply it to?',
+//       'I\'d be happy to help! Could you tell me which promotion you\'re referring to, or share the promo code?',
 //       `${empathyPrefix}Let me look into the available promotions for you. What product or category are you interested in?`
 //     ];
 //   }
@@ -1473,7 +2557,7 @@
 //   if (topics.includes('product_inquiry')) {
 //     return [
 //       'Great question! Let me check that information for you. Which specific product are you asking about?',
-//       'I\'d be happy to help with product details. Could you share the product name or a link so I can look it up?',
+//       'I\'d be happy to help with product details. Could you share the product name or a link?',
 //       'Let me find the most accurate information for you. Can you tell me more about what you\'re looking for?'
 //     ];
 //   }
@@ -1481,9 +2565,9 @@
 //   // ── ACCOUNT ISSUES ──
 //   if (topics.includes('account')) {
 //     return [
-//       `${empathyPrefix}I can help with your account. For security, could you confirm the email address associated with your account?`,
+//       `${empathyPrefix}I can help with your account. For security, could you confirm the email address associated with it?`,
 //       `${empathyPrefix}Let me look into the account issue. Could you describe what's happening when you try to log in?`,
-//       `${empathyPrefix}${repeatPrefix}I'll get this sorted for you. Could you share the email address on your account so I can investigate?${urgencySuffix}`
+//       `${empathyPrefix}${repeatPrefix}I'll get this sorted for you. Could you share the email on your account so I can investigate?${urgencySuffix}`
 //     ];
 //   }
 
@@ -1519,6 +2603,11 @@
 //     `${empathyPrefix}${repeatPrefix}I want to make sure I help you with the right information. Could you tell me a bit more about what you need?${urgencySuffix}`
 //   ];
 // }
+
+
+
+
+
 
 // // ============ EMPLOYEE ENDPOINTS ============
 
@@ -1737,6 +2826,639 @@
 //   }
 // });
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// // ============================================
+// // ANALYTICS CACHE
+// // ============================================
+// let analyticsCache = null;
+// let analyticsCacheTimestamp = null;
+// const ANALYTICS_CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
+
+// // ============================================
+// // ANALYTICS ENDPOINT - Common Questions
+// // ============================================
+// app.get('/api/analytics/common-questions', authenticateToken, async (req, res) => {
+//   try {
+//     console.log('📊 [Analytics] Endpoint called!');
+//     console.log('📊 [Analytics] Query params:', req.query);
+    
+//     const { 
+//       limit = 20, 
+//       timeframe = 'all',
+//     } = req.query;
+
+//     // ✅ Check cache first (only for 'all' timeframe since it changes least)
+//     if (timeframe === 'all' && analyticsCache && analyticsCacheTimestamp) {
+//       const cacheAge = Date.now() - analyticsCacheTimestamp;
+//       if (cacheAge < ANALYTICS_CACHE_DURATION) {
+//         console.log(`📊 [Analytics] ✅ Returning cached results (${Math.floor(cacheAge/1000)}s old)`);
+//         return res.json({
+//           ...analyticsCache,
+//           cached: true,
+//           cacheAge: Math.floor(cacheAge / 1000)
+//         });
+//       }
+//     }
+
+//     // Build date filter using sent_at
+//     let dateFilter = '';
+//     if (timeframe === 'week') {
+//       dateFilter = `AND m.sent_at >= NOW() - INTERVAL '7 days'`;
+//     } else if (timeframe === 'month') {
+//       dateFilter = `AND m.sent_at >= NOW() - INTERVAL '30 days'`;
+//     } else if (timeframe === '3months') {
+//       dateFilter = `AND m.sent_at >= NOW() - INTERVAL '90 days'`;
+//     }
+
+//     // ✅ NO LIMIT - Analyzes ALL customer messages!
+//     const query = `
+//       SELECT 
+//         m.content,
+//         m.sent_at,
+//         m.conversation_id,
+//         m.sender_name as customer_name
+//       FROM messages m
+//       WHERE m.sender_type = 'customer'
+//         AND m.content IS NOT NULL
+//         AND m.content != ''
+//         AND LENGTH(TRIM(m.content)) > 0
+//         ${dateFilter}
+//       ORDER BY m.sent_at DESC
+//     `;
+
+//     console.log('📊 [Analytics] Running query...');
+//     const startTime = Date.now();
+    
+//     const result = await db.pool.query(query);
+//     const messages = result.rows;
+
+//     const queryTime = Date.now() - startTime;
+//     console.log(`📊 [Analytics] Found ${messages.length} customer messages in ${queryTime}ms`);
+
+//     // If no messages, return empty data
+//     if (messages.length === 0) {
+//       console.log('📊 [Analytics] No messages found - returning empty results');
+//       return res.json({
+//         summary: {
+//           totalMessagesAnalyzed: 0,
+//           questionsFound: 0,
+//           timeframe: timeframe,
+//         },
+//         topQuestions: [],
+//         topTopics: [],
+//         topIssues: [],
+//         sentimentBreakdown: { 
+//           very_negative: 0, 
+//           negative: 0, 
+//           neutral: 0, 
+//           positive: 0, 
+//           very_positive: 0 
+//         },
+//       });
+//     }
+
+//     // Analyze messages
+//     console.log('📊 [Analytics] Analyzing messages...');
+//     const analysisStartTime = Date.now();
+//     const questionAnalysis = analyzeCustomerQuestions(messages);
+//     const analysisTime = Date.now() - analysisStartTime;
+
+//     console.log(`📊 [Analytics] Analysis complete: ${questionAnalysis.questions.length} questions found in ${analysisTime}ms`);
+
+//     // Build response
+//     const response = {
+//       summary: {
+//         totalMessagesAnalyzed: messages.length,
+//         questionsFound: questionAnalysis.questions.length,
+//         timeframe: timeframe,
+//         processingTimeMs: queryTime + analysisTime,
+//       },
+//       topQuestions: questionAnalysis.topQuestions.slice(0, parseInt(limit)),
+//       topTopics: questionAnalysis.topTopics.slice(0, 10),
+//       topIssues: questionAnalysis.topIssues.slice(0, 10),
+//       sentimentBreakdown: questionAnalysis.sentimentBreakdown,
+//       cached: false,
+//     };
+
+//     // ✅ Cache 'all time' results for 30 minutes
+//     if (timeframe === 'all') {
+//       analyticsCache = response;
+//       analyticsCacheTimestamp = Date.now();
+//       console.log('📊 [Analytics] Results cached for 30 minutes');
+//     }
+
+//     res.json(response);
+
+//   } catch (error) {
+//     console.error('📊 [Analytics] Error:', error);
+//     console.error('📊 [Analytics] Stack:', error.stack);
+//     res.status(500).json({ 
+//       error: 'Failed to retrieve analytics',
+//       message: error.message 
+//     });
+//   }
+// });
+
+// // ✅ Cache clear endpoint for admins
+// app.post('/api/analytics/clear-cache', authenticateToken, (req, res) => {
+//   try {
+//     if (req.user.role !== 'admin') {
+//       return res.status(403).json({ error: 'Admin access required' });
+//     }
+    
+//     analyticsCache = null;
+//     analyticsCacheTimestamp = null;
+    
+//     console.log('📊 [Analytics] Cache cleared by admin:', req.user.email);
+//     res.json({ success: true, message: 'Analytics cache cleared' });
+//   } catch (error) {
+//     console.error('📊 [Analytics] Cache clear error:', error);
+//     res.status(500).json({ error: 'Failed to clear cache' });
+//   }
+// });
+// function analyzeCustomerQuestions(messages) {
+//   const questions = [];
+//   const topicCounts = {};
+//   const issueCounts = {};
+//   const sentimentCounts = { very_negative: 0, negative: 0, neutral: 0, positive: 0, very_positive: 0 };
+
+//   // ✅ DEBUG COUNTERS
+//   let totalMessages = 0;
+//   let filteredByExclude = 0;
+//   let filteredByLength = 0;
+//   let notQuestionOrInquiry = 0;
+//   let noBusinessTopic = 0;
+//   let normalizedTooShort = 0;
+//   let pickupDetected = 0;
+//   let dosingDetected = 0;
+//   let pickupKept = 0;
+//   let dosingKept = 0;
+
+//   // Topic keywords
+//   const topicKeywords = {
+//     order_status: [
+//       'order', 'tracking', 'shipped', 'delivery', 'deliver', 'where is', 'status', 'when will',
+//       'late', 'delayed', 'still waiting', 'hasn\'t arrived', 'not arrived', 'not received',
+//       'haven\'t received', 'never arrived', 'never came', 'taking too long'
+//     ],
+//     refund_return: ['refund', 'return', 'money back', 'cancel', 'cancellation', 'exchange'],
+//     product_issue: ['broken', 'damaged', 'defective', 'wrong item', 'missing', 'not working', 'doesn\'t work', 'issue with'],
+//     payment: ['payment', 'charged', 'charge', 'billing', 'invoice', 'receipt', 'credit card', 'declined'],
+//     discount_promo: ['discount', 'coupon', 'promo', 'code', 'sale', 'offer', 'deal'],
+
+// product_inquiry: [
+//   // Basic product questions
+//   'product', 'item', 'size', 'color', 'stock', 'available', 'price', 'how much',
+//   // COA/Documentation questions
+//   'coa', 'certificate', 'analysis', 'lab report', 'test results', 'documentation',
+//   'lab test', 'purity', 'quality report', 'authenticity', 'verified', 'certified',
+//   'third party', 'independent test', 'batch', 'lot number', 'actual coa',
+//   // Dosing/Usage questions
+//   'dosing', 'dose', 'dosage', 'how to use', 'how much to take', 'instructions',
+//   'how to take', 'usage', 'how do i use', 'administration', 'inject', 'injection',
+//   'reconstitute', 'reconstitution', 'mixing', 'prepare', 'preparation',
+//   'how many', 'frequency', 'how often', 'protocol', 'regimen', 'schedule',
+//   // Vial duration/longevity questions
+//   'how long', 'last', 'vial last', 'bottle last', 'supply last', 'one vial',
+//   'per week', 'per day', 'per month', 'duration', 'longevity', 'how many doses',
+//   'how many injections', 'servings', 'uses per', 'doses per vial', 'vial contain',
+//   // ✅ NEW: Free items / what's included
+//   'free', 'include', 'comes with', 'receive', 'bac water', 'needle', 'needles', 'syringe', // ✅ ADD THESE
+//   'injection supplies', 'what comes with', 'pre mixed', 'pre-mixed', 'premixed', // ✅ ADD THESE
+//   // Product information
+//   'ingredient', 'composition', 'formula', 'concentration', 'strength', 'potency',
+//   'expiration', 'shelf life', 'storage', 'refrigerate', 'freeze'
+// ],
+//     pickup: [
+//       'pick up', 'pickup', 'pick-up', 'local pickup', 'store pickup', 'collection', 'collect',
+//       'come to', 'come directly', 'come by', 'visit', 'stop by', 'go to',
+//       'your address', 'your location', 'physical location', 'in person', 'physical store',
+//       'buy at your', 'purchase at your', 'come buy', 'visit your store', 'your shop',
+//       'at the location', 'at your place', 'store location', 'shop location', 'come get'
+//     ],
+//     shipping: ['shipping', 'ship', 'freight', 'express', 'standard', 'free shipping', 'shipping cost'],
+//     account: ['account', 'login', 'password', 'sign in', 'email', 'profile', 'update my'],
+//   };
+
+//   const issueKeywords = {
+//     damaged: ['broken', 'damaged', 'defective', 'cracked', 'shattered', 'crushed'],
+//     wrong_item: ['wrong item', 'incorrect', 'not what i ordered', 'different'],
+//     missing: ['missing', 'didn\'t receive', 'never arrived', 'lost'],
+//     late: ['late', 'delayed', 'taking too long', 'still waiting'],
+//     quality: ['poor quality', 'cheap', 'not as described', 'disappointed with quality'],
+//   };
+
+
+// const excludePatterns = [
+//   /^(hi|hey|hello|greetings|good morning|good afternoon|good evening|yo|sup|what's up|whats up)[\s?!.]*$/i,
+//   /^how are you(\s+doing)?[\s?!.]*$/i,
+//   /^(are you|is anyone|is someone|anyone) (there|here|available)[\s?!.]*$/i,
+//   /^(thanks|thank you|thx|ty)[\s?!.]*$/i,
+//   /^(ok|okay|cool|great|awesome|perfect|nice|got it|i see|understood)[\s?!.]*$/i,
+//   /^(yes|no|yeah|yep|nope|sure)[\s?!.]*$/i,
+//   /^[\s?!.]+$/,
+//   /^test$/i,
+//   /\b(is the chat working|did you get my (message|msg)|are you (there|here|receiving)|can you see (this|my message))/i,
+//   /\b(is anyone (there|here|available|reading)|is this working|hello\?+ anyone)/i,
+//   /\b(affiliate|partnership|resell|wholesale|bulk order|business opportunity|work with you|collaborate|become (a|an) (partner|reseller|affiliate))/i,
+//   /\b(how do i (start|become)|interested in (selling|reselling|partnering))/i,
+//   /^(how do i know what|which one should i|what should i|help me choose)[\s\w]{0,30}$/i,
+// ];
+
+//
+// messages.forEach(msg => {
+//   const content = msg.content || '';
+//   const lower = content.toLowerCase().trim();
+
+//   if (excludePatterns.some(pattern => pattern.test(lower))) {
+//     return;
+//   }
+
+//   const spamIndicators = [
+//     'shopify store', 'conversion rate', 'funnel flow', 'store optimization',
+//     'i help store owners', 'i noticed your store', 'structural gaps',
+//     'would you like a breakdown', 'measurable lifts', 'revenue growth',
+//     'ecommerce consultant', 'cro expert', 'conversion triggers'
+//   ];
+
+//   if (spamIndicators.some(indicator => lower.includes(indicator))) {
+//     return;
+//   }
+
+//   const words = content.split(/\s+/);
+//   const shortWords = words.filter(w => w.length >= 3);
+//   if (shortWords.length >= 5) {
+//     const garbledWords = shortWords.filter(w => 
+//       !/[aeiou]/i.test(w) && 
+//       w.length > 3 && 
+//       !/^(www|http|https|pls|thx|plz|msg|bac|ghk|bpc|coa|mlb|nfl|nba)$/i.test(w)
+//     );
+    
+//     const garbledRatio = garbledWords.length / shortWords.length;
+//     if (garbledRatio > 0.3) {
+//       return;
+//     }
+//   }
+
+//   if (content.trim().length < 10) {
+//     return;
+//   }
+
+//   const isQuestion = content.includes('?') || 
+//     /^(can |could |how |what |where |when |why |is |are |do |does |will |would |who |which |have |may |might )/i.test(content.trim());
+
+//   const isInquiry = 
+//     /\b(late|delayed|still waiting|hasn't arrived|havent received|not received|never arrived|where is|when will)\b/i.test(lower) ||
+//     /\b(order|package|shipment).{0,20}(not|never|still|hasn't|haven't).{0,20}(arrived|received|here|come)/i.test(lower) ||
+//     /\b(need|want|waiting for|expecting).{0,30}(order|package|shipment|delivery)/i.test(lower) ||
+//     /\b(track|tracking|status).{0,20}(order|package|shipment)/i.test(lower) ||
+//     /\b(come|visit|go|stop by).{0,30}(to|at|your|the).{0,20}(address|location|store|shop|place)/i.test(lower) ||
+//     /\b(buy|purchase|get).{0,20}(at|from|in).{0,20}(your|the).{0,20}(address|location|store|shop|place)/i.test(lower) ||
+//     /\b(physical|in person|directly).{0,30}(buy|purchase|get|pick|collect)/i.test(lower) ||
+//     /\b(pick.?up|pickup|collection|collect).{0,30}(these|this|it|physically|in person|the|my|order)/i.test(lower) ||
+//     /\b(can i|able to|possible to).{0,30}(pick.?up|pickup|collect)/i.test(lower) ||
+//     /\b(can i|could i|may i).{0,20}(pick|get|buy|purchase|order|collect).{0,20}(these|this|it|them|that).{0,20}(physically|in person|locally|today|tomorrow)/i.test(lower) ||
+//     /\b(does|do).{0,20}(it|this|they|you).{0,20}come.{0,30}(with|in|as|pre)/i.test(lower) ||
+//     /\b(come).{0,20}(pre.?mixed|as a liquid|with|in liquid)/i.test(lower) ||
+//     /\b(if i|when i).{0,30}(purchase|buy|order).{0,50}(will|do|can)/i.test(lower) ||
+//     /\b(i received|i got|i ordered).{0,50}(but|however|and|though).{0,50}(no|not|missing|confused|question)/i.test(lower) ||
+//     /\b(wondering|help me|can you help|need help).{0,30}(with|figure|understand|how)/i.test(lower) ||
+//     /\b(coa|certificate|lab report|test results|documentation).{0,30}(document|available|provide|include|actual)/i.test(lower) ||
+//     /\b(provide|send|include|give|attach).{0,20}(coa|certificate|lab report|test results|documentation)/i.test(lower) ||
+//     /\b(third party|independent).{0,20}(test|lab|verification|certified)/i.test(lower) ||
+//     /\b(purity|quality|authenticity|verified).{0,20}(report|test|document)/i.test(lower) ||
+//     /\b(dosing|dose|dosage|how to).{0,30}(information|work|use|take|inject|administer)/i.test(lower) ||
+//     /\b(able to give|provide|send).{0,20}(dosing|dose|dosage|instructions|usage)/i.test(lower) ||
+//     /\b(how much|how many|how often).{0,30}(take|inject|use|dose|administer|water|bac|injection)/i.test(lower) ||
+//     /\b(reconstitute|reconstitution|mixing|preparation).{0,20}(instructions|guide|how)/i.test(lower) ||
+//     /\b(instructions|usage|protocol).{0,20}(for|on|about).{0,20}(product|use|taking)/i.test(lower) ||
+//     /\b(how long|how many).{0,30}(vial|bottle|supply|container).{0,30}(last|contain|doses|injections)/i.test(lower) ||
+//     /\b(vial|bottle).{0,30}(last|duration|good for).{0,30}(week|month|day|injection)/i.test(lower) ||
+//     /\b(one vial|per vial|each vial).{0,30}(last|give|provide|contain)/i.test(lower) ||
+//     /\b(how many).{0,30}(doses|injections|servings|uses).{0,30}(per|in|from).{0,30}(vial|bottle)/i.test(lower) ||
+//     /\b(receive|get|include|comes with).{0,30}(free|bac|water|needle|syringe|injection)/i.test(lower) ||
+//     /\b(free).{0,20}(bac|water|needle|syringe)/i.test(lower);
+
+//   if (!isQuestion && !isInquiry) {
+//     return;
+//   }
+
+//   const detectedTopics = [];
+//   for (const [topic, keywords] of Object.entries(topicKeywords)) {
+//     if (keywords.some(kw => lower.includes(kw))) {
+//       detectedTopics.push(topic);
+//       topicCounts[topic] = (topicCounts[topic] || 0) + 1;
+//     }
+//   }
+
+//   const hasBusinessTopic = detectedTopics.length > 0;
+//   const isVeryShortGreeting = content.trim().length < 20 && /^(hi|hey|hello|how are you)[\s?!.]*$/i.test(lower);
+  
+//   if (!hasBusinessTopic && isVeryShortGreeting) {
+//     return;
+//   }
+
+//   let detectedIssue = null;
+//   for (const [issue, keywords] of Object.entries(issueKeywords)) {
+//     if (keywords.some(kw => lower.includes(kw))) {
+//       detectedIssue = issue;
+//       issueCounts[issue] = (issueCounts[issue] || 0) + 1;
+//       break;
+//     }
+//   }
+
+//   const negativeWords = ['angry', 'frustrated', 'upset', 'terrible', 'horrible', 'worst', 'unacceptable', 'disappointed'];
+//   const positiveWords = ['thank', 'thanks', 'great', 'awesome', 'perfect', 'helpful', 'appreciate'];
+  
+//   const negCount = negativeWords.filter(w => lower.includes(w)).length;
+//   const posCount = positiveWords.filter(w => lower.includes(w)).length;
+
+//   let sentiment = 'neutral';
+//   if (negCount >= 2) sentiment = 'very_negative';
+//   else if (negCount >= 1) sentiment = 'negative';
+//   else if (posCount >= 2) sentiment = 'very_positive';
+//   else if (posCount >= 1) sentiment = 'positive';
+
+//   sentimentCounts[sentiment]++;
+
+//   const normalizedQuestion = normalizeQuestion(content);
+
+//   if (normalizedQuestion === 'general question' || normalizedQuestion.length < 5) {
+//     return;
+//   }
+
+//   questions.push({
+//     original: content,
+//     normalized: normalizedQuestion,
+//     topics: detectedTopics,
+//     issue: detectedIssue,
+//     sentiment: sentiment,
+//     date: msg.sent_at,
+//     conversationId: msg.conversation_id,
+//     customerName: msg.customer_name || 'Guest',
+//   });
+// });
+
+//   // ✅ PRINT DEBUG SUMMARY
+//   console.log('\n📊 ============ ANALYTICS DEBUG SUMMARY ============');
+//   console.log(`Total messages processed: ${totalMessages}`);
+//   console.log(`Filtered by exclude patterns: ${filteredByExclude}`);
+//   console.log(`Filtered by length < 10: ${filteredByLength}`);
+//   console.log(`Not question or inquiry: ${notQuestionOrInquiry}`);
+//   console.log(`No business topic (generic greeting): ${noBusinessTopic}`);
+//   console.log(`Normalized too short: ${normalizedTooShort}`);
+//   console.log(`Final questions kept: ${questions.length}`);
+//   console.log('\n🏪 PICKUP Questions:');
+//   console.log(`  Detected: ${pickupDetected}`);
+//   console.log(`  Kept: ${pickupKept}`);
+//   console.log(`  Lost: ${pickupDetected - pickupKept}`);
+//   console.log('\n💊 DOSING Questions:');
+//   console.log(`  Detected: ${dosingDetected}`);
+//   console.log(`  Kept: ${dosingKept}`);
+//   console.log(`  Lost: ${dosingDetected - dosingKept}`);
+//   console.log('================================================\n');
+
+//   // Group similar questions
+//   const questionGroups = {};
+//   questions.forEach(q => {
+//     const key = q.normalized;
+//     if (!questionGroups[key]) {
+//       questionGroups[key] = {
+//         question: q.normalized,
+//         examples: [],
+//         count: 0,
+//         topics: {},
+//         issues: {},
+//         sentiment: { very_negative: 0, negative: 0, neutral: 0, positive: 0, very_positive: 0 },
+//       };
+//     }
+    
+//     questionGroups[key].count++;
+//     questionGroups[key].sentiment[q.sentiment]++;
+    
+//     if (questionGroups[key].examples.length < 10) {
+//       questionGroups[key].examples.push(q.original);
+//     }
+
+//     q.topics.forEach(topic => {
+//       questionGroups[key].topics[topic] = (questionGroups[key].topics[topic] || 0) + 1;
+//     });
+
+//     if (q.issue) {
+//       questionGroups[key].issues[q.issue] = (questionGroups[key].issues[q.issue] || 0) + 1;
+//     }
+//   });
+
+//   const topQuestions = Object.values(questionGroups)
+//     .sort((a, b) => b.count - a.count)
+//     .map(q => ({
+//       question: q.question,
+//       count: q.count,
+//       examples: q.examples,
+//       primaryTopic: Object.keys(q.topics).sort((a, b) => q.topics[b] - q.topics[a])[0] || 'general',
+//       primaryIssue: Object.keys(q.issues).sort((a, b) => q.issues[b] - q.issues[a])[0] || null,
+//       sentiment: getMostCommonSentiment(q.sentiment),
+//     }));
+
+//   const topTopics = Object.entries(topicCounts)
+//     .sort((a, b) => b[1] - a[1])
+//     .map(([topic, count]) => ({ topic, count }));
+
+//   const topIssues = Object.entries(issueCounts)
+//     .sort((a, b) => b[1] - a[1])
+//     .map(([issue, count]) => ({ issue, count }));
+
+//   return {
+//     questions,
+//     topQuestions,
+//     topTopics,
+//     topIssues,
+//     sentimentBreakdown: sentimentCounts,
+//   };
+// }
+// /**
+//  * Normalize a question to group similar questions together - ENHANCED VERSION
+//  */
+// function normalizeQuestion(question) {
+//   let normalized = question.toLowerCase().trim();
+
+//   // ✅ PRESERVE important phrases BEFORE general cleanup
+//   const preservedPhrases = {
+//     // Pickup/location phrases
+//     'pick up': '__PICKUP__',
+//     'pickup': '__PICKUP__',
+//     'pick-up': '__PICKUP__',
+//     'local pickup': '__LOCALPICKUP__',
+//     'store pickup': '__STOREPICKUP__',
+//     'come to': '__COMETO__',
+//     'come directly': '__COMEDIRECTLY__',
+//     'come buy': '__COMEBUY__',
+//     'come by': '__COMEBY__',
+//     'come get': '__COMEGET__',
+//     'your address': '__YOURADDRESS__',
+//     'your location': '__YOURLOCATION__',
+//     'your store': '__YOURSTORE__',
+//     'your shop': '__YOURSHOP__',
+//     'at your': '__ATYOUR__',
+//     'in person': '__INPERSON__',
+//     'physical location': '__PHYSICALLOCATION__',
+//     'physical store': '__PHYSICALSTORE__',
+//     'store location': '__STORELOCATION__',
+//     // Late delivery phrases
+//     'still waiting': '__STILLWAITING__',
+//     'not arrived': '__NOTARRIVED__',
+//     'hasn\'t arrived': '__NOTARRIVED__',
+//     'haven\'t received': '__NOTRECEIVED__',
+//     'not received': '__NOTRECEIVED__',
+//     'never arrived': '__NEVERARRIVED__',
+//     'taking too long': '__TOOLONG__',
+//     // COA/documentation phrases
+//     'coa document': '__COADOCUMENT__',
+//     'actual coa': '__ACTUALCOA__',
+//     'certificate of analysis': '__COA__',
+//     'lab report': '__LABREPORT__',
+//     'test results': '__TESTRESULTS__',
+//     'third party': '__THIRDPARTY__',
+//     'quality report': '__QUALITYREPORT__',
+//     // Dosing/usage phrases
+//     'dosing information': '__DOSINGINFO__',
+//     'dosing work': '__DOSINGWORK__',
+//     'how to use': '__HOWTOUSE__',
+//     'how to take': '__HOWTOTAKE__',
+//     'how much to': '__HOWMUCHTO__',
+//     'how many': '__HOWMANY__',
+//     'how often': '__HOWOFTEN__',
+//     'able to give': '__ABLETOGIVE__',
+//     'reconstitution': '__RECONSTITUTION__',
+//     'reconstitute': '__RECONSTITUTE__',
+//     // Vial duration phrases
+//     'how long': '__HOWLONG__',
+//     'vial last': '__VIALLAST__',
+//     'one vial': '__ONEVIAL__',
+//     'per vial': '__PERVIAL__',
+//     'each vial': '__EACHVIAL__',
+//     'bottle last': '__BOTTLELAST__',
+//     'supply last': '__SUPPLYLAST__',
+//     'per week': '__PERWEEK__',
+//     'per day': '__PERDAY__',
+//     'per month': '__PERMONTH__',
+//     'how many doses': '__HOWMANYDOSES__',
+//     'how many injections': '__HOWMANYINJECTIONS__',
+//     'one injection': '__ONEINJECTION__',
+//     'doses per': '__DOSESPER__',
+//     'injections per': '__INJECTIONSPER__',
+//   };
+
+//   Object.entries(preservedPhrases).forEach(([phrase, placeholder]) => {
+//     const regex = new RegExp(phrase, 'gi');
+//     normalized = normalized.replace(regex, placeholder);
+//   });
+
+//   // Remove all numbers (order numbers, amounts, etc.)
+//   normalized = normalized.replace(/\d+/g, '');
+
+//   // Remove email addresses
+//   normalized = normalized.replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, '');
+
+//   // Remove dates
+//   normalized = normalized.replace(/\d{1,2}\/\d{1,2}\/\d{2,4}/g, '');
+
+//   // Remove URLs
+//   normalized = normalized.replace(/https?:\/\/[^\s]+/gi, '');
+
+//   // Remove specific product names and colors
+//   normalized = normalized.replace(/(blue|red|black|white|green|yellow|purple|pink|orange|brown|gray|grey)\s+/gi, '');
+
+//   // Normalize question starters
+//   normalized = normalized
+//     .replace(/^(hey|hi|hello|greetings|good morning|good afternoon|good evening|yo)\s*/gi, '')
+//     .replace(/\s+(there|guys?|everyone|team)\s*/gi, ' ')
+//     .replace(/where is my|where's my|wheres my|where are my/gi, 'where is my')
+//     .replace(/when will|when's|whens|when are|when can/gi, 'when will')
+//     .replace(/how do i|how can i|how to|how would i|how should i/gi, 'how do i')
+//     .replace(/what is|what's|whats|what are/gi, 'what is')
+//     .replace(/can i|could i|may i/gi, 'can i')
+//     .replace(/do you|does your|do your/gi, 'do you')
+//     .replace(/is there|are there/gi, 'is there')
+//     .replace(/don't|dont|do not/gi, 'do not')
+//     .replace(/can't|cant|cannot/gi, 'cannot')
+//     .replace(/won't|wont|will not/gi, 'will not')
+//     .replace(/i'm|im/gi, 'i am')
+//     .replace(/you're|youre/gi, 'you are');
+
+//   // Remove common filler words
+//   normalized = normalized.replace(/\b(please|kindly|just|really|actually|basically|literally|honestly|sorry|um|uh|like|you know)\b/gi, '');
+
+//   // Remove extra punctuation
+//   normalized = normalized.replace(/[?!.,:;]+/g, ' ');
+
+//   // Remove extra whitespace
+//   normalized = normalized.replace(/\s+/g, ' ').trim();
+
+//   // ✅ RESTORE preserved phrases
+//   Object.entries(preservedPhrases).forEach(([phrase, placeholder]) => {
+//     normalized = normalized.replace(new RegExp(placeholder, 'gi'), phrase);
+//   });
+
+//   // If the question is too short or empty after normalization, return a generic placeholder
+//   if (normalized.length < 5) {
+//     return 'general question';
+//   }
+
+//   return normalized;
+// }
+
+// /**
+//  * Get the most common sentiment from sentiment counts
+//  */
+// function getMostCommonSentiment(sentimentCounts) {
+//   return Object.entries(sentimentCounts)
+//     .sort((a, b) => b[1] - a[1])[0][0];
+// }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // // ============ STATS ENDPOINTS ============
 
 // app.get('/api/stats/dashboard', authenticateToken, async (req, res) => {
@@ -1887,9 +3609,6 @@
 // startServer();
 
 // module.exports = { app, server };
-
-
-
 
 
 
@@ -3118,11 +4837,440 @@ app.post('/api/widget/presence', async (req, res) => {
 
 // ============ AI SUGGESTIONS ENDPOINT ============
 
+// app.post('/api/ai/suggestions', authenticateToken, async (req, res) => {
+//   try {
+//     const {
+//       clientMessage,
+//       chatHistory,
+//       conversationId,
+//       customerName,
+//       customerEmail,
+//       storeName,
+//       storeIdentifier,
+//       analysis,
+//       adminNote,
+//       messageEdited
+//     } = req.body;
+
+//     if (!clientMessage) {
+//       return res.status(400).json({ error: 'clientMessage is required' });
+//     }
+
+//     console.log(`✦ [AI] Request — edited: ${!!messageEdited}, note: "${adminNote || ''}", text: "${clientMessage.substring(0, 80)}..."`);
+
+//     const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+
+//     // If no API key configured, return context-aware fallback suggestions
+//     if (!ANTHROPIC_API_KEY) {
+//       console.log('✦ [AI] No ANTHROPIC_API_KEY set, using smart fallback suggestions');
+//       const suggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
+//       return res.json({ suggestions });
+//     }
+
+//     // ── Build a highly contextual system prompt ──
+//     const analysisBlock = buildAnalysisBlock(analysis);
+
+//     const systemPrompt = `You are an expert customer support reply assistant for an e-commerce store. Your job is to suggest exactly 3 reply options that the support agent can immediately send to the customer.
+
+// STORE: ${storeName || 'N/A'}
+// CUSTOMER: ${customerName || 'Guest'}${customerEmail ? ` (${customerEmail})` : ''}
+
+// ${analysisBlock}
+
+// RULES — follow these strictly:
+// 1. Write as the human support agent, NEVER as an AI or bot.
+// 2. Each reply must be 1-3 sentences. Be specific and actionable, not vague.
+// 3. Base every reply on what the customer actually said and the conversation history. Reference specific details they mentioned (order numbers, product names, issues described).
+// 4. Vary the 3 suggestions strategically:
+//    - Suggestion 1: The most direct, helpful answer to what the customer just asked.
+//    - Suggestion 2: A slightly different angle, or addresses a secondary concern.
+//    - Suggestion 3: If info is missing, ask a specific follow-up question. If info is complete, offer an extra step (escalation, follow-up check, additional help).
+// 5. NEVER repeat something the agent already said or already asked for. Read the chat history carefully.
+// 6. Match the customer's energy: if they're upset, acknowledge it with empathy first. If they're casual, be friendly. If they're formal, be professional.
+// 7. If the customer provided an order number, reference it. Do NOT ask for it again.
+// 8. If the customer attached a file/image, acknowledge you've seen it.
+// 9. Do not use emojis unless the customer used them first.
+// 10. Do not make promises about timelines, refund amounts, or outcomes you cannot guarantee.
+// 11. Never say "I understand your frustration" robotically — use natural, varied empathy language.
+
+// Respond ONLY with valid JSON: {"suggestions": ["reply 1", "reply 2", "reply 3"]}`;
+
+//     // Build the user prompt with optional admin edits/notes
+//     let userPrompt = chatHistory
+//       ? `FULL CONVERSATION:\n${chatHistory}\n\nCUSTOMER'S LATEST MESSAGE: ${clientMessage}`
+//       : `CUSTOMER'S MESSAGE: ${clientMessage}`;
+
+//     if (messageEdited) {
+//       userPrompt += `\n\n⚠️ NOTE: The agent EDITED the customer's message above to clarify or add context. Use the edited version as the basis for your reply suggestions.`;
+//     }
+
+//     if (adminNote && adminNote.trim()) {
+//       userPrompt += `\n\n📌 AGENT INSTRUCTIONS: ${adminNote.trim()}\n— The agent wants you to incorporate the above instructions into all 3 suggested replies. Follow them carefully.`;
+//     }
+
+//     // ── Call Anthropic Claude API (uses built-in https, works on all Node versions) ──
+//     const requestBody = JSON.stringify({
+//       model: process.env.AI_MODEL || 'claude-sonnet-4-20250514',
+//       max_tokens: 600,
+//       system: systemPrompt,
+//       messages: [
+//         { role: 'user', content: userPrompt },
+//       ],
+//     });
+
+//     console.log(`✦ [AI] Calling Anthropic API — model: ${process.env.AI_MODEL || 'claude-sonnet-4-20250514'}, key: ${ANTHROPIC_API_KEY.substring(0, 12)}...`);
+
+//     const anthropicData = await new Promise((resolve, reject) => {
+//       const options = {
+//         hostname: 'api.anthropic.com',
+//         path: '/v1/messages',
+//         method: 'POST',
+//         headers: {
+//           'Content-Type': 'application/json',
+//           'x-api-key': ANTHROPIC_API_KEY,
+//           'anthropic-version': '2023-06-01',
+//           'Content-Length': Buffer.byteLength(requestBody),
+//         },
+//       };
+
+//       const apiReq = https.request(options, (apiRes) => {
+//         let body = '';
+//         apiRes.on('data', (chunk) => { body += chunk; });
+//         apiRes.on('end', () => {
+//           console.log(`✦ [AI] Anthropic response status: ${apiRes.statusCode}`);
+//           if (apiRes.statusCode !== 200) {
+//             console.error(`✦ [AI] Anthropic API error ${apiRes.statusCode}:`, body.substring(0, 500));
+//             reject(new Error(`Anthropic API ${apiRes.statusCode}: ${body.substring(0, 200)}`));
+//             return;
+//           }
+//           try {
+//             resolve(JSON.parse(body));
+//           } catch (e) {
+//             console.error('✦ [AI] Failed to parse Anthropic response:', body.substring(0, 500));
+//             reject(new Error('Invalid JSON from Anthropic'));
+//           }
+//         });
+//       });
+
+//       apiReq.on('error', (err) => {
+//         console.error('✦ [AI] HTTPS request failed:', err.message);
+//         reject(err);
+//       });
+
+//       apiReq.setTimeout(15000, () => {
+//         apiReq.destroy();
+//         reject(new Error('Anthropic API timeout (15s)'));
+//       });
+
+//       apiReq.write(requestBody);
+//       apiReq.end();
+//     });
+
+//     const rawContent = anthropicData.content?.[0]?.text || '';
+//     console.log(`✦ [AI] Raw response (first 200 chars): ${rawContent.substring(0, 200)}`);
+
+//     let parsed;
+//     try {
+//       const cleaned = rawContent.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+//       parsed = JSON.parse(cleaned);
+//     } catch (parseErr) {
+//       console.error('✦ [AI] Failed to parse response:', rawContent);
+//       const suggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis);
+//       return res.json({ suggestions, fallback: true });
+//     }
+
+//     const suggestions = Array.isArray(parsed.suggestions)
+//       ? parsed.suggestions.slice(0, 3)
+//       : Array.isArray(parsed)
+//         ? parsed.slice(0, 3)
+//         : generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis);
+
+//     res.json({ suggestions });
+
+//   } catch (error) {
+//     console.error('✦ [AI] Suggestions endpoint error:', error);
+//     const suggestions = generateSmartFallbackSuggestions(
+//       req.body?.clientMessage || '',
+//       req.body?.chatHistory || '',
+//       req.body?.analysis || {}
+//     );
+//     res.json({ suggestions, fallback: true });
+//   }
+// });
+
+// /**
+//  * Build an analysis context block for the AI prompt from the frontend's conversation analysis.
+//  */
+// function buildAnalysisBlock(analysis) {
+//   if (!analysis) return '';
+
+//   const lines = ['CONVERSATION ANALYSIS (use this to inform your replies):'];
+
+//   if (analysis.detectedTopics?.length > 0) {
+//     const topicLabels = {
+//       order_status: 'Order Status / Tracking',
+//       refund_return: 'Refund / Return / Cancellation',
+//       product_issue: 'Product Issue / Damaged / Defective',
+//       payment: 'Payment / Billing',
+//       discount_promo: 'Discount / Promo Code',
+//       product_inquiry: 'Product Inquiry',
+//       shipping: 'Shipping Questions',
+//       account: 'Account Issue',
+//       complaint: 'Complaint / Escalation',
+//       gratitude: 'Customer Expressing Thanks',
+//       greeting: 'Greeting / Opening'
+//     };
+//     const labels = analysis.detectedTopics.map(t => topicLabels[t] || t).join(', ');
+//     lines.push(`- Topics discussed: ${labels}`);
+//   }
+
+//   if (analysis.sentiment) {
+//     const sentimentLabels = {
+//       very_negative: 'Very upset / angry — lead with strong empathy and urgency',
+//       negative: 'Frustrated / unhappy — acknowledge their concern with empathy',
+//       neutral: 'Neutral tone',
+//       positive: 'Positive / friendly',
+//       very_positive: 'Very happy / grateful — match their positive energy'
+//     };
+//     lines.push(`- Customer sentiment: ${sentimentLabels[analysis.sentiment] || analysis.sentiment}`);
+//   }
+
+//   if (analysis.isUrgent) lines.push('- ⚠️ Customer marked this as URGENT — respond with priority');
+//   if (analysis.isRepeat) lines.push('- ⚠️ Customer is REPEATING themselves or following up — they feel unheard. Acknowledge this directly and move forward with action.');
+//   if (analysis.isQuestion) lines.push('- Customer is asking a direct question — answer it specifically');
+//   if (analysis.hasOrderNumber) lines.push('- Customer already provided an order number — DO NOT ask for it again, reference it');
+//   if (analysis.hasEmail) lines.push('- Customer already shared their email — DO NOT ask for it again');
+//   if (analysis.hasAttachment) lines.push('- Customer sent a file/image — acknowledge you have reviewed it');
+//   if (analysis.agentAskedForOrder) lines.push('- Agent already asked for order number in a previous message — do NOT ask again');
+//   if (analysis.agentAlreadyApologized) lines.push('- Agent already apologized — avoid repeating the same apology, focus on action');
+//   if (analysis.agentAskedForEmail) lines.push('- Agent already asked for email — do NOT ask again');
+//   if (analysis.agentAskedForPhoto) lines.push('- Agent already asked for a photo — do NOT ask again');
+//   if (analysis.agentOfferedRefund) lines.push('- Agent already mentioned a refund — build on that, don\'t re-introduce');
+//   if (analysis.agentOfferedReplacement) lines.push('- Agent already offered a replacement — build on that');
+//   if (analysis.isLongConversation) lines.push(`- This is a long conversation (${analysis.turnCount} messages) — the customer may be losing patience. Be efficient and solution-oriented.`);
+//   if (analysis.lastAgentText) lines.push(`- Agent's last message was: "${analysis.lastAgentText.substring(0, 150)}"`);
+
+//   return lines.length > 1 ? lines.join('\n') : '';
+// }
+
+// /**
+//  * Generate smart context-aware fallback suggestions when the AI API is unavailable.
+//  * Uses the conversation analysis from the frontend to produce relevant replies.
+//  */
+// function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis) {
+//   const lower = (customerMsg || '').toLowerCase();
+//   const topics = analysis?.detectedTopics || [];
+//   const sentiment = analysis?.sentiment || 'neutral';
+//   const isRepeat = analysis?.isRepeat || false;
+//   const hasOrderNumber = analysis?.hasOrderNumber || false;
+//   const hasAttachment = analysis?.hasAttachment || false;
+//   const agentAskedForOrder = analysis?.agentAskedForOrder || false;
+//   const agentAlreadyApologized = analysis?.agentAlreadyApologized || false;
+//   const isUrgent = analysis?.isUrgent || false;
+//   const isLongConversation = analysis?.isLongConversation || false;
+
+//   // ── Empathy prefix based on sentiment ──
+//   let empathyPrefix = '';
+//   if (sentiment === 'very_negative' && !agentAlreadyApologized) {
+//     const options = [
+//       'I completely understand how frustrating this must be.',
+//       'I sincerely apologize for this experience.',
+//       'I can see this has been really frustrating, and I want to make it right.',
+//     ];
+//     empathyPrefix = options[Math.floor(Math.random() * options.length)] + ' ';
+//   } else if (sentiment === 'negative' && !agentAlreadyApologized) {
+//     const options = [
+//       'I\'m sorry about that.',
+//       'I understand your concern.',
+//       'I appreciate your patience with this.',
+//     ];
+//     empathyPrefix = options[Math.floor(Math.random() * options.length)] + ' ';
+//   }
+
+//   // ── Repeat/follow-up prefix ──
+//   const repeatPrefix = isRepeat ? 'I apologize for the delay in getting this resolved. ' : '';
+
+//   // ── Urgency suffix ──
+//   const urgencySuffix = isUrgent ? ' I\'m treating this as a priority.' : '';
+
+//   // ── GRATITUDE ──
+//   if (topics.includes('gratitude') && !topics.includes('complaint')) {
+//     return [
+//       'You\'re welcome! Is there anything else I can help you with?',
+//       'Happy to help! Don\'t hesitate to reach out if you need anything else.',
+//       'Glad we could get that sorted for you! Have a great day.'
+//     ];
+//   }
+
+//   // ── GREETING ONLY ──
+//   if (topics.length === 1 && topics.includes('greeting')) {
+//     return [
+//       'Hello! How can I help you today?',
+//       'Hi there! Welcome — what can I assist you with?',
+//       'Hello! Thanks for reaching out. How can I help?'
+//     ];
+//   }
+
+//   // ── PRODUCT ISSUE ──
+//   if (topics.includes('product_issue')) {
+//     if (hasOrderNumber && hasAttachment) {
+//       return [
+//         `${empathyPrefix}${repeatPrefix}Thank you for sharing the photo and your order details. I've reviewed the issue and I'm looking into the best resolution for you right away.${urgencySuffix}`,
+//         `${empathyPrefix}I can see the issue clearly from the photo you sent. Let me check what options we have — would you prefer a replacement or a refund?`,
+//         `${empathyPrefix}${repeatPrefix}I've noted the issue with your order. I'm escalating this now to get it resolved as quickly as possible.${urgencySuffix}`
+//       ];
+//     }
+//     if (hasOrderNumber && !hasAttachment && !analysis?.agentAskedForPhoto) {
+//       return [
+//         `${empathyPrefix}Thank you for your order details. Could you send a photo of the issue? That will help me process this faster.`,
+//         `${empathyPrefix}I've located your order. To help resolve this quickly, could you share a picture of the damage or defect?`,
+//         `${empathyPrefix}${repeatPrefix}I want to get this sorted for you. A quick photo of the issue would help me determine the best next step.${urgencySuffix}`
+//       ];
+//     }
+//     if (!hasOrderNumber && !agentAskedForOrder) {
+//       return [
+//         `${empathyPrefix}I'd like to help resolve this. Could you share your order number so I can pull up the details?`,
+//         `${empathyPrefix}That's not the experience we want you to have. Could you provide your order number and a brief description of the issue?`,
+//         `${empathyPrefix}${repeatPrefix}Let me look into this for you. Can you share your order number and, if possible, a photo of the problem?${urgencySuffix}`
+//       ];
+//     }
+//     return [
+//       `${empathyPrefix}I'm looking into this for you now. I'll have an update shortly.${urgencySuffix}`,
+//       `${empathyPrefix}Thank you for your patience. I'm checking the available options to resolve this.`,
+//       `${empathyPrefix}${repeatPrefix}I want to make sure we get this right. Let me review your case and get back to you with a solution.${urgencySuffix}`
+//     ];
+//   }
+
+//   // ── ORDER STATUS / SHIPPING ──
+//   if (topics.includes('order_status') || topics.includes('shipping')) {
+//     if (hasOrderNumber) {
+//       return [
+//         `${repeatPrefix}Thank you for sharing your order number. Let me check the current status and tracking information for you now.${urgencySuffix}`,
+//         `${repeatPrefix}I'm pulling up your order details right now. I'll have the latest shipping update for you shortly.${urgencySuffix}`,
+//         `${repeatPrefix}I can see your order in our system. Let me check with our fulfillment team for the most up-to-date status.${urgencySuffix}`
+//       ];
+//     }
+//     if (!agentAskedForOrder) {
+//       return [
+//         `${empathyPrefix}I'd be happy to check on that for you. Could you share your order number?`,
+//         'Of course! To look up your order status, I\'ll need your order number or the email address you used at checkout.',
+//         `${empathyPrefix}${repeatPrefix}Let me find your order. Could you provide the order number? It usually starts with # and was included in your confirmation email.${urgencySuffix}`
+//       ];
+//     }
+//     return [
+//       `${repeatPrefix}I'm currently looking into your order. I'll update you as soon as I have the tracking details.${urgencySuffix}`,
+//       'Thank you for your patience. I\'m checking with our shipping team to get you the latest update.',
+//       `${repeatPrefix}I want to make sure I give you accurate information. Give me just a moment to verify the shipping status.${urgencySuffix}`
+//     ];
+//   }
+
+//   // ── REFUND / RETURN ──
+//   if (topics.includes('refund_return')) {
+//     if (hasOrderNumber) {
+//       return [
+//         `${empathyPrefix}${repeatPrefix}I've located your order. Let me review the details and check what options are available for you.${urgencySuffix}`,
+//         `${empathyPrefix}Thank you for providing your order details. I'm checking the return/refund eligibility now and will let you know the next steps.`,
+//         `${empathyPrefix}I have your order pulled up. Could you let me know the reason for the return? That helps me process it faster.`
+//       ];
+//     }
+//     if (!agentAskedForOrder) {
+//       return [
+//         `${empathyPrefix}I'd be happy to help with that. Could you share your order number so I can review the return options?`,
+//         `${empathyPrefix}To get started on the return process, I'll need your order number. You can find it in your confirmation email.`,
+//         `${empathyPrefix}${repeatPrefix}I want to help resolve this. Could you provide your order number and the reason for the return?${urgencySuffix}`
+//       ];
+//     }
+//     return [
+//       `${empathyPrefix}I'm reviewing your return request now. I'll update you with the available options shortly.${urgencySuffix}`,
+//       `${empathyPrefix}Thank you for your patience. I'm checking the return policy details for your specific order.`,
+//       `${empathyPrefix}${repeatPrefix}I'm working on this for you. Would you prefer a refund to your original payment method or a store credit?${urgencySuffix}`
+//     ];
+//   }
+
+//   // ── PAYMENT / BILLING ──
+//   if (topics.includes('payment')) {
+//     if (hasOrderNumber) {
+//       return [
+//         `${empathyPrefix}I can see your order. Let me review the payment details and get back to you.${urgencySuffix}`,
+//         `${empathyPrefix}Thank you for the details. I'm checking the billing records for your order now.`,
+//         `${empathyPrefix}${repeatPrefix}I'm looking into the payment issue on your order. I'll have an update for you shortly.${urgencySuffix}`
+//       ];
+//     }
+//     return [
+//       `${empathyPrefix}I'd like to help sort out this billing issue. Could you share your order number or the email associated with the charge?`,
+//       `${empathyPrefix}To investigate the payment concern, could you provide the order number and the approximate date and amount of the charge?`,
+//       `${empathyPrefix}${repeatPrefix}I want to get to the bottom of this. Could you share any details about the charge — the date, amount, and last four digits of the card used?${urgencySuffix}`
+//     ];
+//   }
+
+//   // ── DISCOUNT / PROMO ──
+//   if (topics.includes('discount_promo')) {
+//     return [
+//       'Let me check on that promo code for you. Could you share the code you\'re trying to use and the items in your cart?',
+//       'I\'d be happy to help with that! Could you tell me which promotion you\'re referring to, or share the code?',
+//       `${empathyPrefix}Let me look into the available promotions for you. What product or category are you interested in?`
+//     ];
+//   }
+
+//   // ── PRODUCT INQUIRY ──
+//   if (topics.includes('product_inquiry')) {
+//     return [
+//       'Great question! Let me check that information for you. Which specific product are you asking about?',
+//       'I\'d be happy to help with product details. Could you share the product name or a link so I can look it up?',
+//       'Let me find the most accurate information for you. Can you tell me more about what you\'re looking for?'
+//     ];
+//   }
+
+//   // ── ACCOUNT ISSUES ──
+//   if (topics.includes('account')) {
+//     return [
+//       `${empathyPrefix}I can help with your account. For security, could you confirm the email address associated with your account?`,
+//       `${empathyPrefix}Let me look into the account issue. Could you describe what's happening when you try to log in?`,
+//       `${empathyPrefix}${repeatPrefix}I'll get this sorted for you. Could you share the email address on your account so I can investigate?${urgencySuffix}`
+//     ];
+//   }
+
+//   // ── COMPLAINT / ESCALATION ──
+//   if (topics.includes('complaint')) {
+//     if (isLongConversation) {
+//       return [
+//         `${empathyPrefix}${repeatPrefix}I understand this has been a long process and I want to get it resolved for you now. Let me escalate this to ensure it's handled promptly.${urgencySuffix}`,
+//         `${empathyPrefix}I can see this hasn't been resolved to your satisfaction. Let me personally make sure we get this taken care of right away.`,
+//         `${empathyPrefix}You've been more than patient. I'm going to escalate this and ensure you get a resolution today.${urgencySuffix}`
+//       ];
+//     }
+//     return [
+//       `${empathyPrefix}${repeatPrefix}I take your feedback seriously and I want to resolve this for you. Could you share the specific details so I can take action?${urgencySuffix}`,
+//       `${empathyPrefix}I hear you, and I want to make this right. Let me look into this and find the best solution.`,
+//       `${empathyPrefix}Thank you for letting us know. I'm going to look into this personally and follow up with you.${urgencySuffix}`
+//     ];
+//   }
+
+//   // ── CUSTOMER ASKED A QUESTION ──
+//   if (analysis?.isQuestion) {
+//     return [
+//       `${empathyPrefix}${repeatPrefix}That's a great question. Let me find the answer for you — one moment.${urgencySuffix}`,
+//       `${empathyPrefix}I'd be happy to help with that. Let me check and get back to you with the details.`,
+//       `${empathyPrefix}${repeatPrefix}Let me look into that for you. Could you provide any additional details that might help me find the answer faster?${urgencySuffix}`
+//     ];
+//   }
+
+//   // ── GENERIC FALLBACK ──
+//   return [
+//     `${empathyPrefix}${repeatPrefix}Thank you for your message. Let me look into this and get back to you shortly.${urgencySuffix}`,
+//     `${empathyPrefix}I appreciate you reaching out. Could you provide a bit more detail so I can assist you better?`,
+//     `${empathyPrefix}${repeatPrefix}I want to make sure I help you with the right information. Could you tell me a bit more about what you need?${urgencySuffix}`
+//   ];
+// }
+
+
+
 app.post('/api/ai/suggestions', authenticateToken, async (req, res) => {
   try {
     const {
       clientMessage,
       chatHistory,
+      recentContext,
       conversationId,
       customerName,
       customerEmail,
@@ -3137,115 +5285,38 @@ app.post('/api/ai/suggestions', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'clientMessage is required' });
     }
 
-    console.log(`✦ [AI] Request — edited: ${!!messageEdited}, note: "${adminNote || ''}", text: "${clientMessage.substring(0, 80)}..."`);
+    const contextQuality = recentContext?.contextQuality || 'minimal';
+    const messageRichness = recentContext?.messageRichness || 'brief';
+    
+    console.log(`✦ [AI] Request — context: ${contextQuality}, richness: ${messageRichness}, edited: ${!!messageEdited}, note: "${adminNote || ''}", text: "${clientMessage.substring(0, 80)}..."`);
 
     const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
-    // If no API key configured, return context-aware fallback suggestions
     if (!ANTHROPIC_API_KEY) {
       console.log('✦ [AI] No ANTHROPIC_API_KEY set, using smart fallback suggestions');
       const suggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
       return res.json({ suggestions });
     }
 
-    // ── Build a highly contextual system prompt ──
-    const analysisBlock = buildAnalysisBlock(analysis);
-
-    const systemPrompt = `You are an expert customer support reply assistant for an e-commerce store. Your job is to suggest exactly 3 reply options that the support agent can immediately send to the customer.
-
-STORE: ${storeName || 'N/A'}
-CUSTOMER: ${customerName || 'Guest'}${customerEmail ? ` (${customerEmail})` : ''}
-
-${analysisBlock}
-
-RULES — follow these strictly:
-1. Write as the human support agent, NEVER as an AI or bot.
-2. Each reply must be 1-3 sentences. Be specific and actionable, not vague.
-3. Base every reply on what the customer actually said and the conversation history. Reference specific details they mentioned (order numbers, product names, issues described).
-4. Vary the 3 suggestions strategically:
-   - Suggestion 1: The most direct, helpful answer to what the customer just asked.
-   - Suggestion 2: A slightly different angle, or addresses a secondary concern.
-   - Suggestion 3: If info is missing, ask a specific follow-up question. If info is complete, offer an extra step (escalation, follow-up check, additional help).
-5. NEVER repeat something the agent already said or already asked for. Read the chat history carefully.
-6. Match the customer's energy: if they're upset, acknowledge it with empathy first. If they're casual, be friendly. If they're formal, be professional.
-7. If the customer provided an order number, reference it. Do NOT ask for it again.
-8. If the customer attached a file/image, acknowledge you've seen it.
-9. Do not use emojis unless the customer used them first.
-10. Do not make promises about timelines, refund amounts, or outcomes you cannot guarantee.
-11. Never say "I understand your frustration" robotically — use natural, varied empathy language.
-
-Respond ONLY with valid JSON: {"suggestions": ["reply 1", "reply 2", "reply 3"]}`;
-
-    // Build the user prompt with optional admin edits/notes
-    let userPrompt = chatHistory
-      ? `FULL CONVERSATION:\n${chatHistory}\n\nCUSTOMER'S LATEST MESSAGE: ${clientMessage}`
-      : `CUSTOMER'S MESSAGE: ${clientMessage}`;
-
-    if (messageEdited) {
-      userPrompt += `\n\n⚠️ NOTE: The agent EDITED the customer's message above to clarify or add context. Use the edited version as the basis for your reply suggestions.`;
-    }
-
-    if (adminNote && adminNote.trim()) {
-      userPrompt += `\n\n📌 AGENT INSTRUCTIONS: ${adminNote.trim()}\n— The agent wants you to incorporate the above instructions into all 3 suggested replies. Follow them carefully.`;
-    }
-
-    // ── Call Anthropic Claude API (uses built-in https, works on all Node versions) ──
+    const conversationState = analyzeConversationState(chatHistory, clientMessage, analysis);
+    const analysisBlock = buildEnhancedAnalysisBlock(analysis, conversationState, recentContext);
+    const customerContext = buildCustomerContext(customerName, customerEmail, conversationState);
+    const policyBlock = buildPolicyBlock();
+    const systemPrompt = buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness);
+    const userPrompt = buildUserPrompt(chatHistory, clientMessage, messageEdited, adminNote, conversationState, recentContext);
     const requestBody = JSON.stringify({
       model: process.env.AI_MODEL || 'claude-sonnet-4-20250514',
-      max_tokens: 600,
+      max_tokens: 800,
+      temperature: 0.7, // Balanced creativity and consistency
       system: systemPrompt,
       messages: [
         { role: 'user', content: userPrompt },
       ],
     });
 
-    console.log(`✦ [AI] Calling Anthropic API — model: ${process.env.AI_MODEL || 'claude-sonnet-4-20250514'}, key: ${ANTHROPIC_API_KEY.substring(0, 12)}...`);
+    console.log(`✦ [AI] Calling Anthropic API — model: ${process.env.AI_MODEL || 'claude-sonnet-4-20250514'}`);
 
-    const anthropicData = await new Promise((resolve, reject) => {
-      const options = {
-        hostname: 'api.anthropic.com',
-        path: '/v1/messages',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': ANTHROPIC_API_KEY,
-          'anthropic-version': '2023-06-01',
-          'Content-Length': Buffer.byteLength(requestBody),
-        },
-      };
-
-      const apiReq = https.request(options, (apiRes) => {
-        let body = '';
-        apiRes.on('data', (chunk) => { body += chunk; });
-        apiRes.on('end', () => {
-          console.log(`✦ [AI] Anthropic response status: ${apiRes.statusCode}`);
-          if (apiRes.statusCode !== 200) {
-            console.error(`✦ [AI] Anthropic API error ${apiRes.statusCode}:`, body.substring(0, 500));
-            reject(new Error(`Anthropic API ${apiRes.statusCode}: ${body.substring(0, 200)}`));
-            return;
-          }
-          try {
-            resolve(JSON.parse(body));
-          } catch (e) {
-            console.error('✦ [AI] Failed to parse Anthropic response:', body.substring(0, 500));
-            reject(new Error('Invalid JSON from Anthropic'));
-          }
-        });
-      });
-
-      apiReq.on('error', (err) => {
-        console.error('✦ [AI] HTTPS request failed:', err.message);
-        reject(err);
-      });
-
-      apiReq.setTimeout(15000, () => {
-        apiReq.destroy();
-        reject(new Error('Anthropic API timeout (15s)'));
-      });
-
-      apiReq.write(requestBody);
-      apiReq.end();
-    });
+    const anthropicData = await callAnthropicAPI(requestBody, ANTHROPIC_API_KEY);
 
     const rawContent = anthropicData.content?.[0]?.text || '';
     console.log(`✦ [AI] Raw response (first 200 chars): ${rawContent.substring(0, 200)}`);
@@ -3256,15 +5327,21 @@ Respond ONLY with valid JSON: {"suggestions": ["reply 1", "reply 2", "reply 3"]}
       parsed = JSON.parse(cleaned);
     } catch (parseErr) {
       console.error('✦ [AI] Failed to parse response:', rawContent);
-      const suggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis);
+      const suggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
       return res.json({ suggestions, fallback: true });
     }
 
-    const suggestions = Array.isArray(parsed.suggestions)
+    let suggestions = Array.isArray(parsed.suggestions)
       ? parsed.suggestions.slice(0, 3)
       : Array.isArray(parsed)
         ? parsed.slice(0, 3)
-        : generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis);
+        : generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
+
+    suggestions = validateSuggestions(suggestions, conversationState, chatHistory);
+    if (suggestions.length < 3) {
+      const fallbackSuggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
+      suggestions = [...suggestions, ...fallbackSuggestions].slice(0, 3);
+    }
 
     res.json({ suggestions });
 
@@ -3273,21 +5350,242 @@ Respond ONLY with valid JSON: {"suggestions": ["reply 1", "reply 2", "reply 3"]}
     const suggestions = generateSmartFallbackSuggestions(
       req.body?.clientMessage || '',
       req.body?.chatHistory || '',
-      req.body?.analysis || {}
+      req.body?.analysis || {},
+      req.body?.adminNote || ''
     );
     res.json({ suggestions, fallback: true });
   }
 });
 
-/**
- * Build an analysis context block for the AI prompt from the frontend's conversation analysis.
- */
-function buildAnalysisBlock(analysis) {
-  if (!analysis) return '';
+function buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness) {
+  let contextGuidance = '';
+  
+  if (contextQuality === 'minimal') {
+    if (messageRichness === 'very_brief' || messageRichness === 'brief') {
+      contextGuidance = `
+⚠️ LIMITED CONTEXT: Customer's first brief message with no conversation history yet.
+- This is likely a greeting or very general inquiry
+- Your suggestions should be opening responses: greet professionally, ask what they need help with
+- Don't make assumptions - gather information first
+- Keep it friendly and welcoming
+`;
+    } else {
+      contextGuidance = `
+ℹ️ DETAILED FIRST MESSAGE: Customer provided substantial information in their first message.
+- They've given you good context to work with despite no conversation history
+- Focus on addressing their specific concern directly
+- Ask for any missing critical information (order number, photos, etc.)
+- Show you understand their issue and are taking action
+`;
+    }
+  } else if (contextQuality === 'basic') {
+    contextGuidance = `
+ℹ️ BASIC CONTEXT: Early in the conversation (1-2 exchanges).
+- Build on what's been discussed so far
+- Continue gathering information if needed
+- Start moving toward solutions if you have enough details
+- Reference specific things they've mentioned
+`;
+  } else if (contextQuality === 'good') {
+    contextGuidance = `
+✓ GOOD CONTEXT: You have sufficient conversation history (2+ exchanges each side).
+- Base suggestions on the full conversation context
+- Avoid repeating what's already been asked or said
+- Focus on moving toward resolution
+- Be specific and reference prior discussion points
+`;
+  } else if (contextQuality === 'excellent') {
+    contextGuidance = `
+✓ EXCELLENT CONTEXT: Rich conversation history with multiple exchanges.
+- You have deep context - use it to provide highly relevant suggestions
+- The customer may be losing patience - be efficient and solution-oriented
+- Avoid any repetition - you know what's been discussed
+- Focus on concrete next steps and resolution
+`;
+  }
 
-  const lines = ['CONVERSATION ANALYSIS (use this to inform your replies):'];
+  return `You are an expert customer support reply assistant for ${storeName || 'an e-commerce store'}. Your job is to suggest exactly 3 reply options that the support agent can immediately send to the customer.
 
-  if (analysis.detectedTopics?.length > 0) {
+${contextGuidance}
+
+${customerContext}
+
+${analysisBlock}
+
+${policyBlock}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CORE RULES — Follow these strictly:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. **Write as a human support agent**, NEVER as an AI or bot. Use first person ("I'll check", "Let me help").
+
+2. **Each reply must be 1-4 sentences.** Be specific and actionable, not vague or generic.
+
+3. **Base every reply on actual details** from the conversation:
+   - Reference specific order numbers, product names, or issues they mentioned
+   - Never ask for information the customer already provided
+   - Never repeat what the agent already said or asked
+
+4. **Vary the 3 suggestions strategically:**
+   - Suggestion 1: Direct, helpful answer to their main question
+   - Suggestion 2: Different angle or addresses a secondary concern
+   - Suggestion 3: If info is missing, ask a specific follow-up. If info is complete, offer next step (escalation, confirmation, additional help)
+
+5. **Match the customer's emotional state:**
+   - Very upset → Lead with strong empathy, show urgency, take immediate action
+   - Frustrated → Acknowledge concern with empathy, then solution
+   - Neutral → Be professional and efficient
+   - Positive → Match their friendly energy
+   - Grateful → Be warm but brief
+
+6. **Never use these robotic phrases:**
+   - "I understand your frustration" (too generic)
+   - "I apologize for any inconvenience"
+   - "Please be advised"
+   - "Kindly"
+   - "As per our policy"
+   - "I appreciate your patience" (unless they've actually been patient)
+
+7. **Use natural, varied empathy language:**
+   - "I'm so sorry this happened"
+   - "That's not the experience we want for you"
+   - "I can see how frustrating this must be"
+   - "I completely understand"
+
+8. **Don't make promises you can't keep:**
+   - Never promise specific timeframes unless confirmed
+   - Don't promise refund amounts or outcomes
+   - Use phrases like "I'll check" or "Let me review" instead
+
+9. **No emojis** unless the customer used them first.
+
+10. **If customer is repeating themselves or following up:**
+    - Acknowledge they've been waiting: "I apologize for the delay getting this resolved"
+    - Show action: "Let me prioritize this" or "I'm escalating this now"
+    - Don't make them explain again
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EXAMPLES OF EXCELLENT REPLIES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Example 1 - Product Damage:
+Customer: "My order #12345 arrived completely damaged! The box was crushed and the ceramic vase is in pieces."
+Agent should say:
+✓ "I'm so sorry your order arrived damaged. I've pulled up order #12345 and can see the vase set you ordered. Could you send a quick photo of the damage? I'll get a replacement shipped out right away."
+✗ "I understand your frustration. Can you provide your order number?"
+
+Example 2 - Angry Customer:
+Customer: "WHERE IS MY PACKAGE?? I ordered 2 weeks ago and NOTHING! This is ridiculous!"
+Agent should say:
+✓ "I completely understand your frustration — 2 weeks is too long. Let me check the status of your order right now. Could you share your order number? It's in your confirmation email and starts with #."
+✗ "I apologize for any inconvenience. Please provide your order number so I can look into this."
+
+Example 3 - Follow-up (customer already asked):
+Customer: "I'm still waiting for an update on my refund. I asked about this yesterday."
+Agent should say:
+✓ "I apologize for the delay getting this resolved. Let me check the status of your refund right now and get you an answer within the hour."
+✗ "Thank you for your patience. Can you provide your order number?"
+
+Example 4 - Simple Gratitude:
+Customer: "Thanks so much for the refund!"
+Agent should say:
+✓ "You're very welcome! Don't hesitate to reach out if you need anything else."
+✗ "I'm glad I could assist you today. Is there anything else I can help you with regarding your order?"
+
+Example 5 - Multiple Issues:
+Customer: "My order #98765 is late AND I was charged twice! This is unacceptable."
+Agent should say:
+✓ "I sincerely apologize — that's definitely not right. I've pulled up order #98765 and I can see both issues. Let me check the shipping status and the duplicate charge right now. I'll have answers for you within 10 minutes."
+✗ "I understand your concern. Let me look into this for you."
+
+Example 6 - Product Question:
+Customer: "Does the blue hoodie come in size XL?"
+Agent should say:
+✓ "Great question! Let me check the current stock on the blue hoodie in XL. Which specific style are you looking at — the Classic or the Premium?"
+✗ "Thank you for your inquiry. Can you provide more details about which product you're interested in?"
+
+Example 7 - Detailed First Message:
+Customer: "Hi, my order #12345 arrived damaged. The box was crushed and the ceramic vase inside is broken into pieces. I need a refund or replacement ASAP."
+Agent should say:
+✓ "I'm so sorry your ceramic vase from order #12345 arrived damaged. Could you send a quick photo of the damage? I'll process a replacement for you right away."
+✗ "Hello! Thank you for contacting us. Can you provide your order number?"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+THINKING PROCESS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Before generating replies, quickly think through:
+1. What is the customer's primary need right now?
+2. What information do we have vs. what's missing?
+3. What tone matches their emotional state?
+4. What has the agent already tried/said/asked?
+5. Is this a repeat question or follow-up?
+
+Then generate your 3 suggestions.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Respond ONLY with valid JSON in this exact format:
+{"suggestions": ["reply 1", "reply 2", "reply 3"]}`;
+}
+
+
+function buildEnhancedAnalysisBlock(analysis, conversationState, recentContext) {
+  if (!analysis && !conversationState && !recentContext) return '';
+
+  const lines = ['━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'];
+  lines.push('CONVERSATION ANALYSIS (use this to inform your replies):');
+  lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  if (recentContext?.messageRichness) {
+    const richnessLabels = {
+      'very_detailed': '📝 VERY DETAILED MESSAGE - Customer provided extensive information, use it all',
+      'detailed': '📝 Detailed message - Good context to work with',
+      'brief': '💬 Brief message - May need to ask for more information',
+      'very_brief': '💬 Very brief message - Likely a greeting or need to ask follow-up questions',
+    };
+    if (richnessLabels[recentContext.messageRichness]) {
+      lines.push(richnessLabels[recentContext.messageRichness]);
+    }
+  }
+
+  if (recentContext?.detectedIssue) {
+    const issueLabels = {
+      'damaged': '📦 Issue Type: DAMAGED/BROKEN item - Offer replacement or refund, ask for photo if not provided',
+      'wrong_item': '📦 Issue Type: WRONG ITEM received - Apologize, offer replacement with return label',
+      'missing': '📦 Issue Type: MISSING/NOT RECEIVED - Check tracking, offer reship or refund',
+      'late': '📦 Issue Type: LATE DELIVERY - Check tracking, explain delay, offer compensation if significant',
+      'quality': '📦 Issue Type: QUALITY concerns - Gather details, offer refund or replacement',
+    };
+    lines.push(issueLabels[recentContext.detectedIssue] || `📦 Issue: ${recentContext.detectedIssue}`);
+  }
+
+  if (recentContext?.customerWants) {
+    const wants = [];
+    if (recentContext.customerWants.refund) wants.push('REFUND');
+    if (recentContext.customerWants.replacement) wants.push('REPLACEMENT');
+    if (recentContext.customerWants.tracking) wants.push('TRACKING INFO');
+    if (recentContext.customerWants.help) wants.push('GENERAL HELP');
+    
+    if (wants.length > 0) {
+      lines.push(`🎯 Customer explicitly wants: ${wants.join(' or ')} - Address this directly`);
+    }
+  }
+
+  if (conversationState?.orderNumber || analysis?.orderNumber) {
+    const orderNum = conversationState?.orderNumber || analysis?.orderNumber;
+    lines.push(`📦 Order Number: ${orderNum} — MUST reference this in your replies, DO NOT ask for it again`);
+  }
+
+  if (conversationState?.productName) {
+    lines.push(`🏷️  Product: ${conversationState.productName} — Reference this specifically`);
+  }
+
+  if (conversationState?.customerEmail && conversationState.customerEmail !== 'unknown') {
+    lines.push(`📧 Email: ${conversationState.customerEmail} — DO NOT ask for email again`);
+  }
+
+  if (analysis?.detectedTopics?.length > 0) {
     const topicLabels = {
       order_status: 'Order Status / Tracking',
       refund_return: 'Refund / Return / Cancellation',
@@ -3302,60 +5600,382 @@ function buildAnalysisBlock(analysis) {
       greeting: 'Greeting / Opening'
     };
     const labels = analysis.detectedTopics.map(t => topicLabels[t] || t).join(', ');
-    lines.push(`- Topics discussed: ${labels}`);
+    lines.push(`🏷️  Topics: ${labels}`);
   }
 
-  if (analysis.sentiment) {
+  if (analysis?.sentiment) {
     const sentimentLabels = {
-      very_negative: 'Very upset / angry — lead with strong empathy and urgency',
-      negative: 'Frustrated / unhappy — acknowledge their concern with empathy',
-      neutral: 'Neutral tone',
-      positive: 'Positive / friendly',
-      very_positive: 'Very happy / grateful — match their positive energy'
+      very_negative: '😡 VERY UPSET / ANGRY — Lead with strong empathy, show urgency, take immediate action',
+      negative: '😟 FRUSTRATED / UNHAPPY — Acknowledge their concern with genuine empathy first',
+      neutral: '😐 NEUTRAL — Be professional and efficient',
+      positive: '😊 POSITIVE / FRIENDLY — Match their positive energy',
+      very_positive: '🎉 VERY HAPPY / GRATEFUL — Be warm and brief, match their enthusiasm'
     };
-    lines.push(`- Customer sentiment: ${sentimentLabels[analysis.sentiment] || analysis.sentiment}`);
+    lines.push(`${sentimentLabels[analysis.sentiment] || analysis.sentiment}`);
   }
 
-  if (analysis.isUrgent) lines.push('- ⚠️ Customer marked this as URGENT — respond with priority');
-  if (analysis.isRepeat) lines.push('- ⚠️ Customer is REPEATING themselves or following up — they feel unheard. Acknowledge this directly and move forward with action.');
-  if (analysis.isQuestion) lines.push('- Customer is asking a direct question — answer it specifically');
-  if (analysis.hasOrderNumber) lines.push('- Customer already provided an order number — DO NOT ask for it again, reference it');
-  if (analysis.hasEmail) lines.push('- Customer already shared their email — DO NOT ask for it again');
-  if (analysis.hasAttachment) lines.push('- Customer sent a file/image — acknowledge you have reviewed it');
-  if (analysis.agentAskedForOrder) lines.push('- Agent already asked for order number in a previous message — do NOT ask again');
-  if (analysis.agentAlreadyApologized) lines.push('- Agent already apologized — avoid repeating the same apology, focus on action');
-  if (analysis.agentAskedForEmail) lines.push('- Agent already asked for email — do NOT ask again');
-  if (analysis.agentAskedForPhoto) lines.push('- Agent already asked for a photo — do NOT ask again');
-  if (analysis.agentOfferedRefund) lines.push('- Agent already mentioned a refund — build on that, don\'t re-introduce');
-  if (analysis.agentOfferedReplacement) lines.push('- Agent already offered a replacement — build on that');
-  if (analysis.isLongConversation) lines.push(`- This is a long conversation (${analysis.turnCount} messages) — the customer may be losing patience. Be efficient and solution-oriented.`);
-  if (analysis.lastAgentText) lines.push(`- Agent's last message was: "${analysis.lastAgentText.substring(0, 150)}"`);
+  if (analysis?.isUrgent || conversationState?.isEscalating) {
+    lines.push('⚠️  URGENT / ESCALATING — Respond with priority, show immediate action, use phrases like "right now" or "immediately"');
+  }
 
-  return lines.length > 1 ? lines.join('\n') : '';
+  if (analysis?.isRepeat || conversationState?.customerMessageCount >= 3) {
+    lines.push('🔁 CUSTOMER REPEATING / FOLLOWING UP — They feel unheard. Acknowledge the delay and take action NOW. Don\'t make them explain again.');
+  }
+
+  if (conversationState?.isLongConversation) {
+    lines.push(`⏰ LONG CONVERSATION (${conversationState.turnCount} messages) — Customer may be losing patience. Be efficient and solution-oriented.`);
+  }
+
+  if (analysis?.isQuestion) {
+    lines.push('❓ Direct question asked — Answer it specifically, don\'t deflect');
+  }
+
+  if (analysis?.hasAttachment || conversationState?.hasAttachment) {
+    lines.push('📎 Customer sent file/image — Acknowledge you\'ve reviewed it in your response');
+  }
+
+  if (analysis?.agentAskedForOrder || conversationState?.agentAskedForOrder) {
+    lines.push('🚫 Agent ALREADY asked for order number — DO NOT ask again, move forward with the information you have');
+  }
+
+  if (analysis?.agentAskedForEmail || conversationState?.agentAskedForEmail) {
+    lines.push('🚫 Agent ALREADY asked for email — DO NOT ask again');
+  }
+
+  if (analysis?.agentAskedForPhoto || conversationState?.agentAskedForPhoto) {
+    lines.push('🚫 Agent ALREADY asked for photo — DO NOT ask again, work with what you have or escalate');
+  }
+
+  if (analysis?.agentAlreadyApologized || conversationState?.agentAlreadyApologized) {
+    lines.push('🚫 Agent ALREADY apologized — Don\'t repeat the same apology, focus on action and solutions');
+  }
+
+  if (analysis?.agentOfferedRefund) {
+    lines.push('💰 Agent already mentioned refund — Build on that, confirm next steps, don\'t re-introduce the concept');
+  }
+
+  if (analysis?.agentOfferedReplacement) {
+    lines.push('🔄 Agent already offered replacement — Build on that, confirm shipping details or next steps');
+  }
+
+  // Last agent message for context
+  if (analysis?.lastAgentText || conversationState?.lastAgentMessage) {
+    const lastMsg = (analysis?.lastAgentText || conversationState?.lastAgentMessage || '').substring(0, 150);
+    if (lastMsg) {
+      lines.push(`💬 Agent's last message: "${lastMsg}${lastMsg.length >= 150 ? '...' : ''}" — Don't repeat this`);
+    }
+  }
+
+  return lines.length > 2 ? lines.join('\n') : '';
 }
 
 /**
- * Generate smart context-aware fallback suggestions when the AI API is unavailable.
- * Uses the conversation analysis from the frontend to produce relevant replies.
+ * Build customer context block
  */
-function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis) {
+function buildCustomerContext(customerName, customerEmail, conversationState) {
+  const lines = [];
+  
+  lines.push(`CUSTOMER: ${customerName || 'Guest'}${customerEmail ? ` (${customerEmail})` : ''}`);
+  
+  if (conversationState?.customerHistory) {
+    const history = conversationState.customerHistory;
+    lines.push(`Customer History: ${history.totalOrders || 0} previous orders, ${history.issueCount || 0} past support tickets`);
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Build policy and brand voice guidelines
+ */
+function buildPolicyBlock() {
+  return `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+COMPANY POLICIES & BRAND VOICE:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Policies:
+- Refund window: 30 days from delivery date
+- Always offer replacement before refund for damaged items
+- Free return shipping for defective/damaged products
+- Escalate to supervisor if customer has contacted 3+ times about same issue
+- Price match: Match competitors within 7 days of purchase
+
+Brand Voice:
+- Friendly but professional — never overly casual or use slang
+- Empathetic without being robotic
+- Action-oriented — always indicate next steps
+- Transparent — if you don't know, say you'll find out
+
+Auto-Escalation Triggers:
+- Customer uses words like "lawyer", "sue", "fraud", "scam"
+- Customer explicitly asks for manager/supervisor
+- 3+ messages about same unresolved issue
+- Very negative sentiment + repeat customer`;
+}
+
+
+function buildUserPrompt(chatHistory, clientMessage, messageEdited, adminNote, conversationState, recentContext) {
+  let prompt = '';
+
+  if (recentContext?.lastCustomerMessages && recentContext?.lastAgentMessages) {
+    const customerMsgs = recentContext.lastCustomerMessages;
+    const agentMsgs = recentContext.lastAgentMessages;
+    
+    if (customerMsgs.length > 0 || agentMsgs.length > 0) {
+      prompt += `<recent_conversation_focus>
+MOST RECENT EXCHANGE (prioritize this context):
+
+`;
+      if (customerMsgs.length > 0) {
+        prompt += `Last ${customerMsgs.length} Customer Message(s):
+${customerMsgs.map((msg, i) => `${i + 1}. ${msg}`).join('\n')}
+
+`;
+      }
+      
+      if (agentMsgs.length > 0) {
+        prompt += `Last ${agentMsgs.length} Agent Response(s):
+${agentMsgs.map((msg, i) => `${i + 1}. ${msg}`).join('\n')}
+
+`;
+      }
+      
+      prompt += `⚠️ IMPORTANT: Base your suggestions primarily on this recent exchange. The customer's latest concerns and the agent's recent responses are your top priority.
+</recent_conversation_focus>
+
+`;
+    }
+  }
+
+  if (chatHistory && chatHistory.trim()) {
+    prompt += `<full_conversation_history>
+${chatHistory}
+</full_conversation_history>
+
+`;
+  }
+
+  prompt += `<customer_latest_message>
+${clientMessage}
+</customer_latest_message>`;
+
+  if (conversationState?.extractedEntities && Object.keys(conversationState.extractedEntities).length > 0) {
+    prompt += `
+
+<extracted_information>
+${Object.entries(conversationState.extractedEntities)
+  .map(([key, value]) => `- ${key}: ${value}`)
+  .join('\n')}
+</extracted_information>`;
+  }
+
+  if (messageEdited) {
+    prompt += `
+
+<important_note>
+⚠️ The agent EDITED the customer's message above to clarify or add context. Use the edited version as the basis for your reply suggestions.
+</important_note>`;
+  }
+
+  if (adminNote && adminNote.trim()) {
+    prompt += `
+
+<agent_special_instructions>
+📌 ${adminNote.trim()}
+
+The agent wants you to incorporate the above instructions into ALL 3 suggested replies. This is a high-priority requirement.
+</agent_special_instructions>`;
+  }
+
+  prompt += `
+
+Generate 3 reply suggestions as JSON: {"suggestions": ["reply 1", "reply 2", "reply 3"]}`;
+
+  return prompt;
+}
+
+function analyzeConversationState(chatHistory, clientMessage, analysis) {
+  const fullText = `${chatHistory || ''} ${clientMessage || ''}`.toLowerCase();
+  const messages = (chatHistory || '').split('\n').filter(m => m.trim());
+  const orderMatch = fullText.match(/(?:order|#)\s*#?(\d{5,})/i);
+  const orderNumber = orderMatch ? orderMatch[1] : null;
+  const emailMatch = fullText.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
+  const customerEmail = emailMatch ? emailMatch[0] : null;
+  const productMatch = clientMessage.match(/(blue|red|black|white|green|yellow|purple|pink|orange|brown|gray|grey)\s+(hoodie|shirt|pants|shoes|dress|jacket|sweater|hat|shorts|jeans|blouse|skirt|coat|boots|sneakers|sandals|watch|bag|backpack|wallet|belt|sunglasses|vase|mug|plate|bowl|pillow|blanket|towel|lamp|chair|table|desk|mirror)/i);
+  const productName = productMatch ? productMatch[0] : null;
+  const customerMessages = messages.filter(m => m.startsWith('Customer:') || m.startsWith('Client:'));
+  const agentMessages = messages.filter(m => m.startsWith('Agent:') || m.startsWith('Support:'));
+  const customerMessageCount = customerMessages.length;
+  const lastAgentMessage = agentMessages[agentMessages.length - 1] || '';
+  const agentAskedForOrder = /order number|order #|order id/i.test(lastAgentMessage);
+  const agentAskedForEmail = /email|e-mail address/i.test(lastAgentMessage);
+  const agentAskedForPhoto = /photo|picture|image|screenshot/i.test(lastAgentMessage);
+  const agentAlreadyApologized = /sorry|apologize|apologies/i.test(lastAgentMessage);
+  const isEscalating = /manager|supervisor|escalate|unacceptable|ridiculous|lawsuit|lawyer|sue|fraud|scam|bbb|attorney general/i.test(clientMessage);
+  const hasAttachment = /attached|attachment|photo|image|screenshot|picture|file/i.test(clientMessage);
+  const isLongConversation = customerMessageCount >= 4;
+  const turnCount = Math.max(customerMessageCount, agentMessages.length);
+
+  return {
+    orderNumber,
+    customerEmail: customerEmail || 'unknown',
+    productName,
+    customerMessageCount,
+    lastAgentMessage,
+    agentAskedForOrder,
+    agentAskedForEmail,
+    agentAskedForPhoto,
+    agentAlreadyApologized,
+    isEscalating,
+    hasAttachment,
+    isLongConversation,
+    turnCount,
+    extractedEntities: {
+      ...(orderNumber && { order_number: orderNumber }),
+      ...(productName && { product: productName }),
+      ...(customerEmail && customerEmail !== 'unknown' && { email: customerEmail }),
+    },
+  };
+}
+
+/**
+ * Validate suggestions to ensure quality and avoid common mistakes
+ */
+function validateSuggestions(suggestions, conversationState, chatHistory) {
+  if (!Array.isArray(suggestions)) return [];
+
+  const lastAgentMessage = (conversationState?.lastAgentMessage || '').toLowerCase();
+  const hasOrderNumber = !!conversationState?.orderNumber || conversationState?.hasOrderNumber;
+  const hasEmail = conversationState?.customerEmail && conversationState.customerEmail !== 'unknown';
+
+  return suggestions.filter((suggestion, index) => {
+    if (!suggestion || typeof suggestion !== 'string') return false;
+
+    const lowerSuggestion = suggestion.toLowerCase();
+
+    // Don't ask for info we already have
+    if (hasOrderNumber && /(?:could you|can you|please|would you mind).*(?:order number|order #|order id)/i.test(suggestion)) {
+      console.log(`✦ [AI] Filtered suggestion ${index + 1}: asking for order number we already have`);
+      return false;
+    }
+
+    if (hasEmail && /(?:could you|can you|please|would you mind).*(?:email|e-mail)/i.test(suggestion)) {
+      console.log(`✦ [AI] Filtered suggestion ${index + 1}: asking for email we already have`);
+      return false;
+    }
+
+    // Don't repeat what agent just said (check first 50 chars)
+    if (lastAgentMessage && lastAgentMessage.length > 20) {
+      const agentStart = lastAgentMessage.substring(0, 50);
+      const suggestionStart = lowerSuggestion.substring(0, 50);
+      if (agentStart.includes(suggestionStart.substring(0, 30)) || 
+          suggestionStart.includes(agentStart.substring(0, 30))) {
+        console.log(`✦ [AI] Filtered suggestion ${index + 1}: too similar to agent's last message`);
+        return false;
+      }
+    }
+
+    // Check length (5-60 words)
+    const wordCount = suggestion.split(/\s+/).length;
+    if (wordCount < 5 || wordCount > 60) {
+      console.log(`✦ [AI] Filtered suggestion ${index + 1}: word count ${wordCount} out of range`);
+      return false;
+    }
+
+    // Avoid robotic phrases
+    const roboticPhrases = [
+      /i apologize for any inconvenience/i,
+      /please be advised/i,
+      /kindly provide/i,
+      /as per our policy/i,
+      /we regret to inform/i,
+    ];
+    
+    for (const phrase of roboticPhrases) {
+      if (phrase.test(suggestion)) {
+        console.log(`✦ [AI] Filtered suggestion ${index + 1}: contains robotic phrase`);
+        return false;
+      }
+    }
+
+    // Avoid AI-like phrases
+    if (/as an ai|i'm a bot|i'm an assistant/i.test(suggestion)) {
+      console.log(`✦ [AI] Filtered suggestion ${index + 1}: mentions being AI`);
+      return false;
+    }
+
+    return true;
+  });
+}
+
+/**
+ * Call Anthropic API with proper error handling
+ */
+function callAnthropicAPI(requestBody, apiKey) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'api.anthropic.com',
+      path: '/v1/messages',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'Content-Length': Buffer.byteLength(requestBody),
+      },
+    };
+
+    const apiReq = https.request(options, (apiRes) => {
+      let body = '';
+      apiRes.on('data', (chunk) => { body += chunk; });
+      apiRes.on('end', () => {
+        console.log(`✦ [AI] Anthropic response status: ${apiRes.statusCode}`);
+        if (apiRes.statusCode !== 200) {
+          console.error(`✦ [AI] Anthropic API error ${apiRes.statusCode}:`, body.substring(0, 500));
+          reject(new Error(`Anthropic API ${apiRes.statusCode}: ${body.substring(0, 200)}`));
+          return;
+        }
+        try {
+          resolve(JSON.parse(body));
+        } catch (e) {
+          console.error('✦ [AI] Failed to parse Anthropic response:', body.substring(0, 500));
+          reject(new Error('Invalid JSON from Anthropic'));
+        }
+      });
+    });
+
+    apiReq.on('error', (err) => {
+      console.error('✦ [AI] HTTPS request failed:', err.message);
+      reject(err);
+    });
+
+    apiReq.setTimeout(20000, () => {
+      apiReq.destroy();
+      reject(new Error('Anthropic API timeout (20s)'));
+    });
+
+    apiReq.write(requestBody);
+    apiReq.end();
+  });
+}
+
+function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis, adminNote) {
   const lower = (customerMsg || '').toLowerCase();
   const topics = analysis?.detectedTopics || [];
   const sentiment = analysis?.sentiment || 'neutral';
   const isRepeat = analysis?.isRepeat || false;
-  const hasOrderNumber = analysis?.hasOrderNumber || false;
-  const hasAttachment = analysis?.hasAttachment || false;
+  const hasOrderNumber = analysis?.hasOrderNumber || /\b\d{5,}\b/.test(customerMsg + chatHistory);
+  const hasAttachment = analysis?.hasAttachment || /attach|photo|image/i.test(customerMsg);
   const agentAskedForOrder = analysis?.agentAskedForOrder || false;
   const agentAlreadyApologized = analysis?.agentAlreadyApologized || false;
   const isUrgent = analysis?.isUrgent || false;
   const isLongConversation = analysis?.isLongConversation || false;
 
-  // ── Empathy prefix based on sentiment ──
   let empathyPrefix = '';
   if (sentiment === 'very_negative' && !agentAlreadyApologized) {
     const options = [
-      'I completely understand how frustrating this must be.',
       'I sincerely apologize for this experience.',
+      'I completely understand how frustrating this must be.',
       'I can see this has been really frustrating, and I want to make it right.',
     ];
     empathyPrefix = options[Math.floor(Math.random() * options.length)] + ' ';
@@ -3363,55 +5983,47 @@ function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis) {
     const options = [
       'I\'m sorry about that.',
       'I understand your concern.',
-      'I appreciate your patience with this.',
+      'I appreciate you bringing this to my attention.',
     ];
     empathyPrefix = options[Math.floor(Math.random() * options.length)] + ' ';
   }
-
-  // ── Repeat/follow-up prefix ──
-  const repeatPrefix = isRepeat ? 'I apologize for the delay in getting this resolved. ' : '';
-
-  // ── Urgency suffix ──
+  const repeatPrefix = isRepeat ? 'I apologize for the delay getting this resolved. ' : '';
   const urgencySuffix = isUrgent ? ' I\'m treating this as a priority.' : '';
-
-  // ── GRATITUDE ──
   if (topics.includes('gratitude') && !topics.includes('complaint')) {
     return [
-      'You\'re welcome! Is there anything else I can help you with?',
-      'Happy to help! Don\'t hesitate to reach out if you need anything else.',
-      'Glad we could get that sorted for you! Have a great day.'
+      'You\'re very welcome! Don\'t hesitate to reach out if you need anything else.',
+      'Happy to help! Have a great day.',
+      'Glad we could get that sorted for you!'
     ];
   }
 
-  // ── GREETING ONLY ──
   if (topics.length === 1 && topics.includes('greeting')) {
     return [
       'Hello! How can I help you today?',
-      'Hi there! Welcome — what can I assist you with?',
-      'Hello! Thanks for reaching out. How can I help?'
+      'Hi there! What can I assist you with?',
+      'Hello! Thanks for reaching out. What do you need help with?'
     ];
   }
 
-  // ── PRODUCT ISSUE ──
   if (topics.includes('product_issue')) {
     if (hasOrderNumber && hasAttachment) {
       return [
-        `${empathyPrefix}${repeatPrefix}Thank you for sharing the photo and your order details. I've reviewed the issue and I'm looking into the best resolution for you right away.${urgencySuffix}`,
-        `${empathyPrefix}I can see the issue clearly from the photo you sent. Let me check what options we have — would you prefer a replacement or a refund?`,
-        `${empathyPrefix}${repeatPrefix}I've noted the issue with your order. I'm escalating this now to get it resolved as quickly as possible.${urgencySuffix}`
+        `${empathyPrefix}${repeatPrefix}Thank you for the photo and order details. I'm reviewing the issue and will get back to you with a solution right away.${urgencySuffix}`,
+        `${empathyPrefix}I can see the issue clearly from the photo. Let me check the best resolution for you — would you prefer a replacement or a refund?`,
+        `${empathyPrefix}${repeatPrefix}I've noted the issue with your order. Let me escalate this to get it resolved as quickly as possible.${urgencySuffix}`
       ];
     }
     if (hasOrderNumber && !hasAttachment && !analysis?.agentAskedForPhoto) {
       return [
-        `${empathyPrefix}Thank you for your order details. Could you send a photo of the issue? That will help me process this faster.`,
+        `${empathyPrefix}Thank you for your order details. Could you send a quick photo of the issue? That will help me process this faster.`,
         `${empathyPrefix}I've located your order. To help resolve this quickly, could you share a picture of the damage or defect?`,
-        `${empathyPrefix}${repeatPrefix}I want to get this sorted for you. A quick photo of the issue would help me determine the best next step.${urgencySuffix}`
+        `${empathyPrefix}${repeatPrefix}A photo would help me determine the best solution for you. Could you send one when you get a chance?${urgencySuffix}`
       ];
     }
     if (!hasOrderNumber && !agentAskedForOrder) {
       return [
         `${empathyPrefix}I'd like to help resolve this. Could you share your order number so I can pull up the details?`,
-        `${empathyPrefix}That's not the experience we want you to have. Could you provide your order number and a brief description of the issue?`,
+        `${empathyPrefix}That's not the experience we want for you. Could you provide your order number and a brief description of the issue?`,
         `${empathyPrefix}${repeatPrefix}Let me look into this for you. Can you share your order number and, if possible, a photo of the problem?${urgencySuffix}`
       ];
     }
@@ -3426,22 +6038,22 @@ function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis) {
   if (topics.includes('order_status') || topics.includes('shipping')) {
     if (hasOrderNumber) {
       return [
-        `${repeatPrefix}Thank you for sharing your order number. Let me check the current status and tracking information for you now.${urgencySuffix}`,
-        `${repeatPrefix}I'm pulling up your order details right now. I'll have the latest shipping update for you shortly.${urgencySuffix}`,
-        `${repeatPrefix}I can see your order in our system. Let me check with our fulfillment team for the most up-to-date status.${urgencySuffix}`
+        `${repeatPrefix}Thank you for your order number. Let me check the current status and tracking information for you now.${urgencySuffix}`,
+        `${repeatPrefix}I'm pulling up your order details right now. I'll have the latest shipping update for you in just a moment.${urgencySuffix}`,
+        `${repeatPrefix}I can see your order. Let me check with our fulfillment team for the most up-to-date status.${urgencySuffix}`
       ];
     }
     if (!agentAskedForOrder) {
       return [
         `${empathyPrefix}I'd be happy to check on that for you. Could you share your order number?`,
-        'Of course! To look up your order status, I\'ll need your order number or the email address you used at checkout.',
-        `${empathyPrefix}${repeatPrefix}Let me find your order. Could you provide the order number? It usually starts with # and was included in your confirmation email.${urgencySuffix}`
+        'I can look that up! I\'ll need your order number or the email address you used at checkout.',
+        `${empathyPrefix}${repeatPrefix}Let me find your order. Could you provide the order number? It should be in your confirmation email.${urgencySuffix}`
       ];
     }
     return [
-      `${repeatPrefix}I'm currently looking into your order. I'll update you as soon as I have the tracking details.${urgencySuffix}`,
-      'Thank you for your patience. I\'m checking with our shipping team to get you the latest update.',
-      `${repeatPrefix}I want to make sure I give you accurate information. Give me just a moment to verify the shipping status.${urgencySuffix}`
+      `${repeatPrefix}I'm checking on your order now. I'll update you with the tracking details as soon as I have them.${urgencySuffix}`,
+      'Thank you for your patience. I\'m looking into the shipping status with our team.',
+      `${repeatPrefix}I want to give you accurate information. Give me just a moment to verify the shipping status.${urgencySuffix}`
     ];
   }
 
@@ -3449,16 +6061,16 @@ function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis) {
   if (topics.includes('refund_return')) {
     if (hasOrderNumber) {
       return [
-        `${empathyPrefix}${repeatPrefix}I've located your order. Let me review the details and check what options are available for you.${urgencySuffix}`,
-        `${empathyPrefix}Thank you for providing your order details. I'm checking the return/refund eligibility now and will let you know the next steps.`,
+        `${empathyPrefix}${repeatPrefix}I've located your order. Let me review the details and check what return options are available for you.${urgencySuffix}`,
+        `${empathyPrefix}Thank you for your order number. I'm checking the return eligibility now and will let you know the next steps.`,
         `${empathyPrefix}I have your order pulled up. Could you let me know the reason for the return? That helps me process it faster.`
       ];
     }
     if (!agentAskedForOrder) {
       return [
         `${empathyPrefix}I'd be happy to help with that. Could you share your order number so I can review the return options?`,
-        `${empathyPrefix}To get started on the return process, I'll need your order number. You can find it in your confirmation email.`,
-        `${empathyPrefix}${repeatPrefix}I want to help resolve this. Could you provide your order number and the reason for the return?${urgencySuffix}`
+        `${empathyPrefix}To get started on the return, I'll need your order number. You can find it in your confirmation email.`,
+        `${empathyPrefix}${repeatPrefix}I want to help resolve this. Could you provide your order number and let me know the reason for the return?${urgencySuffix}`
       ];
     }
     return [
@@ -3479,16 +6091,16 @@ function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis) {
     }
     return [
       `${empathyPrefix}I'd like to help sort out this billing issue. Could you share your order number or the email associated with the charge?`,
-      `${empathyPrefix}To investigate the payment concern, could you provide the order number and the approximate date and amount of the charge?`,
-      `${empathyPrefix}${repeatPrefix}I want to get to the bottom of this. Could you share any details about the charge — the date, amount, and last four digits of the card used?${urgencySuffix}`
+      `${empathyPrefix}To investigate the payment concern, could you provide the order number, date, and amount of the charge?`,
+      `${empathyPrefix}${repeatPrefix}I want to get to the bottom of this. Could you share the order number and the last four digits of the card used?${urgencySuffix}`
     ];
   }
 
   // ── DISCOUNT / PROMO ──
   if (topics.includes('discount_promo')) {
     return [
-      'Let me check on that promo code for you. Could you share the code you\'re trying to use and the items in your cart?',
-      'I\'d be happy to help with that! Could you tell me which promotion you\'re referring to, or share the code?',
+      'Let me check on that promo code for you. Could you share the code and the items you\'re trying to apply it to?',
+      'I\'d be happy to help! Could you tell me which promotion you\'re referring to, or share the promo code?',
       `${empathyPrefix}Let me look into the available promotions for you. What product or category are you interested in?`
     ];
   }
@@ -3497,7 +6109,7 @@ function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis) {
   if (topics.includes('product_inquiry')) {
     return [
       'Great question! Let me check that information for you. Which specific product are you asking about?',
-      'I\'d be happy to help with product details. Could you share the product name or a link so I can look it up?',
+      'I\'d be happy to help with product details. Could you share the product name or a link?',
       'Let me find the most accurate information for you. Can you tell me more about what you\'re looking for?'
     ];
   }
@@ -3505,9 +6117,9 @@ function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis) {
   // ── ACCOUNT ISSUES ──
   if (topics.includes('account')) {
     return [
-      `${empathyPrefix}I can help with your account. For security, could you confirm the email address associated with your account?`,
+      `${empathyPrefix}I can help with your account. For security, could you confirm the email address associated with it?`,
       `${empathyPrefix}Let me look into the account issue. Could you describe what's happening when you try to log in?`,
-      `${empathyPrefix}${repeatPrefix}I'll get this sorted for you. Could you share the email address on your account so I can investigate?${urgencySuffix}`
+      `${empathyPrefix}${repeatPrefix}I'll get this sorted for you. Could you share the email on your account so I can investigate?${urgencySuffix}`
     ];
   }
 
@@ -3543,6 +6155,11 @@ function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis) {
     `${empathyPrefix}${repeatPrefix}I want to make sure I help you with the right information. Could you tell me a bit more about what you need?${urgencySuffix}`
   ];
 }
+
+
+
+
+
 
 // ============ EMPLOYEE ENDPOINTS ============
 
@@ -3760,6 +6377,825 @@ app.delete('/api/templates/:id', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Failed to delete template' });
   }
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+let analyticsCache = null;
+let analyticsCacheTimestamp = null;
+const ANALYTICS_CACHE_DURATION = 30 * 60 * 1000;
+
+app.get('/api/analytics/common-questions', authenticateToken, async (req, res) => {
+  try {
+    console.log('📊 [Analytics] Endpoint called!');
+    console.log('📊 [Analytics] Query params:', req.query);
+    
+    const { 
+      limit = 20, 
+      timeframe = 'all',
+    } = req.query;
+
+    if (timeframe === 'all' && analyticsCache && analyticsCacheTimestamp) {
+      const cacheAge = Date.now() - analyticsCacheTimestamp;
+      if (cacheAge < ANALYTICS_CACHE_DURATION) {
+        console.log(`📊 [Analytics] ✅ Returning cached results (${Math.floor(cacheAge/1000)}s old)`);
+        return res.json({
+          ...analyticsCache,
+          cached: true,
+          cacheAge: Math.floor(cacheAge / 1000)
+        });
+      }
+    }
+
+    let dateFilter = '';
+    if (timeframe === 'week') {
+      dateFilter = `AND m.sent_at >= NOW() - INTERVAL '7 days'`;
+    } else if (timeframe === 'month') {
+      dateFilter = `AND m.sent_at >= NOW() - INTERVAL '30 days'`;
+    } else if (timeframe === '3months') {
+      dateFilter = `AND m.sent_at >= NOW() - INTERVAL '90 days'`;
+    }
+
+    const query = `
+      SELECT 
+        m.content,
+        m.sent_at,
+        m.conversation_id,
+        m.sender_name as customer_name
+      FROM messages m
+      WHERE m.sender_type = 'customer'
+        AND m.content IS NOT NULL
+        AND m.content != ''
+        AND LENGTH(TRIM(m.content)) > 0
+        ${dateFilter}
+      ORDER BY m.sent_at DESC
+    `;
+
+    console.log('📊 [Analytics] Running query...');
+    const startTime = Date.now();
+    
+    const result = await db.pool.query(query);
+    const messages = result.rows;
+
+    const queryTime = Date.now() - startTime;
+    console.log(`📊 [Analytics] Found ${messages.length} customer messages in ${queryTime}ms`);
+
+    if (messages.length === 0) {
+      console.log('📊 [Analytics] No messages found - returning empty results');
+      return res.json({
+        summary: {
+          totalMessagesAnalyzed: 0,
+          questionsFound: 0,
+          timeframe: timeframe,
+        },
+        topQuestions: [],
+        topTopics: [],
+        topIssues: [],
+        sentimentBreakdown: { 
+          very_negative: 0, 
+          negative: 0, 
+          neutral: 0, 
+          positive: 0, 
+          very_positive: 0 
+        },
+      });
+    }
+
+    console.log('📊 [Analytics] Analyzing messages...');
+    const analysisStartTime = Date.now();
+    const questionAnalysis = analyzeCustomerQuestions(messages);
+    const analysisTime = Date.now() - analysisStartTime;
+
+    console.log(`📊 [Analytics] Analysis complete: ${questionAnalysis.questions.length} questions found in ${analysisTime}ms`);
+
+    const response = {
+      summary: {
+        totalMessagesAnalyzed: messages.length,
+        questionsFound: questionAnalysis.questions.length,
+        timeframe: timeframe,
+        processingTimeMs: queryTime + analysisTime,
+      },
+      topQuestions: questionAnalysis.topQuestions.slice(0, parseInt(limit)),
+      topTopics: questionAnalysis.topTopics.slice(0, 10),
+      topIssues: questionAnalysis.topIssues.slice(0, 10),
+      sentimentBreakdown: questionAnalysis.sentimentBreakdown,
+      cached: false,
+    };
+
+    if (timeframe === 'all') {
+      analyticsCache = response;
+      analyticsCacheTimestamp = Date.now();
+      console.log('📊 [Analytics] Results cached for 30 minutes');
+    }
+
+    res.json(response);
+
+  } catch (error) {
+    console.error('📊 [Analytics] Error:', error);
+    console.error('📊 [Analytics] Stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Failed to retrieve analytics',
+      message: error.message 
+    });
+  }
+});
+
+app.post('/api/analytics/clear-cache', authenticateToken, (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    
+    analyticsCache = null;
+    analyticsCacheTimestamp = null;
+    
+    console.log('📊 [Analytics] Cache cleared by admin:', req.user.email);
+    res.json({ success: true, message: 'Analytics cache cleared' });
+  } catch (error) {
+    console.error('📊 [Analytics] Cache clear error:', error);
+    res.status(500).json({ error: 'Failed to clear cache' });
+  }
+});
+function analyzeCustomerQuestions(messages) {
+  const questions = [];
+  const topicCounts = {};
+  const issueCounts = {};
+  const sentimentCounts = { very_negative: 0, negative: 0, neutral: 0, positive: 0, very_positive: 0 };
+
+  let totalMessages = 0;
+  let filteredByExclude = 0;
+  let filteredByLength = 0;
+  let notQuestionOrInquiry = 0;
+  let noBusinessTopic = 0;
+  let normalizedTooShort = 0;
+  let pickupDetected = 0;
+  let dosingDetected = 0;
+  let pickupKept = 0;
+  let dosingKept = 0;
+
+const topicKeywords = {
+  order_status: [
+    'order', 'tracking', 'shipped', 'delivery', 'deliver', 'where is', 'status', 'when will',
+    'late', 'delayed', 'still waiting', 'hasn\'t arrived', 'not arrived', 'not received',
+    'haven\'t received', 'never arrived', 'never came', 'taking too long'
+  ],
+  refund_return: ['refund', 'return', 'money back', 'cancel', 'cancellation', 'exchange'],
+  product_issue: ['broken', 'damaged', 'defective', 'wrong item', 'missing', 'not working', 'doesn\'t work', 'issue with'],
+  payment: ['payment', 'charged', 'charge', 'billing', 'invoice', 'receipt', 'credit card', 'declined'],
+  discount_promo: ['discount', 'coupon', 'promo', 'code', 'sale', 'offer', 'deal'],
+  product_inquiry: [
+    // Basic product questions
+    'product', 'item', 'size', 'color', 'stock', 'available', 'price', 'how much',
+    // COA/Documentation questions
+    'coa', 'certificate', 'analysis', 'lab report', 'test results', 'documentation',
+    'lab test', 'purity', 'quality report', 'authenticity', 'verified', 'certified',
+    'third party', 'independent test', 'batch', 'lot number', 'actual coa',
+    // Dosing/Usage questions
+    'dosing', 'dose', 'dosage', 'how to use', 'how much to take', 'instructions',
+    'how to take', 'usage', 'how do i use', 'administration', 'inject', 'injection',
+    'reconstitute', 'reconstitution', 'mixing', 'prepare', 'preparation',
+    'how many', 'frequency', 'how often', 'protocol', 'regimen', 'schedule',
+    // Vial duration/longevity questions
+    'how long', 'last', 'vial last', 'bottle last', 'supply last', 'one vial',
+    'per week', 'per day', 'per month', 'duration', 'longevity', 'how many doses',
+    'how many injections', 'servings', 'uses per', 'doses per vial', 'vial contain',
+    // Free items / what's included
+    'free', 'include', 'comes with', 'receive', 'bac water', 'needle', 'needles', 'syringe',
+    'injection supplies', 'what comes with', 'pre mixed', 'pre-mixed', 'premixed',
+    // Product information
+    'ingredient', 'composition', 'formula', 'concentration', 'strength', 'potency',
+    'expiration', 'shelf life', 'storage', 'refrigerate', 'freeze',
+    // Product availability - ✅ NEW
+    'do you have', 'do you sell', 'do you guys have', 'do you guys sell', 'do you carry',
+    'in stock', 'sell', 'carry', 'offer', 'what products', 'which products', 
+    'what peptides', 'peptides are there', 'peptides help', 'help lose', 'gain muscle',
+    'blend', 'stack', 'wolverine', 'glow', 'klow', 'budget friendly'
+  ],
+  pickup: [
+    'pick up', 'pickup', 'pick-up', 'local pickup', 'store pickup', 'collection', 'collect',
+    'come to', 'come directly', 'come by', 'visit', 'stop by', 'go to',
+    'your address', 'your location', 'physical location', 'in person', 'physical store',
+    'buy at your', 'purchase at your', 'come buy', 'visit your store', 'your shop',
+    'at the location', 'at your place', 'store location', 'shop location', 'come get',
+    'location', 'address', 'where are you', 'where is your', 'what is your location',
+    'store address', 'shop address', 'physical address', 'brick and mortar',
+    'brick-and-mortar', 'actual store', 'real store', 'showroom', 'warehouse',
+    // ✅ NEW - Store existence questions
+    'have a store', 'store in', 'do you have a store', 'is there a store', 
+    'have a physical', 'physical location', 'retail location', 'do i have to order online'
+  ],
+  shipping: ['shipping', 'ship', 'freight', 'express', 'standard', 'free shipping', 'shipping cost', 'uber'],
+  account: ['account', 'login', 'password', 'sign in', 'email', 'profile', 'update my'],
+};
+
+  const issueKeywords = {
+    damaged: ['broken', 'damaged', 'defective', 'cracked', 'shattered', 'crushed'],
+    wrong_item: ['wrong item', 'incorrect', 'not what i ordered', 'different'],
+    missing: ['missing', 'didn\'t receive', 'never arrived', 'lost'],
+    late: ['late', 'delayed', 'taking too long', 'still waiting'],
+    quality: ['poor quality', 'cheap', 'not as described', 'disappointed with quality'],
+  };
+
+
+const excludePatterns = [
+  /^(hi|hey|hello|greetings|good morning|good afternoon|good evening|yo|sup|what's up|whats up)[\s?!.]*$/i,
+  /^how are you(\s+doing)?[\s?!.]*$/i,
+  /^(are you|is anyone|is someone|anyone) (there|here|available)[\s?!.]*$/i,
+  /^(thanks|thank you|thx|ty)[\s?!.]*$/i,
+  /^(ok|okay|cool|great|awesome|perfect|nice|got it|i see|understood)[\s?!.]*$/i,
+  /^(yes|no|yeah|yep|nope|sure)[\s?!.]*$/i,
+  /^[\s?!.]+$/,
+  /^test$/i,
+  /\b(is the chat working|did you get my (message|msg)|are you (there|here|receiving)|can you see (this|my message))/i,
+  /\b(is anyone (there|here|available|reading)|is this working|hello\?+ anyone)/i,
+  /\b(affiliate|partnership|resell|wholesale|bulk order|business opportunity|work with you|collaborate|become (a|an) (partner|reseller|affiliate))/i,
+  /\b(how do i (start|become)|interested in (selling|reselling|partnering))/i,
+  /^(how do i know what|which one should i|what should i|help me choose)[\s\w]{0,30}$/i,
+];
+
+
+messages.forEach(msg => {
+  const content = msg.content || '';
+  const lower = content.toLowerCase().trim();
+
+  if (excludePatterns.some(pattern => pattern.test(lower))) {
+    return;
+  }
+
+  const spamIndicators = [
+    'shopify store', 'conversion rate', 'funnel flow', 'store optimization',
+    'i help store owners', 'i noticed your store', 'structural gaps',
+    'would you like a breakdown', 'measurable lifts', 'revenue growth',
+    'ecommerce consultant', 'cro expert', 'conversion triggers'
+  ];
+
+  if (spamIndicators.some(indicator => lower.includes(indicator))) {
+    return;
+  }
+
+  const words = content.split(/\s+/);
+  const shortWords = words.filter(w => w.length >= 3);
+  if (shortWords.length >= 5) {
+    const garbledWords = shortWords.filter(w => 
+      !/[aeiou]/i.test(w) && 
+      w.length > 3 && 
+      !/^(www|http|https|pls|thx|plz|msg|bac|ghk|bpc|coa|mlb|nfl|nba)$/i.test(w)
+    );
+    
+    const garbledRatio = garbledWords.length / shortWords.length;
+    if (garbledRatio > 0.3) {
+      return;
+    }
+  }
+
+  if (content.trim().length < 10) {
+    return;
+  }
+
+  const isQuestion = content.includes('?') || 
+    /^(can |could |how |what |where |when |why |is |are |do |does |will |would |who |which |have |may |might )/i.test(content.trim());
+
+const isInquiry = 
+  /\b(late|delayed|still waiting|hasn't arrived|havent received|not received|never arrived|where is|when will)\b/i.test(lower) ||
+  /\b(order|package|shipment).{0,20}(not|never|still|hasn't|haven't).{0,20}(arrived|received|here|come)/i.test(lower) ||
+  /\b(need|want|waiting for|expecting).{0,30}(order|package|shipment|delivery)/i.test(lower) ||
+  /\b(track|tracking|status).{0,20}(order|package|shipment)/i.test(lower) ||
+  /\b(come|visit|go|stop by).{0,30}(to|at|your|the).{0,20}(address|location|store|shop|place)/i.test(lower) ||
+  /\b(buy|purchase|get).{0,20}(at|from|in).{0,20}(your|the).{0,20}(address|location|store|shop|place)/i.test(lower) ||
+  /\b(physical|in person|directly).{0,30}(buy|purchase|get|pick|collect)/i.test(lower) ||
+  /\b(pick.?up|pickup|collection|collect).{0,30}(these|this|it|physically|in person|the|my|order)/i.test(lower) ||
+  /\b(can i|able to|possible to).{0,30}(pick.?up|pickup|collect)/i.test(lower) ||
+  /\b(can i|could i|may i).{0,20}(pick|get|buy|purchase|order|collect).{0,20}(these|this|it|them|that).{0,20}(physically|in person|locally|today|tomorrow)/i.test(lower) ||
+  /\b(does|do).{0,20}(it|this|they|you).{0,20}come.{0,30}(with|in|as|pre)/i.test(lower) ||
+  /\b(come).{0,20}(pre.?mixed|as a liquid|with|in liquid)/i.test(lower) ||
+  /\b(if i|when i).{0,30}(purchase|buy|order).{0,50}(will|do|can)/i.test(lower) ||
+  /\b(i received|i got|i ordered).{0,50}(but|however|and|though).{0,50}(no|not|missing|confused|question)/i.test(lower) ||
+  /\b(wondering|help me|can you help|need help).{0,30}(with|figure|understand|how)/i.test(lower) ||
+  /\b(coa|certificate|lab report|test results|documentation).{0,30}(document|available|provide|include|actual)/i.test(lower) ||
+  /\b(provide|send|include|give|attach).{0,20}(coa|certificate|lab report|test results|documentation)/i.test(lower) ||
+  /\b(third party|independent).{0,20}(test|lab|verification|certified)/i.test(lower) ||
+  /\b(purity|quality|authenticity|verified).{0,20}(report|test|document)/i.test(lower) ||
+  /\b(dosing|dose|dosage|how to).{0,30}(information|work|use|take|inject|administer)/i.test(lower) ||
+  /\b(able to give|provide|send).{0,20}(dosing|dose|dosage|instructions|usage)/i.test(lower) ||
+  /\b(how much|how many|how often).{0,30}(take|inject|use|dose|administer|water|bac|injection)/i.test(lower) ||
+  /\b(reconstitute|reconstitution|mixing|preparation).{0,20}(instructions|guide|how)/i.test(lower) ||
+  /\b(instructions|usage|protocol).{0,20}(for|on|about).{0,20}(product|use|taking)/i.test(lower) ||
+  /\b(how long|how many).{0,30}(vial|bottle|supply|container).{0,30}(last|contain|doses|injections)/i.test(lower) ||
+  /\b(vial|bottle).{0,30}(last|duration|good for).{0,30}(week|month|day|injection)/i.test(lower) ||
+  /\b(one vial|per vial|each vial).{0,30}(last|give|provide|contain)/i.test(lower) ||
+  /\b(how many).{0,30}(doses|injections|servings|uses).{0,30}(per|in|from).{0,30}(vial|bottle)/i.test(lower) ||
+  /\b(receive|get|include|comes with).{0,30}(free|bac|water|needle|syringe|injection)/i.test(lower) ||
+  /\b(free).{0,20}(bac|water|needle|syringe)/i.test(lower) ||
+  /\b(do you have|is there|are there|where is|what is|what's).{0,20}(a |an |any |the |your )?(physical|actual|real|brick).{0,20}(store|shop|location|address|place)/i.test(lower) ||
+  /\b(physical|actual|brick and mortar|brick-and-mortar).{0,20}(store|shop|location|showroom|address)/i.test(lower) ||
+  /\b(store|shop|office).{0,20}(location|address|hours|open|where|in)/i.test(lower) ||
+  /\b(your|the).{0,20}(location|address|store location|shop location|physical address)/i.test(lower) ||
+  /\b(where|what).{0,20}(is|are).{0,20}(your|the).{0,20}(location|address|store|shop)/i.test(lower) ||
+  /\b(location).{0,30}(visit|go to|come to|available|open|hours)/i.test(lower) ||
+  /\b(have a store|store in).{0,50}(or do i|do i have to)/i.test(lower) ||
+  /\b(dosing|dosage|dose).{0,50}(schedule|chart|guide|recommendation|protocol|included|provided|information)/i.test(lower) ||
+  /\b(instructions|directions|usage).{0,30}(included|come with|provided|available|guide)/i.test(lower) ||
+  /\b(vial|bottle).{0,30}(size|amount|mg|iu|contain|last)/i.test(lower) ||
+  /\b(do you|does it|does this|do they).{0,30}(have|include|come|provide|offer|sell|give|carry)/i.test(lower);
+
+  if (!isQuestion && !isInquiry) {
+    return;
+  }
+
+  const detectedTopics = [];
+  for (const [topic, keywords] of Object.entries(topicKeywords)) {
+    if (keywords.some(kw => lower.includes(kw))) {
+      detectedTopics.push(topic);
+      topicCounts[topic] = (topicCounts[topic] || 0) + 1;
+    }
+  }
+
+  const hasBusinessTopic = detectedTopics.length > 0;
+  const isVeryShortGreeting = content.trim().length < 20 && /^(hi|hey|hello|how are you)[\s?!.]*$/i.test(lower);
+  
+  if (!hasBusinessTopic && isVeryShortGreeting) {
+    return;
+  }
+
+  let detectedIssue = null;
+  for (const [issue, keywords] of Object.entries(issueKeywords)) {
+    if (keywords.some(kw => lower.includes(kw))) {
+      detectedIssue = issue;
+      issueCounts[issue] = (issueCounts[issue] || 0) + 1;
+      break;
+    }
+  }
+
+  const negativeWords = ['angry', 'frustrated', 'upset', 'terrible', 'horrible', 'worst', 'unacceptable', 'disappointed'];
+  const positiveWords = ['thank', 'thanks', 'great', 'awesome', 'perfect', 'helpful', 'appreciate'];
+  
+  const negCount = negativeWords.filter(w => lower.includes(w)).length;
+  const posCount = positiveWords.filter(w => lower.includes(w)).length;
+
+  let sentiment = 'neutral';
+  if (negCount >= 2) sentiment = 'very_negative';
+  else if (negCount >= 1) sentiment = 'negative';
+  else if (posCount >= 2) sentiment = 'very_positive';
+  else if (posCount >= 1) sentiment = 'positive';
+
+  sentimentCounts[sentiment]++;
+
+  const normalizedQuestion = normalizeQuestion(content);
+
+  if (normalizedQuestion === 'general question' || normalizedQuestion.length < 5) {
+    return;
+  }
+
+  questions.push({
+    original: content,
+    normalized: normalizedQuestion,
+    topics: detectedTopics,
+    issue: detectedIssue,
+    sentiment: sentiment,
+    date: msg.sent_at,
+    conversationId: msg.conversation_id,
+    customerName: msg.customer_name || 'Guest',
+  });
+});
+
+  // ✅ PRINT DEBUG SUMMARY
+  console.log('\n📊 ============ ANALYTICS DEBUG SUMMARY ============');
+  console.log(`Total messages processed: ${totalMessages}`);
+  console.log(`Filtered by exclude patterns: ${filteredByExclude}`);
+  console.log(`Filtered by length < 10: ${filteredByLength}`);
+  console.log(`Not question or inquiry: ${notQuestionOrInquiry}`);
+  console.log(`No business topic (generic greeting): ${noBusinessTopic}`);
+  console.log(`Normalized too short: ${normalizedTooShort}`);
+  console.log(`Final questions kept: ${questions.length}`);
+  console.log('\n🏪 PICKUP Questions:');
+  console.log(`  Detected: ${pickupDetected}`);
+  console.log(`  Kept: ${pickupKept}`);
+  console.log(`  Lost: ${pickupDetected - pickupKept}`);
+  console.log('\n💊 DOSING Questions:');
+  console.log(`  Detected: ${dosingDetected}`);
+  console.log(`  Kept: ${dosingKept}`);
+  console.log(`  Lost: ${dosingDetected - dosingKept}`);
+  console.log('================================================\n');
+
+  // Group similar questions
+  const questionGroups = {};
+  questions.forEach(q => {
+    const key = q.normalized;
+    if (!questionGroups[key]) {
+      questionGroups[key] = {
+        question: q.normalized,
+        examples: [],
+        count: 0,
+        topics: {},
+        issues: {},
+        sentiment: { very_negative: 0, negative: 0, neutral: 0, positive: 0, very_positive: 0 },
+      };
+    }
+    
+    questionGroups[key].count++;
+    questionGroups[key].sentiment[q.sentiment]++;
+    
+    if (questionGroups[key].examples.length < 10) {
+      questionGroups[key].examples.push(q.original);
+    }
+
+    q.topics.forEach(topic => {
+      questionGroups[key].topics[topic] = (questionGroups[key].topics[topic] || 0) + 1;
+    });
+
+    if (q.issue) {
+      questionGroups[key].issues[q.issue] = (questionGroups[key].issues[q.issue] || 0) + 1;
+    }
+  });
+
+  const topQuestions = Object.values(questionGroups)
+    .sort((a, b) => b.count - a.count)
+    .map(q => ({
+      question: q.question,
+      count: q.count,
+      examples: q.examples,
+      primaryTopic: Object.keys(q.topics).sort((a, b) => q.topics[b] - q.topics[a])[0] || 'general',
+      primaryIssue: Object.keys(q.issues).sort((a, b) => q.issues[b] - q.issues[a])[0] || null,
+      sentiment: getMostCommonSentiment(q.sentiment),
+    }));
+
+  const topTopics = Object.entries(topicCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([topic, count]) => ({ topic, count }));
+
+  const topIssues = Object.entries(issueCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([issue, count]) => ({ issue, count }));
+
+  return {
+    questions,
+    topQuestions,
+    topTopics,
+    topIssues,
+    sentimentBreakdown: sentimentCounts,
+  };
+}
+
+function normalizeQuestion(question) {
+  let normalized = question.toLowerCase().trim();
+
+  // ✅ STEP 1: PRESERVE important phrases BEFORE general cleanup
+  const preservedPhrases = {
+    // Pickup/location phrases
+    'pick up': '__PICKUP__',
+    'pickup': '__PICKUP__',
+    'pick-up': '__PICKUP__',
+    'local pickup': '__LOCALPICKUP__',
+    'store pickup': '__STOREPICKUP__',
+    'come to': '__COMETO__',
+    'come directly': '__COMEDIRECTLY__',
+    'come buy': '__COMEBUY__',
+    'come by': '__COMEBY__',
+    'come get': '__COMEGET__',
+    'your address': '__YOURADDRESS__',
+    'your location': '__YOURLOCATION__',
+    'your store': '__YOURSTORE__',
+    'your shop': '__YOURSHOP__',
+    'at your': '__ATYOUR__',
+    'in person': '__INPERSON__',
+    'physical location': '__PHYSICALLOCATION__',
+    'physical store': '__PHYSICALSTORE__',
+    'store location': '__STORELOCATION__',
+    'have a store': '__HAVEASTORE__',
+    'order online': '__ORDERONLINE__',
+    // Late delivery phrases
+    'still waiting': '__STILLWAITING__',
+    'not arrived': '__NOTARRIVED__',
+    'hasn\'t arrived': '__NOTARRIVED__',
+    'haven\'t received': '__NOTRECEIVED__',
+    'not received': '__NOTRECEIVED__',
+    'never arrived': '__NEVERARRIVED__',
+    'taking too long': '__TOOLONG__',
+    // COA/documentation phrases
+    'coa document': '__COADOCUMENT__',
+    'actual coa': '__ACTUALCOA__',
+    'certificate of analysis': '__COA__',
+    'lab report': '__LABREPORT__',
+    'test results': '__TESTRESULTS__',
+    'third party': '__THIRDPARTY__',
+    'quality report': '__QUALITYREPORT__',
+    // Dosing/usage phrases
+    'dosing information': '__DOSINGINFO__',
+    'dosing work': '__DOSINGWORK__',
+    'how to use': '__HOWTOUSE__',
+    'how to take': '__HOWTOTAKE__',
+    'how much to': '__HOWMUCHTO__',
+    'how many': '__HOWMANY__',
+    'how often': '__HOWOFTEN__',
+    'able to give': '__ABLETOGIVE__',
+    'reconstitution': '__RECONSTITUTION__',
+    'reconstitute': '__RECONSTITUTE__',
+    'bac water': '__BACWATER__',
+    'bacteriostatic water': '__BACWATER__',
+    'bacteriostatic': '__BAC__',
+    // Vial duration phrases
+    'how long': '__HOWLONG__',
+    'vial last': '__VIALLAST__',
+    'one vial': '__ONEVIAL__',
+    'per vial': '__PERVIAL__',
+    'each vial': '__EACHVIAL__',
+    'bottle last': '__BOTTLELAST__',
+    'supply last': '__SUPPLYLAST__',
+    'per week': '__PERWEEK__',
+    'per day': '__PERDAY__',
+    'per month': '__PERMONTH__',
+    'how many doses': '__HOWMANYDOSES__',
+    'how many injections': '__HOWMANYINJECTIONS__',
+    'one injection': '__ONEINJECTION__',
+    'doses per': '__DOSESPER__',
+    'injections per': '__INJECTIONSPER__',
+    // Product availability
+    'do you have': '__DOYOUHAVE__',
+    'do you sell': '__DOYOUSELL__',
+    'do you guys have': '__DOYOUGUYSHAVE__',
+    'do you guys sell': '__DOYOUGUYSSELL__',
+    'comes with': '__COMESWITH__',
+    'come with': '__COMESWITH__',
+  };
+
+  // Apply preserved phrases
+  Object.entries(preservedPhrases).forEach(([phrase, placeholder]) => {
+    const regex = new RegExp(phrase, 'gi');
+    normalized = normalized.replace(regex, placeholder);
+  });
+
+  // ✅ STEP 2: Normalize specific product names to generic terms
+  normalized = normalized
+    .replace(/\b(bpc-?157|bpc 157|bpc157)\b/gi, 'bpc')
+    .replace(/\b(tb-?500|tb 500|tb500)\b/gi, 'tb')
+    .replace(/\b(ghk-?cu|ghk cu|ghkcu)\b/gi, 'ghk')
+    .replace(/\b(cjc-?1295|cjc 1295|cjc1295)\b/gi, 'cjc')
+    .replace(/\b(ipamorelin|ipa)\b/gi, 'ipa')
+    .replace(/\b(mots-?c|mots c|motsc)\b/gi, 'motsc')
+    .replace(/\b(retatrutide|reta|tirz|tirzepatide)\b/gi, 'reta')
+    .replace(/\b(tesamorelin|tesa)\b/gi, 'tesa')
+    .replace(/\b(sermorelin)\b/gi, 'sermorelin')
+    .replace(/\b(semaglutide|sema)\b/gi, 'sema')
+    .replace(/\b(wolverine|glow|klow)\b/gi, 'blend');
+
+  // ✅ STEP 3: Remove all numbers (order numbers, amounts, etc.)
+  normalized = normalized.replace(/\d+/g, '');
+
+  // Remove email addresses
+  normalized = normalized.replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, '');
+
+  // Remove dates
+  normalized = normalized.replace(/\d{1,2}\/\d{1,2}\/\d{2,4}/g, '');
+
+  // Remove URLs
+  normalized = normalized.replace(/https?:\/\/[^\s]+/gi, '');
+
+  // Remove specific colors
+  normalized = normalized.replace(/\b(blue|red|black|white|green|yellow|purple|pink|orange|brown|gray|grey)\b/gi, '');
+
+  // ✅ STEP 4: Normalize common variations
+  normalized = normalized
+    .replace(/\b(vials?|bottles?|containers?)\b/gi, 'vial')
+    .replace(/\b(injections?|shots?|doses?)\b/gi, 'dose')
+    .replace(/\b(weeks?|days?|months?)\b/gi, 'period')
+    .replace(/\b(i live in|i am in|i'm in)\s+[a-z\s]+/gi, 'i live in city')
+    .replace(/\b(fredericton|oshawa|calgary|winnipeg|vancouver|toronto|montreal|ottawa|edmonton)\b/gi, 'city')
+    .replace(/\b(order|order number|order #|#)\s*\d*/gi, 'order')
+    .replace(/\b(\d+\s*)?(ml|mg|iu|mcg|units?)\b/gi, 'amount');
+
+  // ✅ STEP 5: Normalize question starters
+  normalized = normalized
+    .replace(/^(hey|hi|hello|greetings|good morning|good afternoon|good evening|yo)\s*/gi, '')
+    .replace(/\s+(there|guys?|everyone|team|buddy)\s*/gi, ' ')
+    .replace(/where is my|where's my|wheres my|where are my/gi, 'where is')
+    .replace(/when will|when's|whens|when are|when can/gi, 'when will')
+    .replace(/how do i|how can i|how to|how would i|how should i/gi, 'how do i')
+    .replace(/what is|what's|whats|what are/gi, 'what is')
+    .replace(/can i|could i|may i|am i able to/gi, 'can i')
+    .replace(/do you|does your|do your|do you guys/gi, 'do you')
+    .replace(/is there|are there/gi, 'is there')
+    .replace(/don't|dont|do not/gi, 'do not')
+    .replace(/can't|cant|cannot/gi, 'cannot')
+    .replace(/won't|wont|will not/gi, 'will not')
+    .replace(/i'm|im/gi, 'i am')
+    .replace(/you're|youre/gi, 'you are')
+    .replace(/didn't|didnt/gi, 'did not')
+    .replace(/hasn't|hasnt/gi, 'has not')
+    .replace(/haven't|havent/gi, 'have not');
+
+  // ✅ STEP 6: Remove common filler words
+  normalized = normalized.replace(/\b(please|kindly|just|really|actually|basically|literally|honestly|sorry|um|uh|like|you know|mainly|very|quite|pretty|also|still|even|always|never)\b/gi, '');
+
+  // Remove extra punctuation
+  normalized = normalized.replace(/[?!.,:;]+/g, ' ');
+
+  // Remove extra whitespace
+  normalized = normalized.replace(/\s+/g, ' ').trim();
+
+  // ✅ STEP 7: RESTORE preserved phrases
+  Object.entries(preservedPhrases).forEach(([phrase, placeholder]) => {
+    normalized = normalized.replace(new RegExp(placeholder, 'gi'), phrase);
+  });
+
+// ✅ STEP 8: BALANCED KEYWORD-BASED GROUPING
+const stopWords = new Set([
+  'a', 'an', 'the', 'and', 'or', 'but', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+  'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'should', 'could', 'may', 'might',
+  'can', 'of', 'at', 'by', 'for', 'with', 'about', 'as', 'into', 'through', 'during', 'before',
+  'after', 'above', 'below', 'to', 'from', 'up', 'down', 'in', 'out', 'on', 'off', 'over', 'under',
+  'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'all', 'both',
+  'each', 'few', 'more', 'most', 'other', 'some', 'such', 'only', 'own', 'same', 'so', 'than',
+  'too', 'now', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours',
+  'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself',
+  'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'this', 'that', 'these',
+  'those', 'am', 'any', 'because', 'if', 'while', 'how', 'what', 'which', 'who', 'whom'
+]);
+
+const words = normalized.split(/\s+/).filter(w => w.length > 0);
+const keywords = words.filter(w => !stopWords.has(w) && w.length >= 3);
+
+// ✅ SPECIFIC HIGH-PRIORITY GROUPINGS (Group aggressively for key topics)
+
+// 1. BAC water questions - Group ALL BAC water mentions
+if (normalized.includes('__bacwater__') || normalized.includes('__bac__') || 
+    normalized.includes('bac water') || normalized.includes('bacteriostatic') ||
+    (normalized.includes('bac') && !normalized.includes('feedback') && !normalized.includes('back'))) {
+  return 'bac water question';
+}
+
+// 2. Reconstitution Solution questions (when NOT about BAC water)
+if ((normalized.includes('__reconstitution__') || normalized.includes('reconstitution solution')) &&
+    !normalized.includes('__bacwater__') && !normalized.includes('__bac__')) {
+  return 'reconstitution solution question';
+}
+
+// 3. COA questions - Group ALL COA mentions
+if (normalized.includes('coa') || normalized.includes('__coadocument__') || 
+    normalized.includes('certificate') || normalized.includes('__labreport__') ||
+    (normalized.includes('lab') && normalized.includes('report'))) {
+  return 'coa document question';
+}
+
+// 4. Dosing/usage questions - Group ALL dosing mentions
+if (normalized.includes('dosing') || normalized.includes('dosage') || 
+    normalized.includes('__dosinginfo__') || normalized.includes('__dosingwork__')) {
+  return 'dosing information question';
+}
+
+// 5. Vial duration/longevity - How long does vial last, how many doses
+if ((normalized.includes('__howlong__') || normalized.includes('__viallast__')) ||
+    (normalized.includes('__howmany__') && (normalized.includes('dose') || normalized.includes('vial'))) ||
+    (normalized.includes('vial') && normalized.includes('last')) ||
+    (normalized.includes('__howmanydoses__') || normalized.includes('__dosesper__'))) {
+  return 'vial duration question';
+}
+
+// 6. Needles/Syringes included/receive
+if ((normalized.includes('needle') || normalized.includes('syringe')) && 
+    (normalized.includes('__comeswith__') || normalized.includes('receive') || 
+     normalized.includes('included') || normalized.includes('order'))) {
+  return 'needles included question';
+}
+
+// 7. Pickup/Location questions
+if (normalized.includes('__pickup__') || normalized.includes('__cometo__') || 
+    normalized.includes('__inperson__') || normalized.includes('__physicallocation__') || 
+    normalized.includes('__physicalstore__') || normalized.includes('__storelocation__') ||
+    normalized.includes('__haveastore__')) {
+  return 'pickup location question';
+}
+
+// 8. Tracking/Delivery not received
+if ((normalized.includes('tracking') || normalized.includes('__notarrived__') || 
+     normalized.includes('__stillwaiting__') || normalized.includes('__notreceived__')) &&
+    !normalized.includes('edit') && !normalized.includes('change')) {
+  return 'tracking delivery question';
+}
+
+// 9. Order edit/change (NOT address)
+if ((normalized.includes('edit') || normalized.includes('change')) && 
+    normalized.includes('order') && !normalized.includes('address')) {
+  return 'edit order question';
+}
+
+// 10. Address change
+if ((normalized.includes('change') || normalized.includes('update')) && normalized.includes('address')) {
+  return 'change address question';
+}
+
+// 11. Refund questions
+if (normalized.includes('refund') || normalized.includes('refunded') || 
+    normalized.includes('reimbursement') || normalized.includes('money back')) {
+  return 'refund question';
+}
+
+// 12. Discount/promo code
+if (normalized.includes('discount') || (normalized.includes('code') && !normalized.includes('postal')) || 
+    normalized.includes('promo') || normalized.includes('coupon')) {
+  return 'discount code question';
+}
+
+// 13. Payment methods
+if ((normalized.includes('payment') && normalized.includes('method')) || 
+    (normalized.includes('payment') && normalized.includes('accept'))) {
+  return 'payment methods question';
+}
+
+// 14. Product availability (do you have/sell)
+if ((normalized.includes('__doyouhave__') || normalized.includes('__doyousell__')) && 
+    !normalized.includes('needle') && !normalized.includes('syringe') && 
+    !normalized.includes('__bacwater__') && !normalized.includes('coa') &&
+    !normalized.includes('__haveastore__')) {
+  return 'product availability question';
+}
+
+// 15. Ingredients/China source
+if ((normalized.includes('ingredients') || normalized.includes('china') || normalized.includes('source')) &&
+    (normalized.includes('come') || normalized.includes('from') || normalized.includes('__doyouhave__'))) {
+  return 'ingredients source question';
+}
+
+// 16. Vial form (liquid vs powder)
+if ((normalized.includes('liquid') || normalized.includes('powder') || normalized.includes('dry')) && 
+    (normalized.includes('vial') || normalized.includes('form') || normalized.includes('state'))) {
+  return 'vial form question';
+}
+
+// 17. Guarantee/delivery guarantee
+if (normalized.includes('guarantee') && (normalized.includes('delivery') || normalized.includes('arrival'))) {
+  return 'delivery guarantee question';
+}
+
+// 18. Mg/dosage sizes - "can we buy highest mg and inject smaller amount"
+if ((normalized.includes('amount') || normalized.includes('size')) && 
+    (normalized.includes('inject') || normalized.includes('smaller') || normalized.includes('various'))) {
+  return 'dosage size flexibility question';
+}
+
+// ✅ FALLBACK: Use top 3 keywords (sorted)
+if (keywords.length >= 3) {
+  const filteredKeywords = keywords.filter(k => 
+    !['order', 'question', 'help', 'know', 'want', 'need', 'get', 'give', 'tell', 'ask', 
+      'also', 'still', 'just', 'make', 'take', 'use', 'see', 'find'].includes(k)
+  );
+  
+  if (filteredKeywords.length >= 2) {
+    const sortedKeywords = [...filteredKeywords].sort().slice(0, 3);
+    return sortedKeywords.join(' ');
+  }
+}
+
+// Final fallback
+if (normalized.length < 5) {
+  return 'general question';
+}
+
+return normalized;
+}
+
+function getMostCommonSentiment(sentimentCounts) {
+  return Object.entries(sentimentCounts)
+    .sort((a, b) => b[1] - a[1])[0][0];
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // ============ STATS ENDPOINTS ============
 

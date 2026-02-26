@@ -1,5 +1,3 @@
-
-
 import React, { useState, useEffect, useRef } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import api from "../services/api";
@@ -816,6 +814,19 @@ function ChatWindow({
     });
   };
 
+  const getStoreDetails = () => {
+    if (!stores || !conversation) return null;
+    
+    const store = stores.find(s =>
+      s.storeIdentifier === conversation.storeIdentifier ||
+      s.id === conversation.shopId ||
+      s.id === conversation.shop_id ||
+      s.storeIdentifier === conversation.store_identifier
+    );
+    
+    return store || null;
+  };
+
   if (!conversation) {
     return (
       <div className="chat-window">
@@ -828,18 +839,16 @@ function ChatWindow({
     );
   }
 
-  const getStoreDetails = () => {
-    if (!stores || !conversation) return null;
-    const store = stores.find(s =>
-      s.storeIdentifier === conversation.storeIdentifier ||
-      s.id === conversation.shopId
-    );
-    return store || null;
-  };
-
   const storeDetails = getStoreDetails();
   const storeName = storeDetails?.brandName || conversation.storeName || conversation.storeIdentifier;
-  const storeDomain = storeDetails?.domain || storeDetails?.url || storeDetails?.storeDomain || null;
+  const storeDomain = storeDetails?.domain || 
+                      storeDetails?.url || 
+                      storeDetails?.storeDomain || 
+                      storeDetails?.shopDomain ||
+                      storeDetails?.myshopify_domain ||
+                      conversation.domain ||
+                      conversation.storeDomain ||
+                      null;
   const groupedMessages = getGroupedMessages();
 
   return (
@@ -866,9 +875,7 @@ function ChatWindow({
               {storeName && (
                 <span className="store-info">
                   <strong>{storeName}</strong>
-                  <span className="store-domain-mobile">
-                    {storeDomain && ` • ${storeDomain}`}
-                  </span>
+                  {storeDomain && ` • ${storeDomain}`}
                 </span>
               )}
               <span className="customer-email-desktop">
@@ -921,7 +928,6 @@ function ChatWindow({
         </div>
       </div>
 
-
       {/* Delete Modal */}
       {showDeleteModal && (
         <div className="modal-overlay" onClick={handleCancelDelete}>
@@ -966,19 +972,19 @@ function ChatWindow({
               </div>
             ) : (
               <>
-              {groupedMessages.map((message, index) => (
-                <MessageBubble
-                  key={message.id || `msg-${index}`}
-                  message={message}
-                  nextMessage={index < groupedMessages.length - 1 ? groupedMessages[index + 1] : null}
-                  isAgent={message.senderType === 'agent'}
-                  isCustomer={message.senderType === 'customer'}
-                  showAvatar={true}
-                  isFirstInGroup={message.isFirstInGroup}
-                  isLastInGroup={message.isLastInGroup}
-                  sending={message.sending || message._optimistic}
-                />
-              ))}
+                {groupedMessages.map((message, index) => (
+                  <MessageBubble
+                    key={message.id || `msg-${index}`}
+                    message={message}
+                    nextMessage={index < groupedMessages.length - 1 ? groupedMessages[index + 1] : null}
+                    isAgent={message.senderType === 'agent'}
+                    isCustomer={message.senderType === 'customer'}
+                    showAvatar={true}
+                    isFirstInGroup={message.isFirstInGroup}
+                    isLastInGroup={message.isLastInGroup}
+                    sending={message.sending || message._optimistic}
+                  />
+                ))}
                 
                 {typingUsers.size > 0 && (
                   <div className="typing-indicator">

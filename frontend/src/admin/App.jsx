@@ -738,6 +738,12 @@
 
 // export default App;
 
+
+
+
+
+
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import api from './services/api';
 import { useConversations } from './hooks/useConversations';
@@ -749,6 +755,7 @@ import EmployeeManagement from './components/EmployeeManagement';
 import ErrorBoundary from './components/ErrorBoundary';
 import MobileMenu from './components/MobileMenu';
 import ConversationNotes from './components/ConversationNotes';
+import AnalyticsDashboard from './components/AnalyticsDashboard';
 
 function App() {
   const [employee, setEmployee] = useState(null);
@@ -1244,8 +1251,8 @@ function DashboardContent({ employee, onLogout }) {
   };
 
   useEffect(() => {
-    if (activePage === 'employees' && employee.role !== 'admin') {
-      console.warn('⚠️ Non-admin user attempted to access employee management');
+    if ((activePage === 'employees' || activePage === 'analytics') && employee.role !== 'admin') {
+      console.warn('⚠️ Non-admin user attempted to access restricted page');
       setActivePage('dashboard');
     }
   }, [activePage, employee.role]);
@@ -1280,6 +1287,16 @@ function DashboardContent({ employee, onLogout }) {
             >
               💬 Dashboard
             </button>
+            
+{/* {employee.role === 'admin' && (
+  <button
+    className={`nav-btn ${activePage === 'analytics' ? 'nav-active' : ''}`}
+    onClick={() => setActivePage('analytics')}
+    type="button"
+  >
+    📊 Analytics
+  </button>
+)} */}
             
             {employee.role === 'admin' && activePage === 'dashboard' && (
               <button
@@ -1445,11 +1462,21 @@ function DashboardContent({ employee, onLogout }) {
         </div>
       )}
 
+      {activePage === 'analytics' && (
+        <div className="app-content full-width">
+          <ErrorBoundary>
+            <AnalyticsDashboard onBack={handleBackToDashboard} />
+          </ErrorBoundary>
+        </div>
+      )}
+
       {activePage === 'employees' && (
-        <EmployeeManagement
-          currentUser={employee}
-          onBack={handleBackToDashboard}
-        />
+        <div className="app-content full-width">
+          <EmployeeManagement
+            currentUser={employee}
+            onBack={handleBackToDashboard}
+          />
+        </div>
       )}
     </div>
   );
