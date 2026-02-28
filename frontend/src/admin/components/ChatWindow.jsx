@@ -77,12 +77,12 @@ function ChatWindow({
   };
 
   // ============ QUICK REPLY HANDLERS ============
-
-  const handleUseTemplate = (template) => {
-    setMessageText(template.content);
-    if (textareaRef.current) textareaRef.current.focus();
-  };
-
+const handleUseTemplate = (content) => {
+  console.log('📋 Content received:', content);
+  console.log('📋 Type:', typeof content);
+  setMessageText(content);
+  if (textareaRef.current) textareaRef.current.focus();
+};
   const handleAddQuickReply = async ({ name, content }) => {
     const newTemplate = await api.createTemplate({ name, content });
     setTemplates(prev => [...prev, newTemplate]);

@@ -85,24 +85,24 @@ function ConversationNotes({ employeeId, employeeName, onClose }) {
     }
   };
 
-  const handleCopy = async (note) => {
-    const textToCopy = `${note.title}\n\n${note.content}`;
-    
-    try {
-      await navigator.clipboard.writeText(textToCopy);
-      showToast('📋 Copied to clipboard!', 'success');
-    } catch (err) {
-      const textarea = document.createElement('textarea');
-      textarea.value = textToCopy;
-      textarea.style.position = 'fixed';
-      textarea.style.opacity = '0';
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textarea);
-      showToast('📋 Copied to clipboard!', 'success');
-    }
-  };
+const handleCopy = async (note) => {
+  const textToCopy = note.content;  // ✅ Only copy content
+  
+  try {
+    await navigator.clipboard.writeText(textToCopy);
+    showToast('📋 Copied to clipboard!', 'success');
+  } catch (err) {
+    const textarea = document.createElement('textarea');
+    textarea.value = textToCopy;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textarea);
+    showToast('📋 Copied to clipboard!', 'success');
+  }
+};
 
   const showToast = (message, type = 'success') => {
     const toast = document.createElement('div');

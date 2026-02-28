@@ -110,10 +110,12 @@ function QuickReplies({
     if (editingId === templateId) setEditingId(null);
   };
 
-  const handleUse = (template) => {
-    onUseTemplate(template);
-    onToggle();
-  };
+const handleUse = (template) => {
+  console.log('⚡ Template clicked:', template);
+  console.log('⚡ Sending content:', template.content);
+  onUseTemplate(template.content);
+  onToggle();
+};
 
   const handleFormKeyDown = (e, action) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); action(); }
