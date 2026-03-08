@@ -1975,6 +1975,15 @@
             hideTypingIndicator();
           }
           break;
+
+          case 'message_deleted':
+          if (data.messageId) {
+            const msgEl = document.querySelector('[data-message-id="' + data.messageId + '"]');
+            if (msgEl) msgEl.remove();
+            displayedMessageIds.delete(data.messageId);
+            updateMessageDateDisplay();
+          }
+          break;
           
         case 'error':
           console.error('[WebSocket] Error:', data.message);

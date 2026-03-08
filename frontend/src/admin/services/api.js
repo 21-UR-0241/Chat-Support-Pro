@@ -578,7 +578,14 @@ class ApiService {
       method: 'POST',
       body: JSON.stringify(data),
     });
+    
   }
+  
+  async deleteMessage(messageId) {
+  return this.fetch(`/api/messages/${messageId}`, {
+    method: 'DELETE',
+  });
+}
 
   // ============ Stores ============
 
@@ -720,5 +727,7 @@ class ApiService {
     return this.fetch('/health');
   }
 }
+
+
 
 export default new ApiService();
