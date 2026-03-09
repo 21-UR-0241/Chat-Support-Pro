@@ -1620,13 +1620,13 @@
           if (wsToken) {
             connectWebSocket();
           } else {
-            updateStatus('online', "We usually get back to you within 1 to 6 hours");
+            updateStatus('online', 'We usually get back to you within 1 to 6 hours <strong>(Please note it can be the next day as well in some cases)</strong>');
           }
         } catch (e) {
-          updateStatus('online', "We usually get back to you within 1 to 6 hours");
+          updateStatus('online', 'We usually get back to you within 1 to 6 hours <strong>(Please note it can be the next day as well in some cases)</strong>');
         }
       } else {
-        updateStatus('online', "We usually get back to you within 1 to 6 hours");
+        updateStatus('online', 'We usually get back to you within 1 to 6 hours <strong>(Please note it can be the next day as well in some cases)</strong>');
       }
     }
 
@@ -1809,7 +1809,7 @@
           await showChatInterface();
         } else {
           emailCollection.classList.add('visible');
-          updateStatus('online', "We usually get back to you within 1 to 6 hours");
+         updateStatus('online', 'We usually get back to you within 1 to 6 hours <strong>(Please note it can be the next day as well in some cases)</strong>');
         }
       } catch (error) {
         console.error('[Init] Fatal:', error);
@@ -1817,16 +1817,29 @@
       }
     }
 
-    function updateStatus(status, text) {
-      statusText.textContent = text;
-      statusIndicator.classList.remove('offline', 'connecting');
+    // function updateStatus(status, text) {
+    //   statusText.textContent = text;
+    //   statusIndicator.classList.remove('offline', 'connecting');
       
-      if (status === 'connecting') {
-        statusIndicator.classList.add('connecting');
-      } else if (status === 'offline') {
-        statusIndicator.classList.add('offline');
-      }
-    }
+    //   if (status === 'connecting') {
+    //     statusIndicator.classList.add('connecting');
+    //   } else if (status === 'offline') {
+    //     statusIndicator.classList.add('offline');
+    //   }
+    // }
+
+    function updateStatus(status, text) {
+  statusText.innerHTML = text;
+  statusIndicator.classList.remove('offline', 'connecting');
+  
+  if (status === 'connecting') {
+    statusIndicator.classList.add('connecting');
+  } else if (status === 'offline') {
+    statusIndicator.classList.add('offline');
+  }
+}
+
+    
 
     async function loadSettings() {
       try {
@@ -1934,7 +1947,7 @@
           break;
           
         case 'auth_ok':
-          updateStatus('online', "We usually get back to you within 1 to 6 hours");
+          updateStatus('online', 'We usually get back to you within 1 to 6 hours <strong>(Please note it can be the next day as well in some cases)</strong>');
           
           ws.send(JSON.stringify({
             type: 'join_conversation',
@@ -1950,7 +1963,7 @@
           break;
           
         case 'joined':
-          updateStatus('online', "We usually get back to you within 1 to 6 hours");
+          updateStatus('online', 'We usually get back to you within 1 to 6 hours <strong>(Please note it can be the next day as well in some cases)</strong>');
           break;
           
         case 'new_message':

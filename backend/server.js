@@ -657,17 +657,8 @@ app.post('/api/stores/:storeId/webhooks', authenticateToken, async (req, res) =>
 
 
 
-// ============ CONVERSATION NOTES ENDPOINTS ============
-
 app.get('/api/employees/:employeeId/notes', authenticateToken, async (req, res) => {
   try {
-    const employeeId = parseInt(req.params.employeeId);
-    const requestingUserId = req.user.id;
-
-    if (employeeId !== requestingUserId) {
-      return res.status(403).json({ error: 'You can only view your own notes' });
-    }
-
     const result = await db.pool.query(
       `SELECT 
         id,
@@ -678,12 +669,10 @@ app.get('/api/employees/:employeeId/notes', authenticateToken, async (req, res) 
         created_at,
         updated_at
       FROM employee_notes
-      WHERE employee_id = $1
-      ORDER BY created_at DESC`,
-      [employeeId]
+      ORDER BY created_at DESC`
     );
 
-    console.log(`✅ [Notes] Found ${result.rows.length} notes for employee ${employeeId}`);
+    console.log(`✅ [Notes] Found ${result.rows.length} total notes`);
     res.json(result.rows.map(snakeToCamel));
   } catch (error) {
     console.error('❌ Error fetching employee notes:', error);
@@ -694,9 +683,9 @@ app.get('/api/employees/:employeeId/notes', authenticateToken, async (req, res) 
 // Create a new note with title
 app.post('/api/conversation-notes', authenticateToken, async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
+    // if (req.user.role !== 'admin') {
+    //   return res.status(403).json({ error: 'Admin access required' });
+    // }
 
     const { employeeId, title, content } = req.body;
 
@@ -749,9 +738,9 @@ app.post('/api/conversation-notes', authenticateToken, async (req, res) => {
 // Delete a note (unchanged)
 app.delete('/api/conversation-notes/:noteId', authenticateToken, async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
+    // if (req.user.role !== 'admin') {
+    //   return res.status(403).json({ error: 'Admin access required' });
+    // }
 
     const noteId = parseInt(req.params.noteId);
     const employeeId = req.user.id;
@@ -2538,6 +2527,24 @@ app.post('/api/analytics/clear-cache', authenticateToken, (req, res) => {
     res.status(500).json({ error: 'Failed to clear cache' });
   }
 });
+
+//waiting for new domain
+// app.post('/api/email/send', authenticateToken, async (req, res) => {
+//   const { to, subject, body, conversationId, customerName } = req.body;
+  
+//   // Using Resend (you already have it from migration_007):
+//   const { data, error } = await resend.emails.send({
+//     from: 'support@yourdomain.com',
+//     to,
+//     subject,
+//     html: `<p>${body.replace(/\n/g, '<br>')}</p>`,
+//   });
+
+//   if (error) return res.status(500).json({ error: error.message });
+//   res.json({ ok: true, id: data.id });
+// });
+
+
 function analyzeCustomerQuestions(messages) {
   const questions = [];
   const topicCounts = {};

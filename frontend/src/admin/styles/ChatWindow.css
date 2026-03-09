@@ -537,7 +537,9 @@
   box-shadow: 0 4px 12px rgba(0, 168, 132, 0.3);
 }
 
-/* Input Container */
+/* ========================================
+   INPUT CONTAINER
+   ======================================== */
 .chat-input-container {
   background: #f0f2f5;
   padding: 12px 16px;
@@ -584,7 +586,7 @@
 
 .chat-input {
   width: 100%;
-  padding: 10px 48px 10px 14px;
+  padding: 10px 14px;
   border: 1px solid #e9edef;
   border-radius: 22px;
   font-size: 14px;
@@ -613,13 +615,41 @@
   color: #667781;
 }
 
+/* ========================================
+   INPUT ACTION BUTTONS (emoji + attach) — standalone in flex row
+   ======================================== */
+.emoji-toggle-btn {
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  min-height: 38px;
+  border: none;
+  background: transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  transition: background 0.2s ease;
+  flex-shrink: 0;
+  padding: 0;
+  line-height: 1;
+}
+
+.emoji-toggle-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.emoji-toggle-btn:active {
+  transform: scale(0.92);
+}
+
 .attach-btn {
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 32px;
-  height: 32px;
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  min-height: 38px;
   border: none;
   background: transparent;
   color: #54656f;
@@ -628,12 +658,162 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: 20px;
   transition: background 0.2s ease;
+  flex-shrink: 0;
+  padding: 0;
 }
 
 .attach-btn:hover {
-  background: #f5f6f6;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+/* ========================================
+   EMOJI PICKER PANEL
+   ======================================== */
+.emoji-picker {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  right: 0;
+  width: 320px;
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 8px 30px rgba(11, 20, 26, 0.18), 0 2px 8px rgba(11, 20, 26, 0.1);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 200;
+  animation: emojiPickerIn 0.18s ease-out;
+  border: 1px solid #e9edef;
+}
+
+@keyframes emojiPickerIn {
+  from { opacity: 0; transform: scale(0.95) translateY(6px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* Search */
+.emoji-picker-search {
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid #f0f2f5;
+  background: #f8f9fa;
+}
+
+.emoji-search-input {
+  width: 100%;
+  padding: 7px 12px;
+  border: 1px solid #e9edef;
+  border-radius: 18px;
+  font-size: 13px;
+  background: #fff;
+  color: #111b21;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.2s;
+}
+
+.emoji-search-input:focus {
+  border-color: #00a884;
+  box-shadow: 0 0 0 2px rgba(0,168,132,0.12);
+}
+
+.emoji-search-input::placeholder {
+  color: #aab4bc;
+}
+
+/* Category tabs */
+.emoji-category-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 8px;
+  border-bottom: 1px solid #f0f2f5;
+  background: #fafafa;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.emoji-category-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.emoji-cat-tab {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  font-size: 17px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+  padding: 0;
+}
+
+.emoji-cat-tab:hover {
+  background: #f0f2f5;
+}
+
+.emoji-cat-tab.active {
+  background: #e8f8f4;
+  box-shadow: 0 0 0 2px #00a884 inset;
+}
+
+/* Emoji grid */
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+  padding: 8px;
+  overflow-y: auto;
+  max-height: 220px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(134, 150, 160, 0.4) transparent;
+}
+
+.emoji-grid::-webkit-scrollbar {
+  width: 4px;
+}
+
+.emoji-grid::-webkit-scrollbar-thumb {
+  background: rgba(134, 150, 160, 0.4);
+  border-radius: 2px;
+}
+
+.emoji-btn {
+  width: 100%;
+  aspect-ratio: 1;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s, transform 0.1s;
+  padding: 0;
+  line-height: 1;
+}
+
+.emoji-btn:hover {
+  background: #f0f2f5;
+  transform: scale(1.2);
+}
+
+.emoji-btn:active {
+  transform: scale(1.05);
+  background: #e9edef;
+}
+
+.emoji-no-results {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: #aab4bc;
+  font-size: 13px;
+  padding: 24px 0;
 }
 
 .send-btn {
@@ -717,12 +897,8 @@
 }
 
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 .modal-content {
@@ -735,14 +911,8 @@
 }
 
 @keyframes slideUp {
-  from {
-    transform: translateY(30px);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
+  from { transform: translateY(30px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
 }
 
 .modal-header {
@@ -845,7 +1015,7 @@
 }
 
 /* ========================================
-   DESKTOP - KEEP EVERYTHING VISIBLE (MIN-WIDTH 769px)
+   DESKTOP (MIN-WIDTH 769px)
    ======================================== */
 
 @media (min-width: 769px) {
@@ -860,20 +1030,26 @@
   .store-info {
     max-width: none;
   }
-  
+
   .templates-dropdown {
     max-width: 400px;
     left: auto;
     right: auto;
   }
+
+  /* On desktop keep picker anchored to right of wrapper */
+  .emoji-picker {
+    right: 0;
+    left: auto;
+    width: 320px;
+  }
 }
 
 /* ========================================
-   MOBILE RESPONSIVE DESIGN - UPDATED (MAX-WIDTH 768px)
+   MOBILE RESPONSIVE DESIGN (MAX-WIDTH 768px)
    ======================================== */
 
 @media (max-width: 768px) {
-  /* ===== MAIN CONTAINER ===== */
   .chat-window {
     position: fixed;
     top: 0;
@@ -891,7 +1067,6 @@
     overflow: hidden;
   }
 
-  /* ===== TEMPLATES DROPDOWN ON MOBILE ===== */
   .templates-dropdown {
     left: 8px;
     right: 8px;
@@ -922,7 +1097,6 @@
     font-size: 12px;
   }
 
-  /* ===== HEADER ===== */
   .chat-header {
     padding: 8px 12px;
     min-height: 56px;
@@ -947,7 +1121,6 @@
     overflow: hidden;
   }
 
-  /* Back button - always visible on mobile */
   .chat-back-btn-mobile {
     display: flex !important;
     width: 40px;
@@ -971,23 +1144,12 @@
     transform: scale(0.95);
   }
 
-  /* Avatar */
   .chat-header-avatar {
     width: 40px;
     height: 40px;
     min-width: 40px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #00a884, #005c4b);
-    color: white;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 600;
-    font-size: 16px;
-    flex-shrink: 0;
   }
 
-  /* Header info */
   .chat-header-info {
     flex: 1;
     min-width: 0;
@@ -1005,7 +1167,6 @@
     line-height: 20px;
   }
 
-  /* Hide email on mobile, show only store name */
   .customer-email-desktop {
     display: none !important;
   }
@@ -1020,7 +1181,6 @@
     line-height: 16px;
   }
 
-  /* IMPORTANT: Remove any pseudo-elements that add extra text */
   .chat-header-subtitle::after,
   .chat-header-subtitle::before {
     content: none !important;
@@ -1051,7 +1211,6 @@
     flex-shrink: 0;
   }
 
-  /* Header actions */
   .chat-actions {
     display: flex;
     gap: 2px;
@@ -1063,29 +1222,13 @@
     width: 40px;
     height: 40px;
     min-width: 40px;
-    border: none;
-    background: transparent;
-    color: #54656f;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
     font-size: 18px;
-    padding: 0;
-    transition: background 0.2s ease;
-  }
-
-  .icon-btn:active {
-    background: #f5f6f6;
-    transform: scale(0.95);
   }
 
   .delete-btn {
     color: #ff4444;
   }
 
-  /* ===== CONTENT AREA ===== */
   .chat-content {
     display: flex;
     flex: 1;
@@ -1093,7 +1236,6 @@
     min-height: 0;
   }
 
-  /* ===== MESSAGES CONTAINER ===== */
   .chat-messages {
     flex: 1;
     overflow-y: auto;
@@ -1114,13 +1256,11 @@
     scroll-behavior: smooth;
   }
 
-  /* Hide scrollbar for cleaner look */
   .chat-messages::-webkit-scrollbar {
     width: 0;
     display: none;
   }
 
-  /* ===== TYPING INDICATOR ===== */
   .typing-indicator {
     display: flex;
     align-items: flex-end;
@@ -1134,15 +1274,7 @@
     width: 32px;
     height: 32px;
     min-width: 32px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #00a884, #005c4b);
-    color: white;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 600;
     font-size: 13px;
-    flex-shrink: 0;
     margin-bottom: 4px;
   }
 
@@ -1159,8 +1291,6 @@
   .typing-dot {
     width: 8px;
     height: 8px;
-    border-radius: 50%;
-    background: #90949c;
     animation: typingBounce 1.4s infinite;
   }
 
@@ -1169,17 +1299,10 @@
   .typing-dot:nth-child(3) { animation-delay: 0.4s; }
 
   @keyframes typingBounce {
-    0%, 60%, 100% {
-      transform: translateY(0);
-      opacity: 0.7;
-    }
-    30% {
-      transform: translateY(-10px);
-      opacity: 1;
-    }
+    0%, 60%, 100% { transform: translateY(0); opacity: 0.7; }
+    30%            { transform: translateY(-10px); opacity: 1; }
   }
 
-  /* ===== INPUT AREA ===== */
   .chat-input-container {
     background: #f0f2f5;
     padding: 8px 12px;
@@ -1207,7 +1330,7 @@
 
   .chat-input {
     width: 100%;
-    padding: 10px 48px 10px 16px;
+    padding: 10px 16px;
     border: none;
     border-radius: 21px;
     background: white;
@@ -1230,49 +1353,44 @@
     border: none;
   }
 
-  /* Attachment button */
+  /* Emoji picker on mobile — full width, anchored above input */
+  .emoji-picker {
+    width: calc(100vw - 32px);
+    right: -12px;
+    left: auto;
+  }
+
+  .emoji-grid {
+    grid-template-columns: repeat(7, 1fr);
+    max-height: 200px;
+  }
+
+  .emoji-btn {
+    font-size: 22px;
+  }
+
   .attach-btn {
-    position: absolute;
-    right: 8px;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 32px;
-    height: 32px;
-    min-width: 32px;
-    border: none;
-    background: transparent;
-    color: #8696a0;
-    border-radius: 50%;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
     font-size: 20px;
     padding: 0;
-    transition: background 0.2s ease;
+    margin-left: 0;
   }
 
-  .attach-btn:active {
-    background: rgba(134, 150, 160, 0.1);
+  .emoji-toggle-btn {
+    width: 40px;
+    height: 40px;
+    font-size: 20px;
+    margin-right: 0;
   }
 
-  /* Send button */
   .send-btn {
     width: 48px;
     height: 48px;
     min-width: 48px;
-    border: none;
-    background: #00a884;
-    color: white;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    flex-shrink: 0;
     font-size: 20px;
     box-shadow: 0 1px 2px rgba(11, 20, 26, 0.16);
-    transition: all 0.1s ease;
   }
 
   .send-btn:active:not(:disabled) {
@@ -1286,7 +1404,6 @@
     background: #00a884;
   }
 
-  /* ===== EMPTY STATE ===== */
   .empty-state {
     display: flex;
     flex-direction: column;
@@ -1317,7 +1434,6 @@
     line-height: 1.5;
   }
 
-  /* ===== CUSTOMER INFO SIDEBAR ===== */
   .customer-info {
     position: fixed;
     top: 0;
@@ -1333,15 +1449,10 @@
   }
 
   @keyframes slideInRight {
-    from {
-      transform: translateX(100%);
-    }
-    to {
-      transform: translateX(0);
-    }
+    from { transform: translateX(100%); }
+    to   { transform: translateX(0); }
   }
 
-  /* ===== DELETE MODAL ON MOBILE ===== */
   .modal-content {
     width: 95%;
     max-width: 400px;
@@ -1365,7 +1476,6 @@
     width: 100%;
   }
 
-  /* ===== SAFE AREA INSETS ===== */
   .chat-header {
     padding-top: max(8px, env(safe-area-inset-top));
     padding-left: max(12px, env(safe-area-inset-left));
@@ -1378,7 +1488,6 @@
     padding-right: max(12px, env(safe-area-inset-right));
   }
 
-  /* ===== GENERAL MOBILE OPTIMIZATIONS ===== */
   * {
     -webkit-tap-highlight-color: transparent;
   }
@@ -1396,13 +1505,20 @@
     max-width: 150px;
   }
 
-  /* Hide domain on very small screens */
   .store-domain-mobile {
     display: none;
   }
 
   .chat-header-info h3 {
     font-size: 15px;
+  }
+
+  .emoji-picker {
+    width: calc(100vw - 24px);
+  }
+
+  .emoji-grid {
+    grid-template-columns: repeat(6, 1fr);
   }
 }
 
@@ -1429,6 +1545,14 @@
     width: 36px;
     height: 36px;
     min-width: 36px;
+  }
+
+  .emoji-picker {
+    max-height: 260px;
+  }
+
+  .emoji-grid {
+    max-height: 140px;
   }
 }
 
