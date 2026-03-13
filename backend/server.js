@@ -1853,7 +1853,7 @@ app.post('/api/ai/suggestions', authenticateToken, async (req, res) => {
     const systemPrompt = buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness, brainContext, brainSettings);
     const userPrompt = buildUserPrompt(chatHistory, clientMessage, messageEdited, adminNote, conversationState, recentContext);
     const requestBody = JSON.stringify({
-      model: process.env.AI_MODEL || 'claude-sonnet-4-6',
+      model: 'claude-sonnet-4-6',
       max_tokens: 1500,
       temperature: 0.3,
       system: systemPrompt,
