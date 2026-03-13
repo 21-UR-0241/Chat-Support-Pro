@@ -4,10 +4,16 @@
 
 const express = require('express');
 const https   = require('https');
+const multer  = require('multer');
 const router  = express.Router();
 
 const { authenticateToken } = require('../auth');
 const db = require('../database');
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET  /api/ai/training/brain
@@ -53,6 +59,49 @@ router.put('/brain', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error('[AI Training] PUT brain error:', err);
     res.status(500).json({ error: 'Failed to save brain' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/ai/training/upload-doc
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/upload-doc', authenticateToken, upload.single('file'), async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+    const { mimetype, buffer, originalname } = req.file;
+    let text = '';
+
+    if (mimetype === 'text/plain') {
+      text = buffer.toString('utf-8');
+
+    } else if (mimetype === 'application/pdf') {
+      const pdfParse = require('pdf-parse');
+      const data = await pdfParse(buffer);
+      text = data.text;
+
+    } else if (
+      mimetype === 'application/msword' ||
+      mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+      originalname.match(/\.docx?$/i)
+    ) {
+      const mammoth = require('mammoth');
+      const result = await mammoth.extractRawText({ buffer });
+      text = result.value;
+
+    } else {
+      return res.status(400).json({ error: `Unsupported file type: ${mimetype}` });
+    }
+
+    if (!text?.trim()) return res.status(400).json({ error: 'Could not extract text from file' });
+
+    console.log(`[AI Training] Doc uploaded by ${req.user.email}: ${originalname} (${text.length} chars)`);
+    res.json({ text: text.trim(), filename: originalname, chars: text.length });
+
+  } catch (err) {
+    console.error('[AI Training] upload-doc error:', err);
+    res.status(500).json({ error: 'Failed to process document', message: err.message });
   }
 });
 
@@ -235,7 +284,6 @@ RESPONSE FORMAT — valid JSON only, no markdown:
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/ai/training/proactive-questions
-// After auto-analyze, generate targeted interview questions for admin
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/proactive-questions', authenticateToken, async (req, res) => {
   try {
@@ -382,6 +430,11 @@ RULE EXTRACTION:
 - Extract silently — don't ask permission, just confirm briefly: "Got it, added as a rule."
 - Always set type="training" when you extract rules, type="mixed" when you both answer AND extract
 
+DOCUMENT UPLOAD:
+- When admin uploads a document, extract ALL relevant rules, policies, product knowledge, and tone guidelines
+- Treat uploaded docs as authoritative source material — extract aggressively
+- After processing a doc, give a summary of what you learned and ask if anything needs clarification
+
 SCREENSHOT ANALYSIS:
 - Read every detail in the image
 - Identify what's wrong or right with the conversation/suggestion shown
@@ -399,49 +452,48 @@ RESPONSE FORMAT — valid JSON only, no markdown fences:
   "nextQuestion": "Optional follow-up question string, or null"
 }`;
 
-// Build message history — only 'user' and 'assistant' roles allowed by Anthropic
-const rawMessages = [];
-history.slice(-14).forEach(h => {
-  const role = h.role === 'ai' ? 'assistant' : h.role;
-  if (!['user', 'assistant'].includes(role)) return; // skip 'system' messages
-  const content = (h.content || '').trim();
-  if (!content) return; // skip empty
-  rawMessages.push({ role, content });
-});
+    // Build message history — only 'user' and 'assistant' roles allowed by Anthropic
+    const rawMessages = [];
+    history.slice(-14).forEach(h => {
+      const role = h.role === 'ai' ? 'assistant' : h.role;
+      if (!['user', 'assistant'].includes(role)) return;
+      const content = (h.content || '').trim();
+      if (!content) return;
+      rawMessages.push({ role, content });
+    });
 
-// Anthropic requires strict user/assistant alternation — remove consecutive same-role messages
-const chatMessages = [];
-for (const msg of rawMessages) {
-  if (chatMessages.length > 0 && chatMessages[chatMessages.length - 1].role === msg.role) {
-    chatMessages[chatMessages.length - 1] = msg; // keep latest of duplicates
-  } else {
-    chatMessages.push(msg);
-  }
-}
+    // Strict user/assistant alternation
+    const chatMessages = [];
+    for (const msg of rawMessages) {
+      if (chatMessages.length > 0 && chatMessages[chatMessages.length - 1].role === msg.role) {
+        chatMessages[chatMessages.length - 1] = msg;
+      } else {
+        chatMessages.push(msg);
+      }
+    }
 
-// Ensure history ends with assistant (not user) before we add current user message
-if (chatMessages.length > 0 && chatMessages[chatMessages.length - 1].role === 'user') {
-  chatMessages.pop();
-}
+    if (chatMessages.length > 0 && chatMessages[chatMessages.length - 1].role === 'user') {
+      chatMessages.pop();
+    }
 
-const userContent = [];
-if (message?.trim()) userContent.push({ type: 'text', text: message });
-images.forEach(img => {
-  if (img.base64 && img.type) {
-    userContent.push({ type: 'image', source: { type: 'base64', media_type: img.type, data: img.base64 } });
-  }
-});
-if (userContent.length === 0) userContent.push({ type: 'text', text: '(shared an image)' });
-chatMessages.push({ role: 'user', content: userContent });
+    const userContent = [];
+    if (message?.trim()) userContent.push({ type: 'text', text: message });
+    images.forEach(img => {
+      if (img.base64 && img.type) {
+        userContent.push({ type: 'image', source: { type: 'base64', media_type: img.type, data: img.base64 } });
+      }
+    });
+    if (userContent.length === 0) userContent.push({ type: 'text', text: '(shared an image)' });
+    chatMessages.push({ role: 'user', content: userContent });
 
-console.log(`[AI Training] Sending ${chatMessages.length} messages to Anthropic`);
+    console.log(`[AI Training] Sending ${chatMessages.length} messages to Anthropic`);
 
-const requestBody = JSON.stringify({
-  model:'claude-sonnet-4-6',
-  max_tokens: 2500,
-  system: systemPrompt,
-  messages: chatMessages,
-});
+    const requestBody = JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 2500,
+      system: systemPrompt,
+      messages: chatMessages,
+    });
 
     const anthropicResponse = await callAnthropicAPI(requestBody, ANTHROPIC_API_KEY);
     const rawContent = anthropicResponse.content?.[0]?.text || '{}';
@@ -483,7 +535,6 @@ function formatBrainForPrompt(brain) {
   if (brain.responseExamples?.length) sections.push(`EXAMPLES:\n` + brain.responseExamples.map(r => `  - ${txt(r)}`).join('\n'));
   return sections.join('\n\n');
 }
-
 
 module.exports = router;
 

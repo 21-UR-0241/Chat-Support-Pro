@@ -27,6 +27,7 @@ const STARTERS = [
   { label: 'Review screenshot',     icon: '🖼️', text: 'I\'ll share a screenshot of a bad suggestion so you can learn from it.' },
   { label: 'Suggestion length',     icon: '📏', text: 'The suggestions are too short. I want longer, more detailed replies like a real support expert would write.' },
   { label: 'Review bad suggestions',icon: '👎', text: 'I have flagged some bad suggestions. Let\'s review them and improve.' },
+  { label: 'Upload a document',     icon: '📄', text: 'I\'ll upload a document (PDF, TXT, or DOCX) for you to learn from.' },
 ];
 
 function getToken() { return localStorage.getItem('token') || ''; }
@@ -311,7 +312,6 @@ function BrainDrawer({ brain, open, onClose, onRemoveRule, dirty, onSave, saving
         zIndex: 101, display: 'flex', flexDirection: 'column',
         boxShadow: '-20px 0 60px rgba(0,0,0,0.5)',
       }}>
-        {/* Header */}
         <div style={{ padding: '20px 22px', borderBottom: '1px solid #0f172a', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -340,7 +340,6 @@ function BrainDrawer({ brain, open, onClose, onRemoveRule, dirty, onSave, saving
           </div>
         </div>
 
-        {/* Rules list */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 22px' }}>
           {Object.entries(CATEGORY_META).map(([cat, meta]) => {
             const rules = brain[meta.brainKey] || [];
@@ -495,6 +494,7 @@ export default function AITraining({ onBrainUpdate }) {
   const [interviewDone, setInterviewDone] = useState(false);
   const bottomRef = useRef(null);
   const fileInputRef = useRef(null);
+  const docInputRef = useRef(null);
   const textareaRef = useRef(null);
 
   useEffect(() => {
@@ -575,6 +575,36 @@ export default function AITraining({ onBrainUpdate }) {
     reader.readAsDataURL(file);
   }, []);
 
+  const handleDocFile = useCallback(async (file) => {
+    const allowed = ['application/pdf', 'text/plain', 'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    if (!allowed.includes(file.type) && !file.name.match(/\.(pdf|txt|doc|docx)$/i)) {
+      addSystemMessage(`❌ Unsupported file type: ${file.name}`);
+      return;
+    }
+    const formData = new FormData();
+    formData.append('file', file);
+    addSystemMessage(`📄 Reading "${file.name}"…`);
+    try {
+      const res = await fetch(`${API_BASE}/ai/training/upload-doc`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken()}` },
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status}: ${err.slice(0, 100)}`);
+      }
+      const data = await res.json();
+      addSystemMessage(`✅ "${file.name}" loaded — ${data.chars.toLocaleString()} chars extracted. Analyzing…`);
+      await send(
+        `I'm uploading a document called "${file.name}". Here's the content:\n\n${data.text.slice(0, 8000)}\n\nPlease extract all relevant rules, policies, product knowledge, and tone guidelines from this document into the brain.`
+      );
+    } catch (e) {
+      addSystemMessage(`❌ Failed to read "${file.name}": ${e.message}`);
+    }
+  }, []);
+
   const handlePaste = useCallback((e) => {
     const items = e.clipboardData?.items;
     if (!items) return;
@@ -585,8 +615,11 @@ export default function AITraining({ onBrainUpdate }) {
 
   const handleDrop = useCallback((e) => {
     e.preventDefault();
-    [...(e.dataTransfer?.files || [])].forEach(handleImageFile);
-  }, [handleImageFile]);
+    [...(e.dataTransfer?.files || [])].forEach(f => {
+      if (f.type.startsWith('image/')) handleImageFile(f);
+      else handleDocFile(f);
+    });
+  }, [handleImageFile, handleDocFile]);
 
   const send = useCallback(async (text, interviewCtx = null) => {
     const msgText = text || input.trim();
@@ -646,6 +679,37 @@ export default function AITraining({ onBrainUpdate }) {
       setTyping(false);
     }
   }, [input, images, messages, brain, addRules]);
+
+  // fix circular dep: handleDocFile needs send, so redefine after send
+  const handleDocFileWithSend = useCallback(async (file) => {
+    const allowed = ['application/pdf', 'text/plain', 'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    if (!allowed.includes(file.type) && !file.name.match(/\.(pdf|txt|doc|docx)$/i)) {
+      addSystemMessage(`❌ Unsupported file type: ${file.name}`);
+      return;
+    }
+    const formData = new FormData();
+    formData.append('file', file);
+    addSystemMessage(`📄 Reading "${file.name}"…`);
+    try {
+      const res = await fetch(`${API_BASE}/ai/training/upload-doc`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken()}` },
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status}: ${err.slice(0, 100)}`);
+      }
+      const data = await res.json();
+      addSystemMessage(`✅ "${file.name}" loaded — ${data.chars.toLocaleString()} chars extracted. Analyzing…`);
+      await send(
+        `I'm uploading a document called "${file.name}". Here's the content:\n\n${data.text.slice(0, 8000)}\n\nPlease extract all relevant rules, policies, product knowledge, and tone guidelines from this document into the brain.`
+      );
+    } catch (e) {
+      addSystemMessage(`❌ Failed to read "${file.name}": ${e.message}`);
+    }
+  }, [send]);
 
   const answerInterviewQuestion = useCallback(async (question, answer) => {
     const nextIndex = (interview?.currentIndex ?? 0) + 1;
@@ -752,7 +816,13 @@ export default function AITraining({ onBrainUpdate }) {
           background: '#080b14', color: '#e2e8f0',
           fontFamily: "'DM Sans', sans-serif", position: 'relative',
         }}
-        onDrop={handleDrop}
+        onDrop={e => {
+          e.preventDefault();
+          [...(e.dataTransfer?.files || [])].forEach(f => {
+            if (f.type.startsWith('image/')) handleImageFile(f);
+            else handleDocFileWithSend(f);
+          });
+        }}
         onDragOver={e => e.preventDefault()}
       >
         {/* ── Top bar ── */}
@@ -761,7 +831,6 @@ export default function AITraining({ onBrainUpdate }) {
           borderBottom: '1px solid #0f172a', height: 56, flexShrink: 0,
           background: '#080b14',
         }}>
-          {/* Left: brain info */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
             <div style={{
               width: 30, height: 30, borderRadius: 8,
@@ -786,7 +855,6 @@ export default function AITraining({ onBrainUpdate }) {
             </div>
           </div>
 
-          {/* Right: actions */}
           <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
             {['chat', 'settings'].map(tab => (
               <button key={tab} className="at-tab" onClick={() => setActiveTab(tab)} style={{
@@ -854,7 +922,6 @@ export default function AITraining({ onBrainUpdate }) {
           <>
             <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px 0' }}>
 
-              {/* Starter chips */}
               {showStarters && (
                 <div style={{ padding: '48px 0 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20 }}>
                   <div style={{ textAlign: 'center' }}>
@@ -883,8 +950,7 @@ export default function AITraining({ onBrainUpdate }) {
                 </div>
               )}
 
-              {/* Messages */}
-              {messages.map((msg, msgIdx) => {
+              {messages.map((msg) => {
                 if (msg.role === 'system') {
                   return (
                     <div key={msg.id} className="at-msg" style={{ textAlign: 'center', margin: '12px 0' }}>
@@ -933,14 +999,12 @@ export default function AITraining({ onBrainUpdate }) {
                         </p>
                       </div>
 
-                      {/* Rule chips for mixed */}
                       {msg.ruleUpdates?.length > 0 && msg.type === 'mixed' && (
                         <div style={{ marginTop: 8 }}>
                           {msg.ruleUpdates.map((rule, i) => <RuleChip key={i} rule={rule} onAdd={addRule} />)}
                         </div>
                       )}
 
-                      {/* Auto-applied indicator */}
                       {msg.ruleUpdates?.length > 0 && msg.type === 'training' && (
                         <div style={{ marginTop: 5, display: 'flex', alignItems: 'center', gap: 5, paddingLeft: 2 }}>
                           <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#34d399', display: 'inline-block' }} />
@@ -956,7 +1020,6 @@ export default function AITraining({ onBrainUpdate }) {
                 );
               })}
 
-              {/* Typing */}
               {typing && (
                 <div style={{ display: 'flex', gap: 10, marginBottom: 20, alignItems: 'flex-start' }}>
                   <div style={{
@@ -973,7 +1036,6 @@ export default function AITraining({ onBrainUpdate }) {
                 </div>
               )}
 
-              {/* Interview */}
               {currentQuestion && (
                 <InterviewCard
                   question={currentQuestion}
@@ -995,6 +1057,8 @@ export default function AITraining({ onBrainUpdate }) {
             <div style={{ borderTop: '1px solid #0f172a', background: '#080b14', flexShrink: 0 }}>
               <ImagePreview images={images} onRemove={i => setImages(prev => prev.filter((_, j) => j !== i))} />
               <div style={{ display: 'flex', gap: 8, padding: '12px 16px', alignItems: 'flex-end' }}>
+
+                {/* Image button */}
                 <button className="at-img-btn" onClick={() => fileInputRef.current?.click()} title="Attach screenshot" style={{
                   background: '#0d1117', border: '1px solid #0f172a',
                   color: '#334155', borderRadius: 9, padding: '9px 11px',
@@ -1002,6 +1066,15 @@ export default function AITraining({ onBrainUpdate }) {
                 }}>🖼️</button>
                 <input ref={fileInputRef} type="file" accept="image/*" multiple style={{ display: 'none' }}
                   onChange={e => { [...e.target.files].forEach(handleImageFile); e.target.value = ''; }} />
+
+                {/* Doc button */}
+                <button className="at-img-btn" onClick={() => docInputRef.current?.click()} title="Upload document (PDF, TXT, DOCX)" style={{
+                  background: '#0d1117', border: '1px solid #0f172a',
+                  color: '#334155', borderRadius: 9, padding: '9px 11px',
+                  fontSize: 15, cursor: 'pointer', flexShrink: 0, lineHeight: 1,
+                }}>📄</button>
+                <input ref={docInputRef} type="file" accept=".pdf,.txt,.doc,.docx" style={{ display: 'none' }}
+                  onChange={e => { if (e.target.files[0]) handleDocFileWithSend(e.target.files[0]); e.target.value = ''; }} />
 
                 <textarea
                   ref={textareaRef}
@@ -1031,7 +1104,7 @@ export default function AITraining({ onBrainUpdate }) {
                   }}>↑</button>
               </div>
               <p style={{ fontSize: 10, color: '#0f172a', textAlign: 'center', margin: '0 0 10px', letterSpacing: '0.02em' }}>
-                Ctrl+V to paste screenshots · Drag & drop images · Shift+Enter for new line
+                Ctrl+V to paste screenshots · Drag & drop images or docs · 📄 PDF / TXT / DOCX · Shift+Enter for new line
               </p>
             </div>
           </>
