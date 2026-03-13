@@ -117,39 +117,44 @@ router.post('/extract-rules', authenticateToken, async (req, res) => {
 
     const brainSummary = formatBrainForPrompt(brain);
 
-    const systemPrompt = `You extract rules from documents/text for a peptide e-commerce customer support AI brain (400+ Shopify stores, Canada + US).
+const systemPrompt = `You extract and preserve knowledge from documents for a peptide e-commerce customer support AI brain (400+ Shopify stores, Canada + US).
 
-Extract EVERY rule, policy, product fact, tone guideline, and procedure. Be aggressive — if it's actionable for a support agent, extract it.
+This document may be a product guide, dosing protocol, FAQ, policy doc, or training material.
+Your job is to extract ALL useful information — preserving detail, not summarizing it away.
 
 CATEGORIES:
 - tone: how agents should communicate
 - avoid: what agents must never say or do
 - prefer: what agents should always say or do
-- product: peptide/product knowledge, dosing, storage, ingredients, reconstitution
-- policy: refunds, shipping, guarantees, order handling, timelines
+- product: peptide/product knowledge — dosing, storage, reconstitution, ingredients, effects, usage protocols, BAC water ratios, vial sizes, concentrations, cycle lengths, peptide stacks
+- policy: refunds, shipping timelines, guarantees, order handling, payment, returns
 - example: gold-standard reply examples
 
-EXISTING BRAIN (skip exact duplicates):
-${brainSummary || 'Empty — extract everything'}
+RULES FOR EXTRACTION:
+- For product/policy rules: preserve FULL detail — include numbers, dosages, timeframes, temperatures, ratios
+  BAD: "BPC-157 dosing information is available"
+  GOOD: "BPC-157 standard dose is 250-500mcg per injection, 1-2x daily, injected subcutaneously near the site of injury"
+- For tone/avoid/prefer rules: keep them concise and actionable
+- Each rule must be self-contained — an agent reading it alone should understand it fully
+- Extract EVERYTHING — err heavily on the side of including more rules
+- Minimum 10 rules per document, no maximum
+- Split compound information into separate rules for clarity
+- Include brand/product names, specific SKUs, prices if mentioned
 
-RULES:
-- Extract minimum 5 rules, no maximum
-- Each rule must be specific and actionable — not vague
-- Short admin messages like "always include tracking link" are valid rules
-- Product facts, dosing, storage temps, shipping timelines → all extractable
-- If in doubt, extract it
+EXISTING BRAIN (skip exact duplicates only):
+${brainSummary || 'Empty — extract everything'}
 
 RESPONSE FORMAT — valid JSON only, no markdown:
 {
   "rules": [
-    { "category": "policy", "text": "Concrete actionable rule text", "source": "document" }
+    { "category": "product", "text": "Full detailed rule text preserving all specifics", "source": "document" }
   ],
-  "summary": "Extracted X rules covering: [brief topic list]"
+  "summary": "Extracted X rules covering: [topic list]"
 }`;
 
     const requestBody = JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 4000,
+      max_tokens: 6000,
       system: systemPrompt,
       messages: [{ role: 'user', content: `Extract all rules from this${filename ? ` document (${filename})` : ' text'}:\n\n${text}` }],
     });

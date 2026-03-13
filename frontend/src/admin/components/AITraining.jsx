@@ -604,7 +604,7 @@ export default function AITraining({ onBrainUpdate }) {
       const extractRes = await fetch(`${API_BASE}/ai/training/extract-rules`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({ text: uploadData.text.slice(0, 12000), filename: file.name, brain }),
+        body: JSON.stringify({ text: uploadData.text.slice(0, 30000), filename: file.name, brain }),
       });
       if (!extractRes.ok) throw new Error(`Extraction failed: HTTP ${extractRes.status}`);
       const extractData = await extractRes.json();
