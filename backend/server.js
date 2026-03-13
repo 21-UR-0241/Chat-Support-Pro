@@ -2325,7 +2325,15 @@ ADMIN-TRAINED BRAIN RULES — HIGHEST PRIORITY:
 These override tone, length, and all instructions above.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ${brainContext}
+
+⚠️ CRITICAL — PRODUCT PROTOCOL ENFORCEMENT:
+If a brain rule above specifies exact numbers for reconstitution (BAC water volume, concentration, mg/mL),
+dosing (mcg, mg, units), storage, or any peptide protocol — reproduce those EXACT numbers.
+DO NOT substitute your own ratios or doses. DO NOT "also suggest" an alternative ratio.
+If the brain says 1mL → 10mg/mL, you say 1mL → 10mg/mL. Not 2mL. Not 0.5mL.
+Brain rules are the source of truth. Your training data is irrelevant when a brain rule exists.
 ` : ''}
+
 Respond ONLY with valid JSON in this exact format:
 {"suggestions": ["reply 1", "reply 2", "reply 3"]}`;
 }
