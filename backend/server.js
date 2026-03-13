@@ -6,7 +6,6 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const http = require('http');
-// const https = require('https');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const db = require('./database');
@@ -1854,7 +1853,7 @@ app.post('/api/ai/suggestions', authenticateToken, async (req, res) => {
     const systemPrompt = buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness, brainContext, brainSettings);
     const userPrompt = buildUserPrompt(chatHistory, clientMessage, messageEdited, adminNote, conversationState, recentContext);
     const requestBody = JSON.stringify({
-      model: process.env.AI_MODEL || 'claude-sonnet-4-20250514',
+      model: process.env.AI_MODEL || 'claude-sonnet-4-6',
       max_tokens: 1500,
       temperature: 0.3,
       system: systemPrompt,
