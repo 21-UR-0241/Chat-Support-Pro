@@ -280,7 +280,7 @@ ${brainSummary || 'Nothing yet.'}
 Generate the interview.`;
 
     const requestBody = JSON.stringify({
-      model: process.env.AI_MODEL || 'claude-sonnet-4-6'
+      model: process.env.AI_MODEL || 'claude-sonnet-4-6',
       max_tokens: 2000,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
@@ -437,7 +437,7 @@ chatMessages.push({ role: 'user', content: userContent });
 console.log(`[AI Training] Sending ${chatMessages.length} messages to Anthropic`);
 
 const requestBody = JSON.stringify({
-  model: process.env.AI_MODEL || 'claude-sonnet-4-6'
+  model: process.env.AI_MODEL || 'claude-sonnet-4-6',
   max_tokens: 2500,
   system: systemPrompt,
   messages: chatMessages,
