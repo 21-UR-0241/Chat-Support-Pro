@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 
-const API_BASE = '/api';
+const API_BASE = (import.meta.env.PROD 
+  ? import.meta.env.VITE_API_URL || 'https://chat-support-pro.onrender.com'
+  : '') + '/api';
 
 const CATEGORY_META = {
   tone:    { color: '#60a5fa', label: 'Tone',    icon: '🎙️', brainKey: 'toneRules',       bg: '#60a5fa12' },

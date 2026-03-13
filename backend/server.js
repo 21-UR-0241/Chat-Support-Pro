@@ -1862,7 +1862,7 @@ app.post('/api/ai/suggestions', authenticateToken, async (req, res) => {
       ],
     });
 
-    console.log(`✦ [AI] Calling Anthropic API — model: ${process.env.AI_MODEL || 'claude-sonnet-4-20250514'}`);
+    console.log(`✦ [AI] Calling Anthropic API — model: ${process.env.AI_MODEL || 'claude-sonnet-4-6'}`);
 
     //don't remove!
     // const anthropicData = await callAnthropicAPI(requestBody, ANTHROPIC_API_KEY);
