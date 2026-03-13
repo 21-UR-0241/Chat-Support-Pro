@@ -560,7 +560,7 @@ export default function AITraining({ onBrainUpdate }) {
     }
   }, [handleImageFile]);
 
-  const send = useCallback(async (text, interviewCtx = null) => {
+const send = useCallback(async (text, interviewCtx = null) => {
     const msgText = text || input.trim();
     if (!msgText && images.length === 0) return;
 
@@ -592,7 +592,6 @@ export default function AITraining({ onBrainUpdate }) {
     try {
       const data = await apiFetch('/ai/training/chat', {
         method: 'POST',
-        // ── brainRef.current: always sends latest brain, not stale closure value ──
         body: JSON.stringify({ message: finalMsg, images: userMsg.images, history, brain: brainRef.current, interviewContext: interviewCtx }),
       });
 
@@ -603,23 +602,22 @@ export default function AITraining({ onBrainUpdate }) {
       };
       setMessages(prev => [...prev, aiMsg]);
 
-      if (data.ruleUpdates?.length > 0) {
-        setBrain(prev => {
-          const updated = mergeBrainRules(prev, data.ruleUpdates);
-          // ── update ref immediately so next send() sees the accumulated rules ──
-          brainRef.current = updated;
-          apiFetch('/ai/training/brain', { method: 'PUT', body: JSON.stringify({ brain: updated }) })
-            .then(() => {
-              setDirty(false);
-              onBrainUpdate?.();
-              showToast(`✅ ${data.ruleUpdates.length} rule${data.ruleUpdates.length > 1 ? 's' : ''} saved to brain`);
-            })
-            .catch(() => {
-              showToast('⚠️ Rules extracted but save failed — click 💾 Save manually', 4500);
-            });
-          return updated;
-        });
-      }
+      // ── always reload from DB — source of truth, counter stays accurate across all messages ──
+      try {
+        const fresh = await apiFetch('/ai/training/brain');
+        if (fresh.brain) {
+          const loaded = { ...EMPTY_BRAIN, ...fresh.brain };
+          setBrain(loaded);
+          brainRef.current = loaded;
+        }
+        if (data.ruleUpdates?.length > 0) {
+          showToast(`✅ ${data.ruleUpdates.length} rule${data.ruleUpdates.length > 1 ? 's' : ''} saved to brain`);
+        }
+      } catch { /* silent */ }
+
+      setDirty(false);
+      onBrainUpdate?.();
+
     } catch (e) {
       setMessages(prev => [...prev, { id: Date.now() + 1, role: 'system', content: `Error: ${e.message}`, time: nowTime() }]);
     } finally {
