@@ -778,6 +778,7 @@ const buildConversationContext = () => {
           analysis,
           adminNote: note || '',
           messageEdited: isEditedRef.current,
+          brainSettings: (() => { try { return JSON.parse(localStorage.getItem('brain_suggestion_settings') || '{}'); } catch { return {}; } })(),
         }),
       });
 

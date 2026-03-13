@@ -398,6 +398,8 @@ async function runMigrations() {
     await migration_007_add_email_notifications();
     await migration_008_add_conversation_notes();
     await migration_009_add_employee_notes();
+    await migration_010_add_ai_training_brain();
+    await migration_011_add_legal_flag_columns();
     
 
     
@@ -1011,6 +1013,77 @@ async function migration_009_add_employee_notes() {
     `);
 
     console.log(`✅ [${migrationName}] Employee notes table created with title support`);
+  } catch (error) {
+    console.error(`❌ [${migrationName}] Failed:`, error);
+    throw error;
+  }
+}
+
+
+async function migration_010_add_ai_training_brain() {
+  const migrationName = 'Migration 010';
+
+  try {
+    const tableCheck = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables
+        WHERE table_schema = 'public'
+        AND table_name = 'ai_training_brain'
+      );
+    `);
+
+    if (tableCheck.rows[0].exists) {
+      console.log(`✅ [${migrationName}] ai_training_brain table already exists`);
+      return;
+    }
+
+    console.log(`🔄 [${migrationName}] Creating ai_training_brain table...`);
+
+    await pool.query(`
+      CREATE TABLE ai_training_brain (
+        id          INTEGER PRIMARY KEY DEFAULT 1,
+        brain_data  JSONB NOT NULL DEFAULT '{}',
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_by  TEXT,
+        CONSTRAINT single_row CHECK (id = 1)
+      );
+    `);
+
+    await pool.query(`
+      INSERT INTO ai_training_brain (id, brain_data)
+      VALUES (1, '{}')
+      ON CONFLICT DO NOTHING;
+    `);
+
+    console.log(`✅ [${migrationName}] ai_training_brain table created`);
+  } catch (error) {
+    console.error(`❌ [${migrationName}] Failed:`, error);
+    throw error;
+  }
+}
+
+
+async function migration_011_add_legal_flag_columns() {
+  const migrationName = 'Migration 011';
+
+  try {
+    console.log(`📝 [${migrationName}] Adding legal flag columns to conversations...`);
+
+    await pool.query(`
+      ALTER TABLE conversations
+        ADD COLUMN IF NOT EXISTS legal_flag          BOOLEAN      DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS legal_flag_severity VARCHAR(20),
+        ADD COLUMN IF NOT EXISTS legal_flag_at       TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS legal_flag_term     VARCHAR(100);
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_conversations_legal_flag
+        ON conversations(legal_flag)
+        WHERE legal_flag = TRUE;
+    `);
+
+    console.log(`✅ [${migrationName}] Legal flag columns added`);
   } catch (error) {
     console.error(`❌ [${migrationName}] Failed:`, error);
     throw error;

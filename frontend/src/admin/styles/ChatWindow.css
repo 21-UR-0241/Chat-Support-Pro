@@ -30,6 +30,7 @@
   box-shadow: 0 1px 2px rgba(11, 20, 26, 0.05);
   z-index: 10;
   flex-shrink: 0;
+  transition: margin-top 0.3s ease;
 }
 
 .chat-header-left {
@@ -287,6 +288,132 @@
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* ========================================
+   LEGAL THREAT ALERT BANNER
+   ======================================== */
+
+@keyframes legalSlideDown {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.legal-alert-banner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  color: white;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+  animation: legalSlideDown 0.3s ease;
+}
+
+.legal-alert-banner--critical {
+  background: #dc2626;
+}
+
+.legal-alert-banner--high {
+  background: #d97706;
+}
+
+.legal-alert-banner--medium {
+  background: #2563eb;
+}
+
+.legal-alert-icon {
+  font-size: 22px;
+  flex-shrink: 0;
+}
+
+.legal-alert-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.legal-alert-title {
+  font-weight: 700;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legal-alert-badge {
+  background: rgba(255, 255, 255, 0.2);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  letter-spacing: 0.4px;
+}
+
+.legal-alert-detail {
+  font-size: 12px;
+  opacity: 0.92;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.legal-alert-snippet {
+  margin-left: 8px;
+  font-style: italic;
+  opacity: 0.8;
+}
+
+.legal-alert-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.legal-alert-priority {
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.2);
+  padding: 3px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.legal-alert-dismiss {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  border-radius: 50%;
+  width: 26px;
+  height: 26px;
+  cursor: pointer;
+  color: white;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s ease;
+  padding: 0;
+}
+
+.legal-alert-dismiss:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.legal-alert-dismiss:active {
+  background: rgba(255, 255, 255, 0.5);
+  transform: scale(0.95);
 }
 
 /* ========================================
@@ -1043,6 +1170,11 @@
     left: auto;
     width: 320px;
   }
+
+  /* Legal banner slightly smaller on desktop since sidebar may be present */
+  .legal-alert-banner {
+    font-size: 13px;
+  }
 }
 
 /* ========================================
@@ -1065,6 +1197,32 @@
     margin: 0;
     padding: 0;
     overflow: hidden;
+  }
+
+  /* Legal banner mobile adjustments */
+  .legal-alert-banner {
+    padding: 8px 12px;
+    gap: 8px;
+  }
+
+  .legal-alert-icon {
+    font-size: 18px;
+  }
+
+  .legal-alert-title {
+    font-size: 11px;
+  }
+
+  .legal-alert-detail {
+    font-size: 11px;
+  }
+
+  .legal-alert-priority {
+    display: none; /* hide on small screens to save space */
+  }
+
+  .legal-alert-snippet {
+    display: none; /* hide snippet on mobile, title + term is enough */
   }
 
   .templates-dropdown {
@@ -1520,6 +1678,14 @@
   .emoji-grid {
     grid-template-columns: repeat(6, 1fr);
   }
+
+  .legal-alert-banner {
+    padding: 6px 10px;
+  }
+
+  .legal-alert-icon {
+    font-size: 16px;
+  }
 }
 
 /* ===== LANDSCAPE MODE ===== */
@@ -1553,6 +1719,15 @@
 
   .emoji-grid {
     max-height: 140px;
+  }
+
+  /* Compact legal banner in landscape */
+  .legal-alert-banner {
+    padding: 6px 12px;
+  }
+
+  .legal-alert-icon {
+    font-size: 16px;
   }
 }
 

@@ -20,6 +20,11 @@ const shopifyAppRoutes = require('./routes/shopify-app-routes');
 const fileRoutes = require('./routes/fileroutes');
 const { handleOfflineEmailNotification, cancelPendingEmail, startEmailSweep, stopEmailSweep } = require('../frontend/src/admin/services/emailService');
 
+//added
+const aiTrainingRoutes = require('./routes/ai-training-routes');
+const { getBrainContext, refreshBrainCache, getBrainSettings } = require('./brain-context');
+
+
 const app = express();
 const server = http.createServer(app);
 
@@ -75,6 +80,398 @@ function camelToSnake(obj) {
   return snakeObj;
 }
 
+
+// ============ LEGAL THREAT DETECTION ============
+
+const LEGAL_THREAT_PATTERNS = [
+  /\b(lawsuit|sue|suing|sued|litigation|litigate|legal action|take you to court|taking you to court|file a suit|filing a suit|small claims|civil suit|class action)\b/i,
+  /\b(attorney|lawyer|legal counsel|solicitor|barrister|my lawyer|my attorney|legal team|law firm)\b/i,
+  /\b(cease and desist|c&d|cease desist|legal notice|formal notice|demand letter|legal demand|legal letter)\b/i,
+  /\b(bbb|better business bureau|ftc|federal trade commission|attorney general|consumer protection|chargeback dispute|credit card dispute|fraud claim|report you|file a complaint|regulatory complaint)\b/i,
+  /\b(fraud|scam|illegal|criminal|press charges|file charges|police report|law enforcement|stolen|theft|deceptive practices)\b/i,
+  /\b(damages|compensation|liable|liability|negligence|breach of contract|consumer rights violation)\b/i,
+];
+
+const LEGAL_SEVERITY_MAP = {
+  critical: [
+    /cease and desist/i,
+    /class action/i,
+    /attorney general/i,
+    /fraud claim/i,
+    /breach of contract/i,
+    /consumer rights violation/i,
+    /press charges|file charges/i,
+    /law firm/i,
+  ],
+  high: [
+    /lawsuit|sue\b|suing|litigation/i,
+    /attorney|lawyer|legal counsel/i,
+    /legal notice|demand letter/i,
+    /ftc|federal trade commission/i,
+    /criminal|illegal/i,
+    /damages|liable|liability/i,
+  ],
+  medium: [
+    /bbb|better business bureau/i,
+    /chargeback dispute|credit card dispute/i,
+    /report you|file a complaint/i,
+    /fraud|scam/i,
+    /negligence/i,
+  ],
+};
+
+function detectLegalThreat(content) {
+  if (!content || typeof content !== 'string') return null;
+  const matched = LEGAL_THREAT_PATTERNS.some(p => p.test(content));
+  if (!matched) return null;
+
+  for (const [severity, patterns] of Object.entries(LEGAL_SEVERITY_MAP)) {
+    for (const pattern of patterns) {
+      const match = content.match(pattern);
+      if (match) {
+        return {
+          detected: true,
+          severity,
+          matchedTerm: match[0],
+          snippet: content.length > 200 ? content.substring(0, 200) + '...' : content,
+        };
+      }
+    }
+  }
+  return { detected: true, severity: 'medium', matchedTerm: 'legal keyword', snippet: content.substring(0, 200) };
+}
+
+function detectLegalDocumentType(text) {
+  const documentSignatures = [
+    {
+      type: 'Cease and Desist Letter',
+      severity: 'critical',
+      patterns: [/CEASE AND DESIST/i, /cease.{0,20}desist/i]
+    },
+    {
+      type: 'Demand Letter',
+      severity: 'critical',
+      patterns: [/DEMAND LETTER/i, /formal demand/i, /hereby demand/i, /demand that you/i, /demand for payment/i]
+    },
+    {
+      type: 'Court Summons / Complaint',
+      severity: 'critical',
+      patterns: [
+        /SUMMONS/i,
+        /PLAINTIFF.*DEFENDANT/is,
+        /IN THE (SUPERIOR|DISTRICT|SUPREME|CIRCUIT|COUNTY|PROVINCIAL|SMALL CLAIMS) COURT/i,
+        /COURT OF (QUEEN|KING)'S BENCH/i,
+        /STATEMENT OF CLAIM/i,
+        /NOTICE OF CIVIL CLAIM/i,
+      ]
+    },
+    {
+      type: 'BBB / Consumer Complaint',
+      severity: 'high',
+      patterns: [/BETTER BUSINESS BUREAU/i, /BBB COMPLAINT/i, /CONSUMER PROTECTION/i]
+    },
+    {
+      type: 'Chargeback Notice',
+      severity: 'high',
+      patterns: [/CHARGEBACK/i, /DISPUTE NOTIFICATION/i, /RETRIEVAL REQUEST/i, /REASON CODE.{0,20}(fraud|not received|unauthorized)/i]
+    },
+    {
+      type: 'Notice of Legal Action',
+      severity: 'critical',
+      patterns: [
+        /NOTICE OF (LEGAL ACTION|INTENT TO SUE|LITIGATION)/i,
+        /without further legal action/i,
+        /legal proceedings will/i,
+        /compelled to seek legal/i,
+        /pursue legal remedies/i,
+      ]
+    },
+    {
+      type: 'Small Claims Filing',
+      severity: 'critical',
+      patterns: [/SMALL CLAIMS/i, /PLAINTIFF'S CLAIM/i, /CLAIM AMOUNT/i]
+    },
+  ];
+
+  for (const sig of documentSignatures) {
+    if (sig.patterns.some(p => p.test(text))) {
+      return { type: sig.type, severity: sig.severity };
+    }
+  }
+
+  // Structural heuristic: formal legal letter scoring
+  const formalLetterScore = [
+    /\bRE:\s/i,
+    /\bDear (Sir|Madam|Counsel|Mr\.|Ms\.|Mrs\.)/i,
+    /\bsincerely yours\b|\byours truly\b|\byours faithfully\b/i,
+    /\b(Esq\.|Attorney at Law|Barrister|Solicitor|LLB|JD)\b/i,
+    /\bwithout prejudice\b/i,
+    /\bpursuant to\b/i,
+    /\bhereby (notify|demand|give notice)\b/i,
+  ].filter(p => p.test(text)).length;
+
+  if (formalLetterScore >= 3) {
+    return { type: 'Formal Legal Correspondence', severity: 'high' };
+  }
+
+  return null;
+}
+
+async function handleLegalThreat(threat, conversationId, storeId, senderName, messageContent, pool) {
+  const emoji = threat.severity === 'critical' ? '🚨' : threat.severity === 'high' ? '⚠️' : '🔔';
+  console.log(`${emoji} [LEGAL FLAG] Severity: ${threat.severity.toUpperCase()} | Conv: ${conversationId} | Term: "${threat.matchedTerm}" | From: ${senderName}`);
+
+  try {
+    await pool.query(`
+      UPDATE conversations
+      SET 
+        priority = 'urgent',
+        tags = CASE 
+          WHEN tags IS NULL THEN ARRAY['legal-flag']
+          WHEN NOT ('legal-flag' = ANY(tags)) THEN array_append(tags, 'legal-flag')
+          ELSE tags
+        END,
+        legal_flag = TRUE,
+        legal_flag_severity = $1,
+        legal_flag_at = NOW(),
+        legal_flag_term = $2,
+        updated_at = NOW()
+      WHERE id = $3
+    `, [threat.severity, threat.matchedTerm, conversationId]);
+  } catch (dbErr) {
+    console.warn('[LEGAL FLAG] Extended columns not found, using fallback update:', dbErr.message);
+    try {
+      await pool.query(`
+        UPDATE conversations SET priority = 'urgent', updated_at = NOW() WHERE id = $1
+      `, [conversationId]);
+    } catch (fallbackErr) {
+      console.error('[LEGAL FLAG] Fallback DB update failed:', fallbackErr.message);
+    }
+  }
+
+  broadcastToAgents({
+    type: 'legal_threat_detected',
+    alert: {
+      conversationId,
+      storeId,
+      severity: threat.severity,
+      matchedTerm: threat.matchedTerm,
+      senderName,
+      snippet: threat.snippet,
+      timestamp: new Date().toISOString(),
+      emoji,
+      fromAttachment: threat.fromAttachment || false,
+      documentType: threat.documentType || null,
+      message: `${emoji} LEGAL THREAT DETECTED (${threat.severity.toUpperCase()}): "${threat.matchedTerm}" — from ${senderName}`,
+    }
+  });
+
+  sendLegalFlagEmail(threat, conversationId, senderName, messageContent, pool).catch(err =>
+    console.error('[LEGAL FLAG] Email notification failed:', err.message)
+  );
+}
+
+async function sendLegalFlagEmail(threat, conversationId, senderName, messageContent, pool) {
+  const RESEND_API_KEY = process.env.RESEND_API_KEY;
+  const ALERT_EMAIL = process.env.LEGAL_ALERT_EMAIL || process.env.ADMIN_EMAIL;
+
+  if (!RESEND_API_KEY || !ALERT_EMAIL) {
+    console.warn('[LEGAL FLAG] No RESEND_API_KEY or LEGAL_ALERT_EMAIL set — skipping email alert');
+    return;
+  }
+
+  const severity = threat.severity.toUpperCase();
+  const emoji = threat.severity === 'critical' ? '🚨' : threat.severity === 'high' ? '⚠️' : '🔔';
+  const appUrl = process.env.APP_URL || 'https://your-app.com';
+  const sourceLabel = threat.fromAttachment
+    ? `Uploaded Document (${threat.documentType || 'file'})`
+    : 'Chat Message';
+
+  const html = `
+    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+      <div style="background: ${threat.severity === 'critical' ? '#dc2626' : threat.severity === 'high' ? '#d97706' : '#2563eb'};
+                  color: white; padding: 16px 24px; border-radius: 8px 8px 0 0;">
+        <h1 style="margin: 0; font-size: 20px;">${emoji} Legal Threat Detected — ${severity}</h1>
+      </div>
+      <div style="background: #f9fafb; border: 1px solid #e5e7eb; border-top: none;
+                  padding: 24px; border-radius: 0 0 8px 8px;">
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; width: 140px;">Severity</td>
+            <td style="padding: 8px 0; font-weight: 600; color: #111827;">${severity}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280;">Matched Term</td>
+            <td style="padding: 8px 0; font-weight: 600; color: #dc2626;">"${threat.matchedTerm}"</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280;">Source</td>
+            <td style="padding: 8px 0; color: #111827;">${sourceLabel}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280;">From</td>
+            <td style="padding: 8px 0; color: #111827;">${senderName}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280;">Conversation</td>
+            <td style="padding: 8px 0; color: #111827;">#${conversationId}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280;">Time</td>
+            <td style="padding: 8px 0; color: #111827;">${new Date().toLocaleString('en-US', { timeZone: 'America/Toronto' })} EST</td>
+          </tr>
+        </table>
+
+        <div style="margin-top: 16px; padding: 12px 16px; background: #fff;
+                    border-left: 4px solid #dc2626; border-radius: 4px;">
+          <p style="margin: 0 0 4px; font-size: 12px; color: #6b7280; text-transform: uppercase;">Content Excerpt</p>
+          <p style="margin: 0; color: #374151; font-style: italic;">"${threat.snippet}"</p>
+        </div>
+
+        <div style="margin-top: 24px; text-align: center;">
+          <a href="${appUrl}/conversations/${conversationId}"
+             style="display: inline-block; background: #111827; color: white;
+                    padding: 10px 24px; border-radius: 6px; text-decoration: none; font-weight: 600;">
+            Open Conversation →
+          </a>
+        </div>
+
+        <p style="margin-top: 24px; font-size: 12px; color: #9ca3af; text-align: center;">
+          This conversation has been automatically flagged and set to URGENT priority.<br>
+          Do not ignore — respond or escalate within 24 hours.
+        </p>
+      </div>
+    </div>
+  `;
+
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${RESEND_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: process.env.EMAIL_FROM || 'alerts@yourdomain.com',
+      to: ALERT_EMAIL,
+      subject: `${emoji} [${severity}] Legal Threat — Conv #${conversationId} — "${threat.matchedTerm}"`,
+      html,
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Resend API error: ${err}`);
+  }
+
+  console.log(`[LEGAL FLAG] Alert email sent to ${ALERT_EMAIL} for conv #${conversationId}`);
+}
+
+async function extractTextFromPDF(fileUrl) {
+  try {
+    const pdfParse = require('pdf-parse');
+    const response = await fetch(fileUrl);
+    if (!response.ok) throw new Error(`Failed to fetch PDF: ${response.status}`);
+    const buffer = await response.arrayBuffer();
+    const data = await pdfParse(Buffer.from(buffer));
+    return data.text || '';
+  } catch (err) {
+    console.error('[PDF Extract] Error:', err.message);
+    return '';
+  }
+}
+
+async function extractTextFromImage(fileUrl) {
+  const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+  if (!ANTHROPIC_API_KEY) return '';
+
+  try {
+    const response = await fetch(fileUrl);
+    const buffer = await response.arrayBuffer();
+    const base64 = Buffer.from(buffer).toString('base64');
+    const mimeType = response.headers.get('content-type') || 'image/jpeg';
+
+    const apiResponse = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1000,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: mimeType, data: base64 } },
+            { type: 'text', text: 'Extract all text from this image exactly as written. Return only the raw text, no commentary.' }
+          ]
+        }]
+      }),
+      signal: AbortSignal.timeout(20000),
+    });
+
+    const data = await apiResponse.json();
+    return data.content?.[0]?.text || '';
+  } catch (err) {
+    console.error('[Image OCR] Error:', err.message);
+    return '';
+  }
+}
+
+async function analyzeLegalAttachment(fileData, conversationId, storeId, senderName, pool) {
+  const fileUrl = fileData?.url || fileData?.fileUrl;
+  const mimeType = fileData?.mimeType || fileData?.type || '';
+
+  if (!fileUrl) return;
+
+  console.log(`[LEGAL ATTACH] Scanning file: ${fileUrl} (${mimeType})`);
+
+  try {
+    let extractedText = '';
+
+    if (mimeType === 'application/pdf' || fileUrl.endsWith('.pdf')) {
+      extractedText = await extractTextFromPDF(fileUrl);
+    } else if (mimeType.startsWith('image/') || /\.(jpg|jpeg|png|webp|gif)$/i.test(fileUrl)) {
+      extractedText = await extractTextFromImage(fileUrl);
+    } else {
+      return;
+    }
+
+    if (!extractedText) return;
+
+    console.log(`[LEGAL ATTACH] Extracted ${extractedText.length} chars from file`);
+
+    const docType = detectLegalDocumentType(extractedText);
+    if (docType) {
+      console.log(`🚨 [LEGAL ATTACH] Legal document detected: ${docType.type}`);
+      await handleLegalThreat(
+        {
+          detected: true,
+          severity: docType.severity,
+          matchedTerm: docType.type,
+          snippet: extractedText.substring(0, 300),
+          fromAttachment: true,
+          documentType: docType.type,
+        },
+        conversationId, storeId, senderName,
+        `[ATTACHED DOCUMENT] ${extractedText.substring(0, 500)}`,
+        pool
+      );
+      return;
+    }
+
+    const threat = detectLegalThreat(extractedText);
+    if (threat) {
+      threat.fromAttachment = true;
+      await handleLegalThreat(threat, conversationId, storeId, senderName, extractedText, pool);
+    }
+
+  } catch (err) {
+    console.error('[LEGAL ATTACH] File analysis failed:', err.message);
+  }
+}
+
 // Security headers (relaxed for widget embedding)
 app.use(helmet({
   contentSecurityPolicy: false,
@@ -87,7 +484,9 @@ app.use(helmet({
 app.post('/webhooks/:shop/:topic', rawBodyMiddleware, handleWebhook);
 
 // JSON middleware for other routes
-app.use(express.json());
+// app.use(express.json());
+
+app.use(express.json({ limit: '10mb' }));
 
 app.use(session({
   secret: process.env.JWT_SECRET,
@@ -490,6 +889,8 @@ app.use('/shopify', shopifyAppRoutes);
 // ============ FILE UPLOAD ROUTES ============
 app.use('/api/files', fileRoutes);
 
+//added
+app.use('/api/ai/training', aiTrainingRoutes);
 // ============ STORE ENDPOINTS ============
 
 app.get('/api/stores', authenticateToken, async (req, res) => {
@@ -1064,6 +1465,113 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
   }
 });
 
+
+//don't remove!
+// app.post('/api/widget/messages', async (req, res) => {
+//   try {
+//     const { conversationId, customerEmail, customerName, content, storeIdentifier, fileData } = req.body;
+    
+//     if (!conversationId) {
+//       return res.status(400).json({ error: 'Missing required fields' });
+//     }
+    
+//     if (!content && !fileData) {
+//       return res.status(400).json({ error: 'Message must have text or a file attachment' });
+//     }
+    
+//     const store = await db.getStoreByIdentifier(storeIdentifier);
+//     if (!store) {
+//       return res.status(404).json({ error: 'Store not found' });
+//     }
+    
+//     const conversation = await db.getConversation(conversationId);
+    
+//     if (!conversation) {
+//       return res.status(404).json({ 
+//         error: 'conversation_not_found',
+//         message: 'This conversation no longer exists'
+//       });
+//     }
+    
+//     const timestamp = new Date();
+//     const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+//     const tempMessage = {
+//       id: tempId,
+//       conversationId: conversationId,
+//       storeId: store.id,
+//       senderType: 'customer',
+//       senderName: customerName || customerEmail,
+//       content: content || '',
+//       fileData: fileData,
+//       createdAt: timestamp,
+//       pending: true
+//     };
+    
+//     sendToConversation(conversationId, {
+//       type: 'new_message',
+//       message: snakeToCamel(tempMessage)
+//     });
+    
+//     broadcastToAgents({
+//       type: 'new_message',
+//       message: snakeToCamel(tempMessage),
+//       conversationId,
+//       storeId: store.id
+//     });
+    
+//     res.json(snakeToCamel(tempMessage));
+    
+//     setImmediate(async () => {
+//       try {
+//         const savedMessage = await db.saveMessage({
+//           conversation_id: conversationId,
+//           store_id: store.id,
+//           sender_type: 'customer',
+//           sender_name: customerName || customerEmail,
+//           content: content || '',
+//           file_data: fileData ? JSON.stringify(fileData) : null
+//         });
+        
+//         const updatedConversation = await db.getConversation(conversationId);
+        
+//         const confirmedMessage = snakeToCamel(savedMessage);
+        
+//         sendToConversation(conversationId, {
+//           type: 'message_confirmed',
+//           tempId: tempId,
+//           message: confirmedMessage
+//         });
+        
+//         broadcastToAgents({
+//           type: 'message_confirmed',
+//           tempId: tempId,
+//           message: confirmedMessage,
+//           conversationId,
+//           storeId: store.id,
+//           conversation: snakeToCamel(updatedConversation)
+//         });
+        
+//       } catch (error) {
+//         console.error('Failed to save message:', error);
+        
+//         sendToConversation(conversationId, {
+//           type: 'message_failed',
+//           tempId: tempId,
+//           error: 'Failed to save message'
+//         });
+//       }
+//     });
+    
+//   } catch (error) {
+//     console.error('Widget message error:', error);
+//     res.status(500).json({ 
+//       error: 'Failed to send message',
+//       message: error.message 
+//     });
+//   }
+// });
+
 app.post('/api/widget/messages', async (req, res) => {
   try {
     const { conversationId, customerEmail, customerName, content, storeIdentifier, fileData } = req.body;
@@ -1131,7 +1639,6 @@ app.post('/api/widget/messages', async (req, res) => {
         });
         
         const updatedConversation = await db.getConversation(conversationId);
-        
         const confirmedMessage = snakeToCamel(savedMessage);
         
         sendToConversation(conversationId, {
@@ -1148,7 +1655,35 @@ app.post('/api/widget/messages', async (req, res) => {
           storeId: store.id,
           conversation: snakeToCamel(updatedConversation)
         });
-        
+
+        // ── Legal threat detection ──────────────────────────────
+        // 1. Scan text content
+        if (content) {
+          const legalThreat = detectLegalThreat(content);
+          if (legalThreat) {
+            handleLegalThreat(
+              legalThreat,
+              conversationId,
+              store.id,
+              customerName || customerEmail,
+              content,
+              db.pool
+            ).catch(err => console.error('[LEGAL FLAG] Text handler error:', err.message));
+          }
+        }
+
+        // 2. Scan file attachments (PDF / image)
+        if (fileData) {
+          analyzeLegalAttachment(
+            fileData,
+            conversationId,
+            store.id,
+            customerName || customerEmail,
+            db.pool
+          ).catch(err => console.error('[LEGAL FLAG] Attachment handler error:', err.message));
+        }
+        // ────────────────────────────────────────────────────────
+
       } catch (error) {
         console.error('Failed to save message:', error);
         
@@ -1260,20 +1795,22 @@ app.post('/api/widget/presence', async (req, res) => {
 
 app.post('/api/ai/suggestions', authenticateToken, async (req, res) => {
   try {
-    const {
-      clientMessage,
-      chatHistory,
-      recentContext,
-      conversationId,
-      customerName,
-      customerEmail,
-      storeName,
-      storeIdentifier,
-      analysis,
-      adminNote,
-      messageEdited
-    } = req.body;
+      const {
+        clientMessage,
+        chatHistory,
+        recentContext,
+        conversationId,
+        customerName,
+        customerEmail,
+        storeName,
+        storeIdentifier,
+        analysis,
+        adminNote,
+        messageEdited,
+      } = req.body;
 
+      let brainSettings = req.body.brainSettings || {};
+      
     if (!clientMessage) {
       return res.status(400).json({ error: 'clientMessage is required' });
     }
@@ -1290,17 +1827,36 @@ app.post('/api/ai/suggestions', authenticateToken, async (req, res) => {
       const suggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
       return res.json({ suggestions });
     }
+    //don't remove!!
+    // const conversationState = analyzeConversationState(chatHistory, clientMessage, analysis);
+    // const analysisBlock = buildEnhancedAnalysisBlock(analysis, conversationState, recentContext);
+    // const customerContext = buildCustomerContext(customerName, customerEmail, conversationState);
+    // const policyBlock = buildPolicyBlock();
+    // const systemPrompt = buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness);
+    // const userPrompt = buildUserPrompt(chatHistory, clientMessage, messageEdited, adminNote, conversationState, recentContext);
 
+
+    //added
     const conversationState = analyzeConversationState(chatHistory, clientMessage, analysis);
     const analysisBlock = buildEnhancedAnalysisBlock(analysis, conversationState, recentContext);
     const customerContext = buildCustomerContext(customerName, customerEmail, conversationState);
     const policyBlock = buildPolicyBlock();
-    const systemPrompt = buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness);
+   let brainContext = '';
+      try {
+        brainContext = await getBrainContext(db.pool, clientMessage);
+        if (!brainSettings.length && !brainSettings.tone && !brainSettings.empathy) {
+          brainSettings = await getBrainSettings(db.pool);
+          if (brainSettings.tone) console.log('🧠 [Brain] Settings loaded from DB (no localStorage)');
+        }
+      } catch (brainErr) {
+        console.error('🧠 [Brain] Failed to load, continuing without:', brainErr.message);
+      }
+    const systemPrompt = buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness, brainContext, brainSettings);
     const userPrompt = buildUserPrompt(chatHistory, clientMessage, messageEdited, adminNote, conversationState, recentContext);
     const requestBody = JSON.stringify({
       model: process.env.AI_MODEL || 'claude-sonnet-4-20250514',
-      max_tokens: 800,
-      temperature: 0.7, // Balanced creativity and consistency
+      max_tokens: 1500,
+      temperature: 0.3,
       system: systemPrompt,
       messages: [
         { role: 'user', content: userPrompt },
@@ -1309,7 +1865,10 @@ app.post('/api/ai/suggestions', authenticateToken, async (req, res) => {
 
     console.log(`✦ [AI] Calling Anthropic API — model: ${process.env.AI_MODEL || 'claude-sonnet-4-20250514'}`);
 
-    const anthropicData = await callAnthropicAPI(requestBody, ANTHROPIC_API_KEY);
+    //don't remove!
+    // const anthropicData = await callAnthropicAPI(requestBody, ANTHROPIC_API_KEY);
+
+    const anthropicData = await callAnthropicAPIWithRetry(requestBody, ANTHROPIC_API_KEY);
 
     const rawContent = anthropicData.content?.[0]?.text || '';
     console.log(`✦ [AI] Raw response (first 200 chars): ${rawContent.substring(0, 200)}`);
@@ -1330,16 +1889,29 @@ app.post('/api/ai/suggestions', authenticateToken, async (req, res) => {
         ? parsed.slice(0, 3)
         : generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
 
-    suggestions = validateSuggestions(suggestions, conversationState, chatHistory);
-    if (suggestions.length < 3) {
-      const fallbackSuggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
-      suggestions = [...suggestions, ...fallbackSuggestions].slice(0, 3);
-    }
+        console.log(`✦ [AI] BEFORE VALIDATE:`, JSON.stringify(suggestions));
+        console.log(`✦ [AI] orderNumber detected:`, conversationState?.orderNumber);
+        suggestions = validateSuggestions(suggestions, conversationState, chatHistory);
+        console.log(`✦ [AI] AFTER VALIDATE (${suggestions.length}):`, JSON.stringify(suggestions));
+
+        if (suggestions.length === 0) {
+          console.log('✦ [AI] FALLBACK FIRED — all suggestions filtered');
+          suggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
+        } else if (suggestions.length < 3) {
+          console.log(`✦ [AI] ${suggestions.length} suggestion(s) passed — returning Claude output only`);
+        }
+
+      //don't remove!
+    // suggestions = validateSuggestions(suggestions, conversationState, chatHistory);
+    // if (suggestions.length < 3) {
+    //   const fallbackSuggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
+    //   suggestions = [...suggestions, ...fallbackSuggestions].slice(0, 3);
+    // }
 
     res.json({ suggestions });
 
   } catch (error) {
-    console.error('✦ [AI] Suggestions endpoint error:', error);
+    console.error('✦ [AI] Suggestions endpoint error:', error.message, error.stack);
     const suggestions = generateSmartFallbackSuggestions(
       req.body?.clientMessage || '',
       req.body?.chatHistory || '',
@@ -1350,7 +1922,206 @@ app.post('/api/ai/suggestions', authenticateToken, async (req, res) => {
   }
 });
 
-function buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness) {
+app.post('/api/ai/feedback', authenticateToken, async (req, res) => {
+  try {
+    const { suggestion, context, reason, conversationId } = req.body;
+    console.log(`👎 [AI Feedback] Bad suggestion reported — conv: ${conversationId || 'n/a'}, reason: ${reason || 'none'}`);
+    // Optional: persist to DB later. For now just log it.
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('AI feedback error:', error);
+    res.status(500).json({ error: 'Failed to save feedback' });
+  }
+});
+
+//don't remove!
+// function buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness) {
+
+
+
+//   function buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness, brainContext = '', brainSettings = {}) {
+//   let contextGuidance = '';
+  
+//   if (contextQuality === 'minimal') {
+//     if (messageRichness === 'very_brief' || messageRichness === 'brief') {
+//       contextGuidance = `
+// ⚠️ LIMITED CONTEXT: Customer's first brief message with no conversation history yet.
+// - This is likely a greeting or very general inquiry
+// - Your suggestions should be opening responses: greet professionally, ask what they need help with
+// - Don't make assumptions - gather information first
+// - Keep it friendly and welcoming
+// `;
+//     } else {
+//       contextGuidance = `
+// ℹ️ DETAILED FIRST MESSAGE: Customer provided substantial information in their first message.
+// - They've given you good context to work with despite no conversation history
+// - Focus on addressing their specific concern directly
+// - Ask for any missing critical information (order number, photos, etc.)
+// - Show you understand their issue and are taking action
+// `;
+//     }
+//   } else if (contextQuality === 'basic') {
+//     contextGuidance = `
+// ℹ️ BASIC CONTEXT: Early in the conversation (1-2 exchanges).
+// - Build on what's been discussed so far
+// - Continue gathering information if needed
+// - Start moving toward solutions if you have enough details
+// - Reference specific things they've mentioned
+// `;
+//   } else if (contextQuality === 'good') {
+//     contextGuidance = `
+// ✓ GOOD CONTEXT: You have sufficient conversation history (2+ exchanges each side).
+// - Base suggestions on the full conversation context
+// - Avoid repeating what's already been asked or said
+// - Focus on moving toward resolution
+// - Be specific and reference prior discussion points
+// `;
+//   } else if (contextQuality === 'excellent') {
+//     contextGuidance = `
+// ✓ EXCELLENT CONTEXT: Rich conversation history with multiple exchanges.
+// - You have deep context - use it to provide highly relevant suggestions
+// - The customer may be losing patience - be efficient and solution-oriented
+// - Avoid any repetition - you know what's been discussed
+// - Focus on concrete next steps and resolution
+// `;
+//   }
+
+//   return `You are an expert customer support reply assistant for ${storeName || 'an e-commerce store'}. Your job is to suggest exactly 3 reply options that the support agent can immediately send to the customer.
+
+// ${contextGuidance}
+
+// ${customerContext}
+
+// ${analysisBlock}
+
+// ${policyBlock}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CORE RULES — Follow these strictly:
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// 1. **Write as a human support agent**, NEVER as an AI or bot. Use first person ("I'll check", "Let me help").
+
+// 2. **Each reply must be 1-4 sentences.** Be specific and actionable, not vague or generic.
+
+// 3. **Base every reply on actual details** from the conversation:
+//    - Reference specific order numbers, product names, or issues they mentioned
+//    - Never ask for information the customer already provided
+//    - Never repeat what the agent already said or asked
+
+// 4. **Vary the 3 suggestions strategically:**
+//    - Suggestion 1: Direct, helpful answer to their main question
+//    - Suggestion 2: Different angle or addresses a secondary concern
+//    - Suggestion 3: If info is missing, ask a specific follow-up. If info is complete, offer next step (escalation, confirmation, additional help)
+
+// 5. **Match the customer's emotional state:**
+//    - Very upset → Lead with strong empathy, show urgency, take immediate action
+//    - Frustrated → Acknowledge concern with empathy, then solution
+//    - Neutral → Be professional and efficient
+//    - Positive → Match their friendly energy
+//    - Grateful → Be warm but brief
+
+// 6. **Never use these robotic phrases:**
+//    - "I understand your frustration" (too generic)
+//    - "I apologize for any inconvenience"
+//    - "Please be advised"
+//    - "Kindly"
+//    - "As per our policy"
+//    - "I appreciate your patience" (unless they've actually been patient)
+
+// 7. **Use natural, varied empathy language:**
+//    - "I'm so sorry this happened"
+//    - "That's not the experience we want for you"
+//    - "I can see how frustrating this must be"
+//    - "I completely understand"
+
+// 8. **Don't make promises you can't keep:**
+//    - Never promise specific timeframes unless confirmed
+//    - Don't promise refund amounts or outcomes
+//    - Use phrases like "I'll check" or "Let me review" instead
+
+// 9. **No emojis** unless the customer used them first.
+
+// 10. **If customer is repeating themselves or following up:**
+//     - Acknowledge they've been waiting: "I apologize for the delay getting this resolved"
+//     - Show action: "Let me prioritize this" or "I'm escalating this now"
+//     - Don't make them explain again
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// EXAMPLES OF EXCELLENT REPLIES:
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Example 1 - Product Damage:
+// Customer: "My order #12345 arrived completely damaged! The box was crushed and the ceramic vase is in pieces."
+// Agent should say:
+// ✓ "I'm so sorry your order arrived damaged. I've pulled up order #12345 and can see the vase set you ordered. Could you send a quick photo of the damage? I'll get a replacement shipped out right away."
+// ✗ "I understand your frustration. Can you provide your order number?"
+
+// Example 2 - Angry Customer:
+// Customer: "WHERE IS MY PACKAGE?? I ordered 2 weeks ago and NOTHING! This is ridiculous!"
+// Agent should say:
+// ✓ "I completely understand your frustration — 2 weeks is too long. Let me check the status of your order right now. Could you share your order number? It's in your confirmation email and starts with #."
+// ✗ "I apologize for any inconvenience. Please provide your order number so I can look into this."
+
+// Example 3 - Follow-up (customer already asked):
+// Customer: "I'm still waiting for an update on my refund. I asked about this yesterday."
+// Agent should say:
+// ✓ "I apologize for the delay getting this resolved. Let me check the status of your refund right now and get you an answer within the hour."
+// ✗ "Thank you for your patience. Can you provide your order number?"
+
+// Example 4 - Simple Gratitude:
+// Customer: "Thanks so much for the refund!"
+// Agent should say:
+// ✓ "You're very welcome! Don't hesitate to reach out if you need anything else."
+// ✗ "I'm glad I could assist you today. Is there anything else I can help you with regarding your order?"
+
+// Example 5 - Multiple Issues:
+// Customer: "My order #98765 is late AND I was charged twice! This is unacceptable."
+// Agent should say:
+// ✓ "I sincerely apologize — that's definitely not right. I've pulled up order #98765 and I can see both issues. Let me check the shipping status and the duplicate charge right now. I'll have answers for you within 10 minutes."
+// ✗ "I understand your concern. Let me look into this for you."
+
+// Example 6 - Product Question:
+// Customer: "Does the blue hoodie come in size XL?"
+// Agent should say:
+// ✓ "Great question! Let me check the current stock on the blue hoodie in XL. Which specific style are you looking at — the Classic or the Premium?"
+// ✗ "Thank you for your inquiry. Can you provide more details about which product you're interested in?"
+
+// Example 7 - Detailed First Message:
+// Customer: "Hi, my order #12345 arrived damaged. The box was crushed and the ceramic vase inside is broken into pieces. I need a refund or replacement ASAP."
+// Agent should say:
+// ✓ "I'm so sorry your ceramic vase from order #12345 arrived damaged. Could you send a quick photo of the damage? I'll process a replacement for you right away."
+// ✗ "Hello! Thank you for contacting us. Can you provide your order number?"
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// THINKING PROCESS:
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Before generating replies, quickly think through:
+// 1. What is the customer's primary need right now?
+// 2. What information do we have vs. what's missing?
+// 3. What tone matches their emotional state?
+// 4. What has the agent already tried/said/asked?
+// 5. Is this a repeat question or follow-up?
+
+// Then generate your 3 suggestions.
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// ${brainContext ? `
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ADMIN-TRAINED RULES — HIGHEST PRIORITY (override everything above):
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ${brainContext}
+// ` : ''}
+// Respond ONLY with valid JSON in this exact format:
+// {"suggestions": ["reply 1", "reply 2", "reply 3"]}`;
+
+
+// }
+
+
+function buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness, brainContext = '', brainSettings = {}) {
   let contextGuidance = '';
   
   if (contextQuality === 'minimal') {
@@ -1397,7 +2168,39 @@ function buildSystemPrompt(storeName, customerContext, analysisBlock, policyBloc
 `;
   }
 
+  // ── Build reply quality block from admin brain settings ──────────────────
+  const len = brainSettings.length || 'medium';
+  const tone = brainSettings.tone || 'friendly-professional';
+  const empathy = brainSettings.empathy || 'high';
+
+  const lengthRule = len === 'long'
+    ? `Each reply must be **4-6 sentences minimum**. Write thorough, detailed responses like a knowledgeable human agent. Cover the issue, the resolution path, and reassurance. Never give one-liners or short answers.`
+    : len === 'short'
+    ? `Each reply must be **1-2 sentences**. Be extremely direct and concise. One clear action or answer per reply.`
+    : `Each reply must be **2-4 sentences**. Specific and actionable — enough detail to be helpful, not overwhelming.`;
+
+  const toneRule = tone === 'formal'
+    ? `Use formal, professional language throughout. Avoid contractions (use "I will" not "I'll"). No casual phrases.`
+    : tone === 'casual'
+    ? `Use casual, conversational language. Contractions are encouraged. Sound like a helpful colleague, not a corporate agent.`
+    : `Use friendly-professional language — warm and personable but not overly casual. Contractions are fine.`;
+
+  const empathyRule = empathy === 'high'
+    ? `Always lead with empathy before jumping to solutions. Acknowledge the customer's experience first.`
+    : empathy === 'low'
+    ? `Skip empathy preambles. Get straight to the solution — customers want answers, not sympathy.`
+    : `Brief empathy acknowledgment is enough before moving to the solution. Don't over-apologize.`;
+
+  const qualityBlock = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+REPLY QUALITY REQUIREMENTS (set by admin — non-negotiable):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+LENGTH: ${lengthRule}
+TONE: ${toneRule}
+EMPATHY: ${empathyRule}`;
+
   return `You are an expert customer support reply assistant for ${storeName || 'an e-commerce store'}. Your job is to suggest exactly 3 reply options that the support agent can immediately send to the customer.
+
+${qualityBlock}
 
 ${contextGuidance}
 
@@ -1413,7 +2216,7 @@ CORE RULES — Follow these strictly:
 
 1. **Write as a human support agent**, NEVER as an AI or bot. Use first person ("I'll check", "Let me help").
 
-2. **Each reply must be 1-4 sentences.** Be specific and actionable, not vague or generic.
+2. **Reply length:** ${lengthRule}
 
 3. **Base every reply on actual details** from the conversation:
    - Reference specific order numbers, product names, or issues they mentioned
@@ -1517,11 +2320,17 @@ Before generating replies, quickly think through:
 
 Then generate your 3 suggestions.
 
+${brainContext ? `
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
+ADMIN-TRAINED BRAIN RULES — HIGHEST PRIORITY:
+These override tone, length, and all instructions above.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${brainContext}
+` : ''}
 Respond ONLY with valid JSON in this exact format:
 {"suggestions": ["reply 1", "reply 2", "reply 3"]}`;
 }
+
 
 
 function buildEnhancedAnalysisBlock(analysis, conversationState, recentContext) {
@@ -1790,7 +2599,7 @@ Generate 3 reply suggestions as JSON: {"suggestions": ["reply 1", "reply 2", "re
 function analyzeConversationState(chatHistory, clientMessage, analysis) {
   const fullText = `${chatHistory || ''} ${clientMessage || ''}`.toLowerCase();
   const messages = (chatHistory || '').split('\n').filter(m => m.trim());
-  const orderMatch = fullText.match(/(?:order|#)\s*#?(\d{5,})/i);
+  const orderMatch = fullText.match(/(?:order|#)\s*#?(\d{4,})/i);
   const orderNumber = orderMatch ? orderMatch[1] : null;
   const emailMatch = fullText.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
   const customerEmail = emailMatch ? emailMatch[0] : null;
@@ -1834,66 +2643,102 @@ function analyzeConversationState(chatHistory, clientMessage, analysis) {
 /**
  * Validate suggestions to ensure quality and avoid common mistakes
  */
+
+//don't remove!
+// function validateSuggestions(suggestions, conversationState, chatHistory) {
+//   if (!Array.isArray(suggestions)) return [];
+
+//   const lastAgentMessage = (conversationState?.lastAgentMessage || '').toLowerCase();
+//   const hasOrderNumber = !!conversationState?.orderNumber || conversationState?.hasOrderNumber;
+//   const hasEmail = conversationState?.customerEmail && conversationState.customerEmail !== 'unknown';
+
+//   return suggestions.filter((suggestion, index) => {
+//     if (!suggestion || typeof suggestion !== 'string') return false;
+
+//     const lowerSuggestion = suggestion.toLowerCase();
+
+//     // Don't ask for info we already have
+//     if (hasOrderNumber && /(?:could you|can you|please|would you mind).*(?:order number|order #|order id)/i.test(suggestion)) {
+//       console.log(`✦ [AI] Filtered suggestion ${index + 1}: asking for order number we already have`);
+//       return false;
+//     }
+
+//     if (hasEmail && /(?:could you|can you|please|would you mind).*(?:email|e-mail)/i.test(suggestion)) {
+//       console.log(`✦ [AI] Filtered suggestion ${index + 1}: asking for email we already have`);
+//       return false;
+//     }
+
+//     // Don't repeat what agent just said (check first 50 chars)
+//     if (lastAgentMessage && lastAgentMessage.length > 20) {
+//       const agentStart = lastAgentMessage.substring(0, 50);
+//       const suggestionStart = lowerSuggestion.substring(0, 50);
+//       if (agentStart.includes(suggestionStart.substring(0, 30)) || 
+//           suggestionStart.includes(agentStart.substring(0, 30))) {
+//         console.log(`✦ [AI] Filtered suggestion ${index + 1}: too similar to agent's last message`);
+//         return false;
+//       }
+//     }
+
+//     // Check length (5-60 words)
+//     const wordCount = suggestion.split(/\s+/).length;
+//     if (wordCount < 5 || wordCount > 150) {
+//       console.log(`✦ [AI] Filtered suggestion ${index + 1}: word count ${wordCount} out of range`);
+//       return false;
+//     }
+
+//     // Avoid robotic phrases
+//     const roboticPhrases = [
+//       /i apologize for any inconvenience/i,
+//       /please be advised/i,
+//       /kindly provide/i,
+//       /as per our policy/i,
+//       /we regret to inform/i,
+//     ];
+    
+//     for (const phrase of roboticPhrases) {
+//       if (phrase.test(suggestion)) {
+//         console.log(`✦ [AI] Filtered suggestion ${index + 1}: contains robotic phrase`);
+//         return false;
+//       }
+//     }
+
+//     // Avoid AI-like phrases
+//     if (/as an ai|i'm a bot|i'm an assistant/i.test(suggestion)) {
+//       console.log(`✦ [AI] Filtered suggestion ${index + 1}: mentions being AI`);
+//       return false;
+//     }
+
+//     return true;
+//   });
+// }
+
 function validateSuggestions(suggestions, conversationState, chatHistory) {
   if (!Array.isArray(suggestions)) return [];
 
-  const lastAgentMessage = (conversationState?.lastAgentMessage || '').toLowerCase();
   const hasOrderNumber = !!conversationState?.orderNumber || conversationState?.hasOrderNumber;
   const hasEmail = conversationState?.customerEmail && conversationState.customerEmail !== 'unknown';
 
   return suggestions.filter((suggestion, index) => {
-    if (!suggestion || typeof suggestion !== 'string') return false;
-
-    const lowerSuggestion = suggestion.toLowerCase();
-
-    // Don't ask for info we already have
-    if (hasOrderNumber && /(?:could you|can you|please|would you mind).*(?:order number|order #|order id)/i.test(suggestion)) {
-      console.log(`✦ [AI] Filtered suggestion ${index + 1}: asking for order number we already have`);
+    if (!suggestion || typeof suggestion !== 'string' || suggestion.trim().length < 10) {
+      console.log(`✦ [AI] Filtered suggestion ${index + 1}: empty or too short`);
       return false;
     }
 
-    if (hasEmail && /(?:could you|can you|please|would you mind).*(?:email|e-mail)/i.test(suggestion)) {
-      console.log(`✦ [AI] Filtered suggestion ${index + 1}: asking for email we already have`);
-      return false;
-    }
-
-    // Don't repeat what agent just said (check first 50 chars)
-    if (lastAgentMessage && lastAgentMessage.length > 20) {
-      const agentStart = lastAgentMessage.substring(0, 50);
-      const suggestionStart = lowerSuggestion.substring(0, 50);
-      if (agentStart.includes(suggestionStart.substring(0, 30)) || 
-          suggestionStart.includes(agentStart.substring(0, 30))) {
-        console.log(`✦ [AI] Filtered suggestion ${index + 1}: too similar to agent's last message`);
-        return false;
-      }
-    }
-
-    // Check length (5-60 words)
-    const wordCount = suggestion.split(/\s+/).length;
-    if (wordCount < 5 || wordCount > 60) {
-      console.log(`✦ [AI] Filtered suggestion ${index + 1}: word count ${wordCount} out of range`);
-      return false;
-    }
-
-    // Avoid robotic phrases
-    const roboticPhrases = [
-      /i apologize for any inconvenience/i,
-      /please be advised/i,
-      /kindly provide/i,
-      /as per our policy/i,
-      /we regret to inform/i,
-    ];
-    
-    for (const phrase of roboticPhrases) {
-      if (phrase.test(suggestion)) {
-        console.log(`✦ [AI] Filtered suggestion ${index + 1}: contains robotic phrase`);
-        return false;
-      }
-    }
-
-    // Avoid AI-like phrases
-    if (/as an ai|i'm a bot|i'm an assistant/i.test(suggestion)) {
+    // Never let Claude pretend to be an AI/bot
+    if (/as an ai|i'm a bot|i'm an assistant|as an assistant/i.test(suggestion)) {
       console.log(`✦ [AI] Filtered suggestion ${index + 1}: mentions being AI`);
+      return false;
+    }
+
+    // If customer gave order number, don't ask for it again
+    if (hasOrderNumber && /\b(can you|could you|please|would you).*?(order number|order #|order id)\b/i.test(suggestion)) {
+      console.log(`✦ [AI] Filtered suggestion ${index + 1}: asking for order number already provided`);
+      return false;
+    }
+
+    // If customer gave email, don't ask for it again
+    if (hasEmail && /\b(can you|could you|please|would you).*?(email address|your email)\b/i.test(suggestion)) {
+      console.log(`✦ [AI] Filtered suggestion ${index + 1}: asking for email already provided`);
       return false;
     }
 
@@ -1904,19 +2749,94 @@ function validateSuggestions(suggestions, conversationState, chatHistory) {
 /**
  * Call Anthropic API with proper error handling
  */
+// function callAnthropicAPI(requestBody, apiKey) {
+//   return new Promise((resolve, reject) => {
+//     const options = {
+//       hostname: 'api.anthropic.com',
+//       path: '/v1/messages',
+//       method: 'POST',
+//       headers: {
+//         'Content-Type': 'application/json',
+//         'x-api-key': apiKey,
+//         'anthropic-version': '2023-06-01',
+//         'Content-Length': Buffer.byteLength(requestBody),
+//       },
+//     };
+
+//     const apiReq = https.request(options, (apiRes) => {
+//       let body = '';
+//       apiRes.on('data', (chunk) => { body += chunk; });
+//       apiRes.on('end', () => {
+//         console.log(`✦ [AI] Anthropic response status: ${apiRes.statusCode}`);
+//         if (apiRes.statusCode !== 200) {
+//           console.error(`✦ [AI] Anthropic API error ${apiRes.statusCode}:`, body.substring(0, 500));
+//           reject(new Error(`Anthropic API ${apiRes.statusCode}: ${body.substring(0, 200)}`));
+//           return;
+//         }
+//         try {
+//           resolve(JSON.parse(body));
+//         } catch (e) {
+//           console.error('✦ [AI] Failed to parse Anthropic response:', body.substring(0, 500));
+//           reject(new Error('Invalid JSON from Anthropic'));
+//         }
+//       });
+//     });
+
+//     apiReq.on('error', (err) => {
+//       console.error('✦ [AI] HTTPS request failed:', err.message);
+//       reject(err);
+//     });
+
+//     apiReq.setTimeout(20000, () => {
+//       apiReq.destroy();
+//       reject(new Error('Anthropic API timeout (20s)'));
+//     });
+
+//     apiReq.write(requestBody);
+//     apiReq.end();
+//   });
+// }
+
+
+
 function callAnthropicAPI(requestBody, apiKey) {
   return new Promise((resolve, reject) => {
-    const options = {
-      hostname: 'api.anthropic.com',
-      path: '/v1/messages',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'Content-Length': Buffer.byteLength(requestBody),
-      },
-    };
+
+
+
+    //don't remove!
+    // const options = {
+    //   hostname: 'api.anthropic.com',
+    //   path: '/v1/messages',
+    //   method: 'POST',
+    //   headers: {
+    //     'Content-Type': 'application/json',
+    //     'x-api-key': apiKey,
+    //     'anthropic-version': '2023-06-01',
+    //     'Content-Length': Buffer.byteLength(requestBody),
+    //     'Connection': 'close',
+    //   },
+    // };
+const agent = new https.Agent({ 
+  keepAlive: false,
+  timeout: 45000,
+});
+
+const options = {
+  hostname: 'api.anthropic.com',
+  path: '/v1/messages',
+  method: 'POST',
+  agent,
+  headers: {
+    'Content-Type': 'application/json',
+    'x-api-key': apiKey,
+    'anthropic-version': '2023-06-01',
+    'Content-Length': Buffer.byteLength(requestBody),
+    'Connection': 'close',
+  },
+};
+
+
 
     const apiReq = https.request(options, (apiRes) => {
       let body = '';
@@ -1942,9 +2862,9 @@ function callAnthropicAPI(requestBody, apiKey) {
       reject(err);
     });
 
-    apiReq.setTimeout(20000, () => {
+    apiReq.setTimeout(45000, () => {
       apiReq.destroy();
-      reject(new Error('Anthropic API timeout (20s)'));
+      reject(new Error('Anthropic API timeout (45s)'));
     });
 
     apiReq.write(requestBody);
@@ -1952,12 +2872,58 @@ function callAnthropicAPI(requestBody, apiKey) {
   });
 }
 
+
+function callAnthropicAPIWithRetry(requestBody, apiKey, retries = 3) {
+  const attempt = (attemptsLeft) => new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'api.anthropic.com',
+      path: '/v1/messages',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'Content-Length': Buffer.byteLength(requestBody),
+      },
+    };
+
+    const req = require('https').request(options, apiRes => {
+      let body = '';
+      apiRes.on('data', chunk => { body += chunk; });
+      apiRes.on('end', () => {
+        console.log(`✦ [AI] Anthropic response status: ${apiRes.statusCode}`);
+        if (apiRes.statusCode !== 200) {
+          return reject(new Error(`Anthropic API ${apiRes.statusCode}: ${body.slice(0, 200)}`));
+        }
+        try { resolve(JSON.parse(body)); }
+        catch (e) { reject(new Error('Invalid JSON from Anthropic')); }
+      });
+    });
+
+    req.on('error', (err) => {
+      const currentAttempt = retries - attemptsLeft + 1;
+      console.error(`✦ [AI] Attempt ${currentAttempt}/${retries} failed: ${err.message}`);
+      if (attemptsLeft > 0) {
+        setTimeout(() => attempt(attemptsLeft - 1).then(resolve).catch(reject), 1500 * currentAttempt);
+      } else {
+        reject(err);
+      }
+    });
+
+    req.setTimeout(45000, () => { req.destroy(); reject(new Error('Anthropic timeout')); });
+    req.write(requestBody);
+    req.end();
+  });
+
+  return attempt(retries - 1);
+}
+
 function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis, adminNote) {
   const lower = (customerMsg || '').toLowerCase();
   const topics = analysis?.detectedTopics || [];
   const sentiment = analysis?.sentiment || 'neutral';
   const isRepeat = analysis?.isRepeat || false;
-  const hasOrderNumber = analysis?.hasOrderNumber || /\b\d{5,}\b/.test(customerMsg + chatHistory);
+  const hasOrderNumber = analysis?.hasOrderNumber || /\b\d{4,}\b/.test(customerMsg + chatHistory);
   const hasAttachment = analysis?.hasAttachment || /attach|photo|image/i.test(customerMsg);
   const agentAskedForOrder = analysis?.agentAskedForOrder || false;
   const agentAlreadyApologized = analysis?.agentAlreadyApologized || false;
