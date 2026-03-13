@@ -487,38 +487,34 @@ function formatBrainForPrompt(brain) {
 
 module.exports = router;
 
-function callAnthropicAPI(requestBody, apiKey) {
-  const attempt = (attemptsLeft) => new Promise((resolve, reject) => {
-    const options = {
-      hostname: 'api.anthropic.com',
-      path: '/v1/messages',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'Content-Length': Buffer.byteLength(requestBody),
-      },
-    };
-    const req = https.request(options, apiRes => {
-      let body = '';
-      apiRes.on('data', chunk => { body += chunk; });
-      apiRes.on('end', () => {
-        if (apiRes.statusCode !== 200) return reject(new Error(`Anthropic API ${apiRes.statusCode}: ${body.slice(0, 200)}`));
-        try { resolve(JSON.parse(body)); } catch (e) { reject(new Error('Invalid JSON from Anthropic')); }
+async function callAnthropicAPI(requestBody, apiKey) {
+  for (let attempt = 0; attempt <= 2; attempt++) {
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: requestBody,
+        signal: AbortSignal.timeout(60000),
       });
-    });
-    req.on('error', (err) => {
-      if (attemptsLeft > 0 && ['ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED'].includes(err.code)) {
-        console.warn(`[AI Training] ${err.code} — retrying in 1.5s (${attemptsLeft} left)`);
-        setTimeout(() => attempt(attemptsLeft - 1).then(resolve).catch(reject), 1500);
-      } else {
-        reject(err);
+
+      const text = await res.text();
+      if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${text.slice(0, 200)}`);
+      return JSON.parse(text);
+
+    } catch (err) {
+      const retryable = err.name === 'TimeoutError' ||
+        ['ECONNRESET','ETIMEDOUT','ECONNREFUSED'].includes(err.cause?.code);
+
+      if (retryable && attempt < 2) {
+        console.warn(`[AI Training] ${err.message} — retry ${attempt + 1}/2`);
+        await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+        continue;
       }
-    });
-    req.setTimeout(60000, () => { req.destroy(); reject(new Error('Anthropic timeout')); });
-    req.write(requestBody);
-    req.end();
-  });
-  return attempt(2);
+      throw err;
+    }
+  }
 }
