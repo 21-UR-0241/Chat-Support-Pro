@@ -105,6 +105,11 @@ router.post('/upload-doc', authenticateToken, upload.single('file'), async (req,
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/ai/training/extract-rules
 // Dedicated rule extraction — bypasses conversational chat, saves directly
+// NOTE: brain is intentionally NOT passed to the system prompt here.
+//       Deduplication is handled at the DB level (exists check before push).
+//       Passing the brain caused the AI to self-suppress rules for subsequent
+//       product uploads, assuming they were already covered. Extract everything,
+//       let the DB deduplicate.
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/extract-rules', authenticateToken, async (req, res) => {
   try {
@@ -112,12 +117,12 @@ router.post('/extract-rules', authenticateToken, async (req, res) => {
     const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
     if (!ANTHROPIC_API_KEY) return res.status(400).json({ error: 'No API key' });
 
-    const { text, filename, brain = {} } = req.body;
+    const { text, filename } = req.body;
     if (!text?.trim()) return res.status(400).json({ error: 'No text provided' });
 
-    const brainSummary = formatBrainForPrompt(brain);
-
-const systemPrompt = `You extract and preserve knowledge from documents for a peptide e-commerce customer support AI brain (400+ Shopify stores, Canada + US).
+    // ── FIX: No brain summary in prompt — prevents AI from suppressing rules
+    //         on 2nd/3rd/Nth product upload. DB handles dedup automatically.
+    const systemPrompt = `You extract and preserve knowledge from documents for a peptide e-commerce customer support AI brain (400+ Shopify stores, Canada + US).
 
 This document may be a product guide, dosing protocol, FAQ, policy doc, or training material.
 Your job is to extract ALL useful information — preserving detail, not summarizing it away.
@@ -136,13 +141,12 @@ RULES FOR EXTRACTION:
   GOOD: "BPC-157 standard dose is 250-500mcg per injection, 1-2x daily, injected subcutaneously near the site of injury"
 - For tone/avoid/prefer rules: keep them concise and actionable
 - Each rule must be self-contained — an agent reading it alone should understand it fully
-- Extract EVERYTHING — err heavily on the side of including more rules
+- Extract EVERYTHING from this document — err heavily on the side of including more rules
 - Minimum 10 rules per document, no maximum
 - Split compound information into separate rules for clarity
 - Include brand/product names, specific SKUs, prices if mentioned
-
-EXISTING BRAIN (skip exact duplicates only):
-${brainSummary || 'Empty — extract everything'}
+- IMPORTANT: Extract ALL rules you find in this document. Do NOT skip or omit anything.
+  Deduplication is handled automatically after extraction — your job is only to extract.
 
 RESPONSE FORMAT — valid JSON only, no markdown:
 {
@@ -170,6 +174,7 @@ RESPONSE FORMAT — valid JSON only, no markdown:
       .map(r => ({ ...r, source: filename ? 'document-upload' : 'admin-input' }));
 
     // Auto-save extracted rules into brain DB immediately
+    // The exists check here is the ONLY dedup gate — AI is not involved in filtering
     if (rules.length > 0) {
       try {
         const currentResult = await db.pool.query(
@@ -181,12 +186,16 @@ RESPONSE FORMAT — valid JSON only, no markdown:
           product: 'productKnowledge', policy: 'customPolicies', example: 'responseExamples',
         };
         const updatedBrain = { ...currentBrain };
+        let newRulesAdded = 0;
         rules.forEach(rule => {
           const key = BRAIN_KEYS[rule.category];
           if (!key) return;
           if (!updatedBrain[key]) updatedBrain[key] = [];
           const exists = updatedBrain[key].some(r => (r.text || r) === rule.text);
-          if (!exists) updatedBrain[key].push({ text: rule.text, source: rule.source });
+          if (!exists) {
+            updatedBrain[key].push({ text: rule.text, source: rule.source });
+            newRulesAdded++;
+          }
         });
         await db.pool.query(`
           INSERT INTO ai_training_brain (id, brain_data, updated_at, updated_by)
@@ -197,7 +206,7 @@ RESPONSE FORMAT — valid JSON only, no markdown:
                 updated_by = EXCLUDED.updated_by
         `, [JSON.stringify(updatedBrain), 'extract-rules-auto']);
         try { const { refreshBrainCache } = require('../brain-context'); refreshBrainCache(); } catch {}
-        console.log(`[AI Training] Auto-saved ${rules.length} extracted rules to brain DB`);
+        console.log(`[AI Training] Auto-saved ${newRulesAdded} new rules to brain DB (${rules.length - newRulesAdded} exact duplicates skipped)`);
       } catch (saveErr) {
         console.error('[AI Training] extract-rules auto-save error:', saveErr.message);
       }

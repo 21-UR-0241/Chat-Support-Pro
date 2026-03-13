@@ -560,7 +560,7 @@ export default function AITraining({ onBrainUpdate }) {
     }
   }, [handleImageFile]);
 
-const send = useCallback(async (text, interviewCtx = null) => {
+  const send = useCallback(async (text, interviewCtx = null) => {
     const msgText = text || input.trim();
     if (!msgText && images.length === 0) return;
 
@@ -625,6 +625,9 @@ const send = useCallback(async (text, interviewCtx = null) => {
     }
   }, [input, images, messages, showToast, onBrainUpdate]);
 
+  // ── FIX: Do NOT pass brain to extract-rules.
+  //    Brain in the prompt caused AI to suppress rules for subsequent product uploads,
+  //    treating them as "already covered." Deduplication happens at the DB level only.
   const handleDocFileWithSend = useCallback(async (file) => {
     const allowed = ['application/pdf', 'text/plain', 'application/msword',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
@@ -650,20 +653,25 @@ const send = useCallback(async (text, interviewCtx = null) => {
       const extractRes = await fetch(`${API_BASE}/ai/training/extract-rules`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-        // ── brainRef.current here too ──
-        body: JSON.stringify({ text: uploadData.text.slice(0, 30000), filename: file.name, brain: brainRef.current }),
+        // ── brain intentionally omitted — prevents AI from suppressing rules on Nth upload ──
+        body: JSON.stringify({ text: uploadData.text.slice(0, 30000), filename: file.name }),
       });
       if (!extractRes.ok) throw new Error(`Extraction failed: HTTP ${extractRes.status}`);
       const extractData = await extractRes.json();
 
       if (extractData.rules?.length > 0) {
-        setBrain(prev => {
-          const updated = mergeBrainRules(prev, extractData.rules);
-          brainRef.current = updated;
-          setDirty(false);
-          onBrainUpdate?.();
-          return updated;
-        });
+        // Reload brain from DB — backend already saved the new rules
+        try {
+          const fresh = await apiFetch('/ai/training/brain');
+          if (fresh.brain) {
+            const loaded = { ...EMPTY_BRAIN, ...fresh.brain };
+            setBrain(loaded);
+            brainRef.current = loaded;
+          }
+        } catch { /* silent */ }
+
+        setDirty(false);
+        onBrainUpdate?.();
         showToast(`✅ ${extractData.rules.length} rules extracted from "${file.name}" and saved`);
         addSystemMessage(`🧠 ${extractData.rules.length} rules extracted from "${file.name}" and saved to brain.`);
         setMessages(prev => [...prev, {
