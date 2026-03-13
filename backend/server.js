@@ -18,7 +18,7 @@ const { hashPassword, verifyPassword, generateToken, authenticateToken } = requi
 const session = require('express-session');
 const shopifyAppRoutes = require('./routes/shopify-app-routes');
 const fileRoutes = require('./routes/fileroutes');
-const { handleOfflineEmailNotification, cancelPendingEmail, startEmailSweep, stopEmailSweep } = require('./services/emailService');
+const { handleOfflineEmailNotification, cancelPendingEmail, startEmailSweep, stopEmailSweep } = require('../frontend/src/admin/services/emailService');
 
 //added
 const aiTrainingRoutes = require('./routes/ai-training-routes');
