@@ -54,9 +54,10 @@ function mergeBrainRules(brain, ruleUpdates) {
     const meta = CATEGORY_META[rule.category];
     if (!meta) return;
     const key = meta.brainKey;
-    if (!updated[key]) updated[key] = [];
-    const exists = updated[key].some(r => (r.text || r) === rule.text);
-    if (!exists) updated[key].push({ text: rule.text, source: rule.source || 'admin-chat' });
+    const existing = updated[key] ? [...updated[key]] : []; // new array ref — React detects change
+    const exists = existing.some(r => (r.text || r) === rule.text);
+    if (!exists) existing.push({ text: rule.text, source: rule.source || 'admin-chat' });
+    updated[key] = existing;
   });
   return updated;
 }
