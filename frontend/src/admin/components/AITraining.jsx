@@ -48,14 +48,13 @@ function nowTime() {
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-// ── Fixed: creates new array references so React detects the change ──
 function mergeBrainRules(brain, ruleUpdates) {
   const updated = { ...brain };
   ruleUpdates.forEach(rule => {
     const meta = CATEGORY_META[rule.category];
     if (!meta) return;
     const key = meta.brainKey;
-    const existing = updated[key] ? [...updated[key]] : []; // new array ref — React detects change
+    const existing = updated[key] ? [...updated[key]] : [];
     const exists = existing.some(r => (r.text || r) === rule.text);
     if (!exists) existing.push({ text: rule.text, source: rule.source || 'admin-chat' });
     updated[key] = existing;
@@ -398,7 +397,6 @@ function ReviewModal({ results, onAdd, onClose }) {
   );
 }
 
-// ── Save Toast ──
 function SaveToast({ message }) {
   if (!message) return null;
   const isError = message.startsWith('⚠️') || message.startsWith('❌');
@@ -435,14 +433,17 @@ export default function AITraining({ onBrainUpdate }) {
   const [analyzing, setAnalyzing] = useState(false);
   const [interview, setInterview] = useState(null);
   const [interviewDone, setInterviewDone] = useState(false);
-  const [saveToast, setSaveToast] = useState(null);          // ── NEW
+  const [saveToast, setSaveToast] = useState(null);
   const bottomRef = useRef(null);
   const fileInputRef = useRef(null);
   const docInputRef = useRef(null);
   const textareaRef = useRef(null);
   const toastTimer = useRef(null);
 
-  // ── Helper: show toast and auto-dismiss ──
+  // ── brainRef: always holds latest brain so useCallback closures never go stale ──
+  const brainRef = useRef(brain);
+  useEffect(() => { brainRef.current = brain; }, [brain]);
+
   const showToast = useCallback((msg, duration = 3500) => {
     setSaveToast(msg);
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -451,7 +452,13 @@ export default function AITraining({ onBrainUpdate }) {
 
   useEffect(() => {
     apiFetch('/ai/training/brain')
-      .then(d => { if (d.brain) setBrain({ ...EMPTY_BRAIN, ...d.brain }); })
+      .then(d => {
+        if (d.brain) {
+          const loaded = { ...EMPTY_BRAIN, ...d.brain };
+          setBrain(loaded);
+          brainRef.current = loaded;
+        }
+      })
       .catch(() => {});
     return () => { if (toastTimer.current) clearTimeout(toastTimer.current); };
   }, []);
@@ -460,15 +467,15 @@ export default function AITraining({ onBrainUpdate }) {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, typing, interview]);
 
-  // Auto-save 4s after any brain change — safety net so nothing is lost
+  // Auto-save 4s after any brain change
   useEffect(() => {
     if (!dirty) return;
     const timer = setTimeout(async () => {
       try {
-        await apiFetch('/ai/training/brain', { method: 'PUT', body: JSON.stringify({ brain }) });
+        await apiFetch('/ai/training/brain', { method: 'PUT', body: JSON.stringify({ brain: brainRef.current }) });
         setDirty(false);
         onBrainUpdate?.();
-      } catch { /* silent — user can still manually save */ }
+      } catch { /* silent */ }
     }, 4000);
     return () => clearTimeout(timer);
   }, [brain, dirty]);
@@ -481,7 +488,9 @@ export default function AITraining({ onBrainUpdate }) {
       const ruleText = typeof rule === 'string' ? rule : rule.text;
       const already = list.some(r => (typeof r === 'string' ? r : r.text) === ruleText);
       if (already) return prev;
-      return { ...prev, [meta.brainKey]: [...list, { text: ruleText, source: rule.source || 'admin' }] };
+      const next = { ...prev, [meta.brainKey]: [...list, { text: ruleText, source: rule.source || 'admin' }] };
+      brainRef.current = next;
+      return next;
     });
     setDirty(true);
   }, []);
@@ -492,7 +501,9 @@ export default function AITraining({ onBrainUpdate }) {
     setBrain(prev => {
       const list = [...(prev[brainKey] || [])];
       list.splice(index, 1);
-      return { ...prev, [brainKey]: list };
+      const next = { ...prev, [brainKey]: list };
+      brainRef.current = next;
+      return next;
     });
     setDirty(true);
   }, []);
@@ -500,11 +511,11 @@ export default function AITraining({ onBrainUpdate }) {
   const saveBrain = useCallback(async () => {
     setSaving(true);
     try {
-      await apiFetch('/ai/training/brain', { method: 'PUT', body: JSON.stringify({ brain }) });
+      await apiFetch('/ai/training/brain', { method: 'PUT', body: JSON.stringify({ brain: brainRef.current }) });
       setDirty(false);
       onBrainUpdate?.();
-      if (brain.suggestionSettings) {
-        try { localStorage.setItem('brain_suggestion_settings', JSON.stringify(brain.suggestionSettings)); } catch {}
+      if (brainRef.current.suggestionSettings) {
+        try { localStorage.setItem('brain_suggestion_settings', JSON.stringify(brainRef.current.suggestionSettings)); } catch {}
       }
       addSystemMessage('✅ Brain saved — all future suggestions will use these rules.');
     } catch (e) {
@@ -512,7 +523,7 @@ export default function AITraining({ onBrainUpdate }) {
     } finally {
       setSaving(false);
     }
-  }, [brain, onBrainUpdate]);
+  }, [onBrainUpdate]);
 
   function addSystemMessage(text) {
     setMessages(prev => [...prev, { id: Date.now(), role: 'system', content: text, time: nowTime() }]);
@@ -581,7 +592,8 @@ export default function AITraining({ onBrainUpdate }) {
     try {
       const data = await apiFetch('/ai/training/chat', {
         method: 'POST',
-        body: JSON.stringify({ message: finalMsg, images: userMsg.images, history, brain, interviewContext: interviewCtx }),
+        // ── brainRef.current: always sends latest brain, not stale closure value ──
+        body: JSON.stringify({ message: finalMsg, images: userMsg.images, history, brain: brainRef.current, interviewContext: interviewCtx }),
       });
 
       const aiMsg = {
@@ -591,10 +603,11 @@ export default function AITraining({ onBrainUpdate }) {
       };
       setMessages(prev => [...prev, aiMsg]);
 
-      // ── Fixed: single setBrain call with new array refs + toast confirmation ──
       if (data.ruleUpdates?.length > 0) {
         setBrain(prev => {
           const updated = mergeBrainRules(prev, data.ruleUpdates);
+          // ── update ref immediately so next send() sees the accumulated rules ──
+          brainRef.current = updated;
           apiFetch('/ai/training/brain', { method: 'PUT', body: JSON.stringify({ brain: updated }) })
             .then(() => {
               setDirty(false);
@@ -602,7 +615,7 @@ export default function AITraining({ onBrainUpdate }) {
               showToast(`✅ ${data.ruleUpdates.length} rule${data.ruleUpdates.length > 1 ? 's' : ''} saved to brain`);
             })
             .catch(() => {
-              showToast('⚠️ Rules extracted but save failed — will retry', 4500);
+              showToast('⚠️ Rules extracted but save failed — click 💾 Save manually', 4500);
             });
           return updated;
         });
@@ -612,9 +625,8 @@ export default function AITraining({ onBrainUpdate }) {
     } finally {
       setTyping(false);
     }
-  }, [input, images, messages, brain, showToast, onBrainUpdate]);
+  }, [input, images, messages, showToast, onBrainUpdate]);
 
-  // Doc upload → dedicated extract-rules endpoint → saves directly to DB
   const handleDocFileWithSend = useCallback(async (file) => {
     const allowed = ['application/pdf', 'text/plain', 'application/msword',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
@@ -628,7 +640,6 @@ export default function AITraining({ onBrainUpdate }) {
     addSystemMessage(`📄 Reading "${file.name}"…`);
 
     try {
-      // Step 1: extract text from file
       const uploadRes = await fetch(`${API_BASE}/ai/training/upload-doc`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${getToken()}` },
@@ -638,19 +649,19 @@ export default function AITraining({ onBrainUpdate }) {
       const uploadData = await uploadRes.json();
       addSystemMessage(`✅ "${file.name}" read — ${uploadData.chars.toLocaleString()} chars. Extracting rules…`);
 
-      // Step 2: extract rules directly to DB — no chat roundtrip
       const extractRes = await fetch(`${API_BASE}/ai/training/extract-rules`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({ text: uploadData.text.slice(0, 30000), filename: file.name, brain }),
+        // ── brainRef.current here too ──
+        body: JSON.stringify({ text: uploadData.text.slice(0, 30000), filename: file.name, brain: brainRef.current }),
       });
       if (!extractRes.ok) throw new Error(`Extraction failed: HTTP ${extractRes.status}`);
       const extractData = await extractRes.json();
 
       if (extractData.rules?.length > 0) {
-        // ── Fixed: single setBrain call for doc upload too ──
         setBrain(prev => {
           const updated = mergeBrainRules(prev, extractData.rules);
+          brainRef.current = updated;
           setDirty(false);
           onBrainUpdate?.();
           return updated;
@@ -668,7 +679,7 @@ export default function AITraining({ onBrainUpdate }) {
     } catch (e) {
       addSystemMessage(`❌ Failed to process "${file.name}": ${e.message}`);
     }
-  }, [brain, onBrainUpdate, showToast]);
+  }, [onBrainUpdate, showToast]);
 
   const answerInterviewQuestion = useCallback(async (question, answer) => {
     const nextIndex = (interview?.currentIndex ?? 0) + 1;
@@ -695,7 +706,7 @@ export default function AITraining({ onBrainUpdate }) {
         addSystemMessage(`Found ${data.rules.length} patterns and ${data.gaps.length} gaps. Generating interview questions…`);
         try {
           const qData = await apiFetch('/ai/training/proactive-questions', {
-            method: 'POST', body: JSON.stringify({ gaps: data.gaps, rules: data.rules, brain }),
+            method: 'POST', body: JSON.stringify({ gaps: data.gaps, rules: data.rules, brain: brainRef.current }),
           });
           if (qData.questions?.length > 0) {
             setMessages(prev => [...prev, {
@@ -712,7 +723,7 @@ export default function AITraining({ onBrainUpdate }) {
     } finally {
       setAnalyzing(false);
     }
-  }, [brain]);
+  }, []);
 
   useEffect(() => {
     const ta = textareaRef.current;
@@ -846,7 +857,14 @@ export default function AITraining({ onBrainUpdate }) {
               </div>
               <SettingsPanel
                 settings={brain.suggestionSettings}
-                onChange={settings => { setBrain(prev => ({ ...prev, suggestionSettings: settings })); setDirty(true); }}
+                onChange={settings => {
+                  setBrain(prev => {
+                    const next = { ...prev, suggestionSettings: settings };
+                    brainRef.current = next;
+                    return next;
+                  });
+                  setDirty(true);
+                }}
               />
               {dirty && (
                 <div style={{ padding: '0 28px 28px' }}>
@@ -1048,7 +1066,6 @@ export default function AITraining({ onBrainUpdate }) {
         />
       )}
 
-      {/* ── Save toast — bottom right confirmation ── */}
       <SaveToast message={saveToast} />
     </>
   );
