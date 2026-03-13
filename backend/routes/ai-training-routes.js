@@ -12,7 +12,7 @@ const db = require('../database');
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  limits: { fileSize: 10 * 1024 * 1024 },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -75,12 +75,10 @@ router.post('/upload-doc', authenticateToken, upload.single('file'), async (req,
 
     if (mimetype === 'text/plain') {
       text = buffer.toString('utf-8');
-
     } else if (mimetype === 'application/pdf') {
       const pdfParse = require('pdf-parse');
       const data = await pdfParse(buffer);
       text = data.text;
-
     } else if (
       mimetype === 'application/msword' ||
       mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
@@ -89,7 +87,6 @@ router.post('/upload-doc', authenticateToken, upload.single('file'), async (req,
       const mammoth = require('mammoth');
       const result = await mammoth.extractRawText({ buffer });
       text = result.value;
-
     } else {
       return res.status(400).json({ error: `Unsupported file type: ${mimetype}` });
     }
@@ -102,6 +99,111 @@ router.post('/upload-doc', authenticateToken, upload.single('file'), async (req,
   } catch (err) {
     console.error('[AI Training] upload-doc error:', err);
     res.status(500).json({ error: 'Failed to process document', message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/ai/training/extract-rules
+// Dedicated rule extraction — bypasses conversational chat, saves directly
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/extract-rules', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+    const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+    if (!ANTHROPIC_API_KEY) return res.status(400).json({ error: 'No API key' });
+
+    const { text, filename, brain = {} } = req.body;
+    if (!text?.trim()) return res.status(400).json({ error: 'No text provided' });
+
+    const brainSummary = formatBrainForPrompt(brain);
+
+    const systemPrompt = `You extract rules from documents/text for a peptide e-commerce customer support AI brain (400+ Shopify stores, Canada + US).
+
+Extract EVERY rule, policy, product fact, tone guideline, and procedure. Be aggressive — if it's actionable for a support agent, extract it.
+
+CATEGORIES:
+- tone: how agents should communicate
+- avoid: what agents must never say or do
+- prefer: what agents should always say or do
+- product: peptide/product knowledge, dosing, storage, ingredients, reconstitution
+- policy: refunds, shipping, guarantees, order handling, timelines
+- example: gold-standard reply examples
+
+EXISTING BRAIN (skip exact duplicates):
+${brainSummary || 'Empty — extract everything'}
+
+RULES:
+- Extract minimum 5 rules, no maximum
+- Each rule must be specific and actionable — not vague
+- Short admin messages like "always include tracking link" are valid rules
+- Product facts, dosing, storage temps, shipping timelines → all extractable
+- If in doubt, extract it
+
+RESPONSE FORMAT — valid JSON only, no markdown:
+{
+  "rules": [
+    { "category": "policy", "text": "Concrete actionable rule text", "source": "document" }
+  ],
+  "summary": "Extracted X rules covering: [brief topic list]"
+}`;
+
+    const requestBody = JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 4000,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: `Extract all rules from this${filename ? ` document (${filename})` : ' text'}:\n\n${text}` }],
+    });
+
+    const response = await callAnthropicAPI(requestBody, ANTHROPIC_API_KEY);
+    const raw = response.content?.[0]?.text || '{}';
+    let parsed;
+    try { parsed = JSON.parse(raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim()); }
+    catch { parsed = { rules: [], summary: 'Could not parse extraction.' }; }
+
+    const rules = (parsed.rules || [])
+      .filter(r => r.text && r.category)
+      .map(r => ({ ...r, source: filename ? 'document-upload' : 'admin-input' }));
+
+    // Auto-save extracted rules into brain DB immediately
+    if (rules.length > 0) {
+      try {
+        const currentResult = await db.pool.query(
+          `SELECT brain_data FROM ai_training_brain ORDER BY updated_at DESC LIMIT 1`
+        );
+        const currentBrain = currentResult.rows[0]?.brain_data || {};
+        const BRAIN_KEYS = {
+          tone: 'toneRules', avoid: 'avoidPatterns', prefer: 'preferPatterns',
+          product: 'productKnowledge', policy: 'customPolicies', example: 'responseExamples',
+        };
+        const updatedBrain = { ...currentBrain };
+        rules.forEach(rule => {
+          const key = BRAIN_KEYS[rule.category];
+          if (!key) return;
+          if (!updatedBrain[key]) updatedBrain[key] = [];
+          const exists = updatedBrain[key].some(r => (r.text || r) === rule.text);
+          if (!exists) updatedBrain[key].push({ text: rule.text, source: rule.source });
+        });
+        await db.pool.query(`
+          INSERT INTO ai_training_brain (id, brain_data, updated_at, updated_by)
+          VALUES (1, $1, NOW(), $2)
+          ON CONFLICT (id) DO UPDATE
+            SET brain_data = EXCLUDED.brain_data,
+                updated_at = EXCLUDED.updated_at,
+                updated_by = EXCLUDED.updated_by
+        `, [JSON.stringify(updatedBrain), 'extract-rules-auto']);
+        try { const { refreshBrainCache } = require('../brain-context'); refreshBrainCache(); } catch {}
+        console.log(`[AI Training] Auto-saved ${rules.length} extracted rules to brain DB`);
+      } catch (saveErr) {
+        console.error('[AI Training] extract-rules auto-save error:', saveErr.message);
+      }
+    }
+
+    console.log(`[AI Training] Extracted ${rules.length} rules from ${filename || 'text'}`);
+    res.json({ rules, summary: parsed.summary || `Extracted ${rules.length} rules.` });
+
+  } catch (err) {
+    console.error('[AI Training] extract-rules error:', err);
+    res.status(500).json({ error: 'Extraction failed', message: err.message });
   }
 });
 
@@ -417,23 +519,15 @@ ${interviewBlock}
 CURRENT BRAIN:
 ${brainSummary || '⚠️ Empty — no rules yet. Priority to fill.'}
 
-RULE EXTRACTION:
-- Tone/style instruction → "tone" rule
-- What NOT to say → "avoid" rule
-- What to always do/say → "prefer" rule
-- Peptide/product knowledge → "product" rule
-- Policy clarification → "policy" rule
-- Gold-standard reply → "example" rule
-- Extract aggressively — if admin states any fact, preference, policy, or correction, make it a rule
-- When in doubt, extract it — better too many rules than miss something important
-- Every direct answer is a potential rule: "X takes Y days" → policy, "We do/don't do X" → policy, "Agents should say X" → prefer
-- Extract silently — don't ask permission, just confirm briefly: "Got it, added as a rule."
-- Always set type="training" when you extract rules, type="mixed" when you both answer AND extract
-
-DOCUMENT UPLOAD:
-- When admin uploads a document, extract ALL relevant rules, policies, product knowledge, and tone guidelines
-- Treat uploaded docs as authoritative source material — extract aggressively
-- After processing a doc, give a summary of what you learned and ask if anything needs clarification
+RULE EXTRACTION — CRITICAL, DO THIS EVERY MESSAGE:
+- Read EVERY admin message for extractable facts, preferences, corrections, or instructions
+- If admin states ANYTHING about how agents should behave, what products are, or what policies exist → extract it as a rule
+- NEVER return empty ruleUpdates for a teaching message — if admin taught you something, it MUST appear in ruleUpdates
+- type="training" → extracted rules only | type="mixed" → rules + conversational answer | type="answer" → genuinely no new info (rare)
+- Tone/style instruction → "tone" | Forbidden phrases/actions → "avoid" | Must-do actions → "prefer"
+- Product facts, dosing, ingredients, storage → "product" | Refunds, shipping, timelines → "policy" | Gold replies → "example"
+- Short messages like "always include tracking link" or "never say sorry" are valid rules — extract them
+- Extract silently — don't ask permission, just confirm: "Got it, saved as a rule."
 
 SCREENSHOT ANALYSIS:
 - Read every detail in the image
@@ -443,16 +537,15 @@ SCREENSHOT ANALYSIS:
 
 RESPONSE FORMAT — valid JSON only, no markdown fences:
 {
-  "message": "Your response. Warm, direct, specific. Use **bold** and bullet lists when helpful. Reference what admin actually said.",
+  "message": "Your response. Warm, direct, specific. Use **bold** and bullet lists when helpful.",
   "type": "answer|training|mixed|question",
   "isQuestion": true/false,
   "ruleUpdates": [
     { "category": "prefer", "text": "concrete actionable rule text", "source": "admin-feedback" }
   ],
-  "nextQuestion": "Optional follow-up question string, or null"
+  "nextQuestion": "One follow-up question string, or null"
 }`;
 
-    // Build message history — only 'user' and 'assistant' roles allowed by Anthropic
     const rawMessages = [];
     history.slice(-14).forEach(h => {
       const role = h.role === 'ai' ? 'assistant' : h.role;
@@ -462,7 +555,6 @@ RESPONSE FORMAT — valid JSON only, no markdown fences:
       rawMessages.push({ role, content });
     });
 
-    // Strict user/assistant alternation
     const chatMessages = [];
     for (const msg of rawMessages) {
       if (chatMessages.length > 0 && chatMessages[chatMessages.length - 1].role === msg.role) {
@@ -503,7 +595,40 @@ RESPONSE FORMAT — valid JSON only, no markdown fences:
     catch { parsed = { message: rawContent, isQuestion: rawContent.includes('?'), ruleUpdates: [], type: 'answer' }; }
 
     const ruleUpdates = Array.isArray(parsed.ruleUpdates) ? parsed.ruleUpdates : [];
-    if (ruleUpdates.length > 0) console.log(`[AI Training] Extracted ${ruleUpdates.length} rule(s)`);
+
+    // Auto-save chat-extracted rules to DB immediately — don't wait for frontend
+    if (ruleUpdates.length > 0) {
+      console.log(`[AI Training] Extracted ${ruleUpdates.length} rule(s) — auto-saving to DB`);
+      try {
+        const currentResult = await db.pool.query(
+          `SELECT brain_data FROM ai_training_brain ORDER BY updated_at DESC LIMIT 1`
+        );
+        const currentBrainDB = currentResult.rows[0]?.brain_data || {};
+        const BRAIN_KEYS = {
+          tone: 'toneRules', avoid: 'avoidPatterns', prefer: 'preferPatterns',
+          product: 'productKnowledge', policy: 'customPolicies', example: 'responseExamples',
+        };
+        const updatedBrain = { ...currentBrainDB };
+        ruleUpdates.forEach(rule => {
+          const key = BRAIN_KEYS[rule.category];
+          if (!key) return;
+          if (!updatedBrain[key]) updatedBrain[key] = [];
+          const exists = updatedBrain[key].some(r => (r.text || r) === rule.text);
+          if (!exists) updatedBrain[key].push({ text: rule.text, source: rule.source || 'admin-chat' });
+        });
+        await db.pool.query(`
+          INSERT INTO ai_training_brain (id, brain_data, updated_at, updated_by)
+          VALUES (1, $1, NOW(), $2)
+          ON CONFLICT (id) DO UPDATE
+            SET brain_data = EXCLUDED.brain_data,
+                updated_at = EXCLUDED.updated_at,
+                updated_by = EXCLUDED.updated_by
+        `, [JSON.stringify(updatedBrain), currentBrain.email || 'chat-auto']);
+        try { const { refreshBrainCache } = require('../brain-context'); refreshBrainCache(); } catch {}
+      } catch (saveErr) {
+        console.error('[AI Training] chat auto-save error:', saveErr.message);
+      }
+    }
 
     res.json({
       message: parsed.message || 'Tell me more.',

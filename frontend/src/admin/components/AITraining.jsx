@@ -61,7 +61,6 @@ function mergeBrainRules(brain, ruleUpdates) {
   return updated;
 }
 
-// ─── Typing dots ──────────────────────────────────────────────────────────────
 function TypingDots() {
   return (
     <div style={{ display: 'flex', gap: 5, alignItems: 'center', padding: '2px 0' }}>
@@ -77,7 +76,6 @@ function TypingDots() {
   );
 }
 
-// ─── Render markdown-ish message text ────────────────────────────────────────
 function MessageText({ text }) {
   if (!text) return null;
   const parts = text.split(/(\*\*[^*]+\*\*)/g);
@@ -95,15 +93,13 @@ function MessageText({ text }) {
   );
 }
 
-// ─── Rule chip ────────────────────────────────────────────────────────────────
 function RuleChip({ rule, onAdd }) {
   const [added, setAdded] = useState(false);
   const meta = CATEGORY_META[rule.category] || CATEGORY_META.prefer;
   return (
     <div style={{
       display: 'flex', alignItems: 'flex-start', gap: 10,
-      background: meta.bg,
-      border: `1px solid ${meta.color}25`,
+      background: meta.bg, border: `1px solid ${meta.color}25`,
       borderLeft: `3px solid ${meta.color}`,
       borderRadius: 8, padding: '10px 12px', marginTop: 8, fontSize: 12,
       transition: 'all 0.2s',
@@ -127,7 +123,6 @@ function RuleChip({ rule, onAdd }) {
   );
 }
 
-// ─── Image thumbnail preview ──────────────────────────────────────────────────
 function ImagePreview({ images, onRemove }) {
   if (!images.length) return null;
   return (
@@ -135,8 +130,7 @@ function ImagePreview({ images, onRemove }) {
       {images.map((img, i) => (
         <div key={i} style={{ position: 'relative' }}>
           <img src={`data:${img.type};base64,${img.base64}`} alt="" style={{
-            width: 60, height: 60, objectFit: 'cover', borderRadius: 8,
-            border: '1px solid #1e293b',
+            width: 60, height: 60, objectFit: 'cover', borderRadius: 8, border: '1px solid #1e293b',
           }} />
           <button onClick={() => onRemove(i)} style={{
             position: 'absolute', top: -5, right: -5, width: 18, height: 18,
@@ -150,14 +144,12 @@ function ImagePreview({ images, onRemove }) {
   );
 }
 
-// ─── Interview card ───────────────────────────────────────────────────────────
 function InterviewCard({ question, index, total, onAnswer, onSkip }) {
   const [custom, setCustom] = useState('');
   const meta = CATEGORY_META[question.category] || CATEGORY_META.product;
   return (
     <div style={{
-      background: '#0d1117',
-      border: `1px solid ${meta.color}30`,
+      background: '#0d1117', border: `1px solid ${meta.color}30`,
       borderLeft: `3px solid ${meta.color}`,
       borderRadius: 12, padding: '18px 20px', margin: '16px 0',
       boxShadow: `0 0 24px ${meta.color}08`,
@@ -165,20 +157,13 @@ function InterviewCard({ question, index, total, onAnswer, onSkip }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 13 }}>{meta.icon}</span>
-          <span style={{ fontSize: 10, color: meta.color, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-            {meta.label}
-          </span>
-          <span style={{ fontSize: 10, color: '#334155', fontWeight: 500 }}>
-            {index + 1} / {total}
-          </span>
+          <span style={{ fontSize: 10, color: meta.color, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{meta.label}</span>
+          <span style={{ fontSize: 10, color: '#334155', fontWeight: 500 }}>{index + 1} / {total}</span>
         </div>
         <button onClick={onSkip} style={{
           background: 'none', border: '1px solid #1e293b', color: '#475569',
-          fontSize: 11, cursor: 'pointer', borderRadius: 5, padding: '3px 10px',
-          transition: 'all 0.15s',
-        }}>
-          Skip →
-        </button>
+          fontSize: 11, cursor: 'pointer', borderRadius: 5, padding: '3px 10px', transition: 'all 0.15s',
+        }}>Skip →</button>
       </div>
       <p style={{ color: '#cbd5e1', fontSize: 14, margin: '0 0 8px', lineHeight: 1.6, fontWeight: 500 }}>{question.text}</p>
       {question.hint && (
@@ -193,9 +178,7 @@ function InterviewCard({ question, index, total, onAnswer, onSkip }) {
               background: '#0f172a', border: `1px solid ${meta.color}30`,
               color: '#94a3b8', borderRadius: 20, padding: '5px 14px',
               fontSize: 12, cursor: 'pointer', transition: 'all 0.15s',
-            }}>
-              {qr}
-            </button>
+            }}>{qr}</button>
           ))}
         </div>
       )}
@@ -221,28 +204,13 @@ function InterviewCard({ question, index, total, onAnswer, onSkip }) {
   );
 }
 
-// ─── Settings panel ───────────────────────────────────────────────────────────
 function SettingsPanel({ settings, onChange }) {
   const s = settings || { length: 'medium', tone: 'friendly-professional', empathy: 'high' };
-
   const descriptions = {
-    length: {
-      short: '1–2 sentences · Direct and fast',
-      medium: '2–4 sentences · Balanced default',
-      long: '4–6 sentences · Expert-level detail',
-    },
-    tone: {
-      formal: 'Professional language · No contractions',
-      'friendly-professional': 'Warm but polished · Best for most cases',
-      casual: 'Conversational · Like a helpful colleague',
-    },
-    empathy: {
-      low: 'Skip preambles · Get straight to solution',
-      medium: 'Brief acknowledgment · Then solution',
-      high: 'Lead with empathy · Always acknowledge first',
-    },
+    length: { short: '1–2 sentences · Direct and fast', medium: '2–4 sentences · Balanced default', long: '4–6 sentences · Expert-level detail' },
+    tone: { formal: 'Professional language · No contractions', 'friendly-professional': 'Warm but polished · Best for most cases', casual: 'Conversational · Like a helpful colleague' },
+    empathy: { low: 'Skip preambles · Get straight to solution', medium: 'Brief acknowledgment · Then solution', high: 'Lead with empathy · Always acknowledge first' },
   };
-
   const Section = ({ label, keyName, options }) => (
     <div style={{ marginBottom: 24 }}>
       <label style={{ fontSize: 11, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: 10, fontWeight: 600 }}>{label}</label>
@@ -251,85 +219,57 @@ function SettingsPanel({ settings, onChange }) {
           const active = s[keyName] === opt.value;
           return (
             <button key={opt.value} onClick={() => onChange({ ...s, [keyName]: opt.value })} style={{
-              background: active ? '#34d39915' : '#0f172a',
-              border: `1px solid ${active ? '#34d399' : '#1e293b'}`,
-              color: active ? '#34d399' : '#64748b',
-              borderRadius: 8, padding: '7px 16px', fontSize: 12,
-              cursor: 'pointer', fontWeight: active ? 700 : 400,
-              transition: 'all 0.15s', flex: 1,
+              background: active ? '#34d39915' : '#0f172a', border: `1px solid ${active ? '#34d399' : '#1e293b'}`,
+              color: active ? '#34d399' : '#64748b', borderRadius: 8, padding: '7px 16px', fontSize: 12,
+              cursor: 'pointer', fontWeight: active ? 700 : 400, transition: 'all 0.15s', flex: 1,
             }}>{opt.label}</button>
           );
         })}
       </div>
-      <p style={{ fontSize: 11, color: '#334155', margin: 0, lineHeight: 1.5 }}>
-        {descriptions[keyName][s[keyName]]}
-      </p>
+      <p style={{ fontSize: 11, color: '#334155', margin: 0, lineHeight: 1.5 }}>{descriptions[keyName][s[keyName]]}</p>
     </div>
   );
-
   return (
     <div style={{ padding: '24px 28px' }}>
       <p style={{ fontSize: 12, color: '#334155', margin: '0 0 24px', lineHeight: 1.6 }}>
         These settings control how the AI generates replies for all agents across all conversations.
       </p>
-      <Section label="Reply Length" keyName="length" options={[
-        { value: 'short', label: 'Short' },
-        { value: 'medium', label: 'Medium' },
-        { value: 'long', label: 'Long' },
-      ]} />
-      <Section label="Tone" keyName="tone" options={[
-        { value: 'formal', label: 'Formal' },
-        { value: 'friendly-professional', label: 'Friendly' },
-        { value: 'casual', label: 'Casual' },
-      ]} />
-      <Section label="Empathy Level" keyName="empathy" options={[
-        { value: 'low', label: 'Low' },
-        { value: 'medium', label: 'Medium' },
-        { value: 'high', label: 'High' },
-      ]} />
+      <Section label="Reply Length" keyName="length" options={[{ value: 'short', label: 'Short' }, { value: 'medium', label: 'Medium' }, { value: 'long', label: 'Long' }]} />
+      <Section label="Tone" keyName="tone" options={[{ value: 'formal', label: 'Formal' }, { value: 'friendly-professional', label: 'Friendly' }, { value: 'casual', label: 'Casual' }]} />
+      <Section label="Empathy Level" keyName="empathy" options={[{ value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High' }]} />
     </div>
   );
 }
 
-// ─── Brain drawer ─────────────────────────────────────────────────────────────
 function BrainDrawer({ brain, open, onClose, onRemoveRule, dirty, onSave, saving }) {
   const totalRules = Object.values(CATEGORY_META).reduce((sum, meta) => sum + (brain[meta.brainKey] || []).length, 0);
-
   return (
     <>
       <div onClick={onClose} style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
-        backdropFilter: 'blur(2px)',
-        opacity: open ? 1 : 0, pointerEvents: open ? 'all' : 'none',
-        transition: 'opacity 0.2s', zIndex: 100,
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(2px)',
+        opacity: open ? 1 : 0, pointerEvents: open ? 'all' : 'none', transition: 'opacity 0.2s', zIndex: 100,
       }} />
       <div style={{
-        position: 'fixed', top: 0, right: 0, bottom: 0, width: 380,
-        background: '#080b14',
+        position: 'fixed', top: 0, right: 0, bottom: 0, width: 380, background: '#080b14',
         borderLeft: '1px solid #0f172a',
         transform: open ? 'translateX(0)' : 'translateX(100%)',
         transition: 'transform 0.28s cubic-bezier(.4,0,.2,1)',
-        zIndex: 101, display: 'flex', flexDirection: 'column',
-        boxShadow: '-20px 0 60px rgba(0,0,0,0.5)',
+        zIndex: 101, display: 'flex', flexDirection: 'column', boxShadow: '-20px 0 60px rgba(0,0,0,0.5)',
       }}>
         <div style={{ padding: '20px 22px', borderBottom: '1px solid #0f172a', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ color: '#34d399', fontSize: 16 }}>⬡</span>
               <span style={{ color: '#e2e8f0', fontWeight: 700, fontSize: 14 }}>Brain Rules</span>
-              <span style={{
-                fontSize: 11, color: '#34d399', background: '#34d39915',
-                borderRadius: 20, padding: '2px 8px', border: '1px solid #34d39930', fontWeight: 600,
-              }}>{totalRules}</span>
+              <span style={{ fontSize: 11, color: '#34d399', background: '#34d39915', borderRadius: 20, padding: '2px 8px', border: '1px solid #34d39930', fontWeight: 600 }}>{totalRules}</span>
             </div>
             <p style={{ margin: '3px 0 0', fontSize: 11, color: '#334155' }}>Rules trained into the suggestion engine</p>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             {dirty && (
               <button onClick={onSave} disabled={saving} style={{
-                background: '#34d399', border: 'none', borderRadius: 7,
-                color: '#000', padding: '6px 14px', fontSize: 12,
-                fontWeight: 700, cursor: saving ? 'wait' : 'pointer',
+                background: '#34d399', border: 'none', borderRadius: 7, color: '#000',
+                padding: '6px 14px', fontSize: 12, fontWeight: 700, cursor: saving ? 'wait' : 'pointer',
               }}>{saving ? 'Saving…' : '💾 Save'}</button>
             )}
             <button onClick={onClose} style={{
@@ -339,17 +279,13 @@ function BrainDrawer({ brain, open, onClose, onRemoveRule, dirty, onSave, saving
             }}>×</button>
           </div>
         </div>
-
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 22px' }}>
           {Object.entries(CATEGORY_META).map(([cat, meta]) => {
             const rules = brain[meta.brainKey] || [];
             if (!rules.length) return null;
             return (
               <div key={cat} style={{ marginBottom: 24 }}>
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10,
-                  paddingBottom: 8, borderBottom: `1px solid ${meta.color}15`,
-                }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10, paddingBottom: 8, borderBottom: `1px solid ${meta.color}15` }}>
                   <span style={{ fontSize: 13 }}>{meta.icon}</span>
                   <span style={{ fontSize: 11, color: meta.color, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{meta.label}</span>
                   <span style={{ fontSize: 10, color: '#334155', marginLeft: 'auto' }}>{rules.length} rules</span>
@@ -365,8 +301,7 @@ function BrainDrawer({ brain, open, onClose, onRemoveRule, dirty, onSave, saving
                       <span style={{ flex: 1, fontSize: 12, color: '#94a3b8', lineHeight: 1.5 }}>{text}</span>
                       <button onClick={() => onRemoveRule(meta.brainKey, i)} style={{
                         background: 'none', border: 'none', color: '#1e293b', fontSize: 16,
-                        cursor: 'pointer', padding: '0 2px', lineHeight: 1, flexShrink: 0,
-                        transition: 'color 0.15s',
+                        cursor: 'pointer', padding: '0 2px', lineHeight: 1, flexShrink: 0, transition: 'color 0.15s',
                       }} title="Remove"
                         onMouseEnter={e => e.target.style.color = '#f87171'}
                         onMouseLeave={e => e.target.style.color = '#1e293b'}
@@ -389,15 +324,12 @@ function BrainDrawer({ brain, open, onClose, onRemoveRule, dirty, onSave, saving
   );
 }
 
-// ─── Auto-analyze review modal ────────────────────────────────────────────────
 function ReviewModal({ results, onAdd, onClose }) {
   const [selected, setSelected] = useState(() => new Set(results.rules.map((_, i) => i)));
   const toggle = i => setSelected(prev => { const s = new Set(prev); s.has(i) ? s.delete(i) : s.add(i); return s; });
-
   return (
     <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
-      backdropFilter: 'blur(4px)', zIndex: 200,
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)', zIndex: 200,
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
     }}>
       <div style={{
@@ -408,9 +340,7 @@ function ReviewModal({ results, onAdd, onClose }) {
         <div style={{ padding: '22px 26px', borderBottom: '1px solid #0f172a' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
             <span style={{ fontSize: 18 }}>📊</span>
-            <h3 style={{ margin: 0, color: '#e2e8f0', fontSize: 15, fontWeight: 700 }}>
-              Analysis Complete
-            </h3>
+            <h3 style={{ margin: 0, color: '#e2e8f0', fontSize: 15, fontWeight: 700 }}>Analysis Complete</h3>
             <span style={{ fontSize: 11, color: '#34d399', background: '#34d39915', borderRadius: 20, padding: '2px 10px', border: '1px solid #34d39930' }}>
               {results.totalConversations} conversations
             </span>
@@ -419,7 +349,6 @@ function ReviewModal({ results, onAdd, onClose }) {
             {results.message}. Select the rules to add to the brain.
           </p>
         </div>
-
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 26px' }}>
           {results.rules.map((rule, i) => {
             const meta = CATEGORY_META[rule.category] || CATEGORY_META.prefer;
@@ -434,8 +363,7 @@ function ReviewModal({ results, onAdd, onClose }) {
                 <div style={{
                   width: 18, height: 18, borderRadius: 5, border: `2px solid ${isSelected ? meta.color : '#1e293b'}`,
                   background: isSelected ? meta.color : 'transparent',
-                  flexShrink: 0, marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  transition: 'all 0.15s',
+                  flexShrink: 0, marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s',
                 }}>
                   {isSelected && <span style={{ color: '#000', fontSize: 11, fontWeight: 900, lineHeight: 1 }}>✓</span>}
                 </div>
@@ -454,20 +382,13 @@ function ReviewModal({ results, onAdd, onClose }) {
             );
           })}
         </div>
-
         <div style={{ padding: '16px 26px', borderTop: '1px solid #0f172a', display: 'flex', gap: 10, justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ fontSize: 12, color: '#334155' }}>{selected.size} of {results.rules.length} selected</span>
           <div style={{ display: 'flex', gap: 10 }}>
-            <button onClick={onClose} style={{
-              background: '#0f172a', border: '1px solid #1e293b', color: '#64748b',
-              borderRadius: 8, padding: '8px 18px', fontSize: 13, cursor: 'pointer',
-            }}>Cancel</button>
+            <button onClick={onClose} style={{ background: '#0f172a', border: '1px solid #1e293b', color: '#64748b', borderRadius: 8, padding: '8px 18px', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
             <button onClick={() => { onAdd([...selected].map(i => results.rules[i])); onClose(); }} style={{
-              background: '#34d399', border: 'none', borderRadius: 8,
-              color: '#000', padding: '8px 20px', fontSize: 13, fontWeight: 700, cursor: 'pointer',
-            }}>
-              Add {selected.size} rules →
-            </button>
+              background: '#34d399', border: 'none', borderRadius: 8, color: '#000', padding: '8px 20px', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+            }}>Add {selected.size} rules →</button>
           </div>
         </div>
       </div>
@@ -506,6 +427,19 @@ export default function AITraining({ onBrainUpdate }) {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, typing, interview]);
+
+  // Auto-save 4s after any brain change — safety net so nothing is lost
+  useEffect(() => {
+    if (!dirty) return;
+    const timer = setTimeout(async () => {
+      try {
+        await apiFetch('/ai/training/brain', { method: 'PUT', body: JSON.stringify({ brain }) });
+        setDirty(false);
+        onBrainUpdate?.();
+      } catch { /* silent — user can still manually save */ }
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, [brain, dirty]);
 
   const addRule = useCallback((rule) => {
     const meta = CATEGORY_META[rule.category];
@@ -575,36 +509,6 @@ export default function AITraining({ onBrainUpdate }) {
     reader.readAsDataURL(file);
   }, []);
 
-  const handleDocFile = useCallback(async (file) => {
-    const allowed = ['application/pdf', 'text/plain', 'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
-    if (!allowed.includes(file.type) && !file.name.match(/\.(pdf|txt|doc|docx)$/i)) {
-      addSystemMessage(`❌ Unsupported file type: ${file.name}`);
-      return;
-    }
-    const formData = new FormData();
-    formData.append('file', file);
-    addSystemMessage(`📄 Reading "${file.name}"…`);
-    try {
-      const res = await fetch(`${API_BASE}/ai/training/upload-doc`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${getToken()}` },
-        body: formData,
-      });
-      if (!res.ok) {
-        const err = await res.text().catch(() => '');
-        throw new Error(`HTTP ${res.status}: ${err.slice(0, 100)}`);
-      }
-      const data = await res.json();
-      addSystemMessage(`✅ "${file.name}" loaded — ${data.chars.toLocaleString()} chars extracted. Analyzing…`);
-      await send(
-        `I'm uploading a document called "${file.name}". Here's the content:\n\n${data.text.slice(0, 8000)}\n\nPlease extract all relevant rules, policies, product knowledge, and tone guidelines from this document into the brain.`
-      );
-    } catch (e) {
-      addSystemMessage(`❌ Failed to read "${file.name}": ${e.message}`);
-    }
-  }, []);
-
   const handlePaste = useCallback((e) => {
     const items = e.clipboardData?.items;
     if (!items) return;
@@ -612,14 +516,6 @@ export default function AITraining({ onBrainUpdate }) {
       if (item.type.startsWith('image/')) { e.preventDefault(); handleImageFile(item.getAsFile()); }
     }
   }, [handleImageFile]);
-
-  const handleDrop = useCallback((e) => {
-    e.preventDefault();
-    [...(e.dataTransfer?.files || [])].forEach(f => {
-      if (f.type.startsWith('image/')) handleImageFile(f);
-      else handleDocFile(f);
-    });
-  }, [handleImageFile, handleDocFile]);
 
   const send = useCallback(async (text, interviewCtx = null) => {
     const msgText = text || input.trim();
@@ -664,13 +560,13 @@ export default function AITraining({ onBrainUpdate }) {
       setMessages(prev => [...prev, aiMsg]);
 
       if (data.ruleUpdates?.length > 0) {
+        // Backend already saved to DB — just sync local state
         addRules(data.ruleUpdates);
         setBrain(prev => {
-          const updatedBrain = mergeBrainRules(prev, data.ruleUpdates);
-          apiFetch('/ai/training/brain', { method: 'PUT', body: JSON.stringify({ brain: updatedBrain }) })
-            .then(() => { setDirty(false); onBrainUpdate?.(); })
-            .catch(() => {});
-          return updatedBrain;
+          const updated = mergeBrainRules(prev, data.ruleUpdates);
+          setDirty(false); // backend already saved
+          onBrainUpdate?.();
+          return updated;
         });
       }
     } catch (e) {
@@ -680,7 +576,7 @@ export default function AITraining({ onBrainUpdate }) {
     }
   }, [input, images, messages, brain, addRules]);
 
-  // fix circular dep: handleDocFile needs send, so redefine after send
+  // Doc upload → dedicated extract-rules endpoint → saves directly to DB
   const handleDocFileWithSend = useCallback(async (file) => {
     const allowed = ['application/pdf', 'text/plain', 'application/msword',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
@@ -688,28 +584,53 @@ export default function AITraining({ onBrainUpdate }) {
       addSystemMessage(`❌ Unsupported file type: ${file.name}`);
       return;
     }
+
     const formData = new FormData();
     formData.append('file', file);
     addSystemMessage(`📄 Reading "${file.name}"…`);
+
     try {
-      const res = await fetch(`${API_BASE}/ai/training/upload-doc`, {
+      // Step 1: extract text from file
+      const uploadRes = await fetch(`${API_BASE}/ai/training/upload-doc`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${getToken()}` },
         body: formData,
       });
-      if (!res.ok) {
-        const err = await res.text().catch(() => '');
-        throw new Error(`HTTP ${res.status}: ${err.slice(0, 100)}`);
+      if (!uploadRes.ok) throw new Error(`Upload failed: HTTP ${uploadRes.status}`);
+      const uploadData = await uploadRes.json();
+      addSystemMessage(`✅ "${file.name}" read — ${uploadData.chars.toLocaleString()} chars. Extracting rules…`);
+
+      // Step 2: extract rules directly to DB — no chat roundtrip
+      const extractRes = await fetch(`${API_BASE}/ai/training/extract-rules`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ text: uploadData.text.slice(0, 12000), filename: file.name, brain }),
+      });
+      if (!extractRes.ok) throw new Error(`Extraction failed: HTTP ${extractRes.status}`);
+      const extractData = await extractRes.json();
+
+      if (extractData.rules?.length > 0) {
+        // Sync local state — DB was already updated by backend
+        addRules(extractData.rules);
+        setBrain(prev => {
+          const updated = mergeBrainRules(prev, extractData.rules);
+          setDirty(false);
+          onBrainUpdate?.();
+          return updated;
+        });
+        addSystemMessage(`🧠 ${extractData.rules.length} rules extracted from "${file.name}" and saved to brain.`);
+        setMessages(prev => [...prev, {
+          id: Date.now(), role: 'ai',
+          content: extractData.summary || `I've extracted ${extractData.rules.length} rules from **${file.name}** and saved them directly to the brain. They're active now.`,
+          type: 'training', ruleUpdates: extractData.rules, time: nowTime(),
+        }]);
+      } else {
+        addSystemMessage(`⚠️ No rules could be extracted from "${file.name}". Try a more structured document.`);
       }
-      const data = await res.json();
-      addSystemMessage(`✅ "${file.name}" loaded — ${data.chars.toLocaleString()} chars extracted. Analyzing…`);
-      await send(
-        `I'm uploading a document called "${file.name}". Here's the content:\n\n${data.text.slice(0, 8000)}\n\nPlease extract all relevant rules, policies, product knowledge, and tone guidelines from this document into the brain.`
-      );
     } catch (e) {
-      addSystemMessage(`❌ Failed to read "${file.name}": ${e.message}`);
+      addSystemMessage(`❌ Failed to process "${file.name}": ${e.message}`);
     }
-  }, [send]);
+  }, [brain, addRules, onBrainUpdate]);
 
   const answerInterviewQuestion = useCallback(async (question, answer) => {
     const nextIndex = (interview?.currentIndex ?? 0) + 1;
@@ -828,28 +749,19 @@ export default function AITraining({ onBrainUpdate }) {
         {/* ── Top bar ── */}
         <div style={{
           display: 'flex', alignItems: 'center', padding: '0 20px',
-          borderBottom: '1px solid #0f172a', height: 56, flexShrink: 0,
-          background: '#080b14',
+          borderBottom: '1px solid #0f172a', height: 56, flexShrink: 0, background: '#080b14',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
             <div style={{
-              width: 30, height: 30, borderRadius: 8,
-              background: '#34d39912', border: '1px solid #34d39930',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 14, color: '#34d399', flexShrink: 0,
+              width: 30, height: 30, borderRadius: 8, background: '#34d39912', border: '1px solid #34d39930',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: '#34d399', flexShrink: 0,
             }}>⬡</div>
             <div style={{ minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontWeight: 700, fontSize: 14, color: '#e2e8f0' }}>Brain AI</span>
-                <span style={{
-                  fontSize: 11, color: '#34d399', background: '#34d39912',
-                  borderRadius: 20, padding: '1px 8px', border: '1px solid #34d39925', fontWeight: 600,
-                }}>{ruleCount} rules</span>
+                <span style={{ fontSize: 11, color: '#34d399', background: '#34d39912', borderRadius: 20, padding: '1px 8px', border: '1px solid #34d39925', fontWeight: 600 }}>{ruleCount} rules</span>
                 {dirty && (
-                  <span style={{
-                    fontSize: 10, color: '#fbbf24', background: '#fbbf2410',
-                    borderRadius: 20, padding: '1px 8px', border: '1px solid #fbbf2425', fontWeight: 600,
-                  }}>● unsaved</span>
+                  <span style={{ fontSize: 10, color: '#fbbf24', background: '#fbbf2410', borderRadius: 20, padding: '1px 8px', border: '1px solid #fbbf2425', fontWeight: 600 }}>● unsaved</span>
                 )}
               </div>
             </div>
@@ -865,15 +777,11 @@ export default function AITraining({ onBrainUpdate }) {
                 cursor: 'pointer', fontWeight: activeTab === tab ? 600 : 400,
               }}>{tab === 'settings' ? '⚙️ Quality' : '💬 Chat'}</button>
             ))}
-
             <div style={{ width: 1, height: 20, background: '#0f172a', margin: '0 2px' }} />
-
             <button onClick={() => setDrawerOpen(true)} style={{
-              background: '#0f172a', border: '1px solid #1e293b',
-              color: '#64748b', borderRadius: 7, padding: '5px 12px', fontSize: 12,
-              cursor: 'pointer', transition: 'all 0.15s',
+              background: '#0f172a', border: '1px solid #1e293b', color: '#64748b',
+              borderRadius: 7, padding: '5px 12px', fontSize: 12, cursor: 'pointer', transition: 'all 0.15s',
             }}>🧠 Brain</button>
-
             <button className="at-analyze" onClick={runAutoAnalyze} disabled={analyzing} style={{
               background: analyzing ? '#0f172a' : '#34d39912',
               border: `1px solid ${analyzing ? '#1e293b' : '#34d39935'}`,
@@ -881,12 +789,10 @@ export default function AITraining({ onBrainUpdate }) {
               borderRadius: 7, padding: '5px 12px', fontSize: 12,
               cursor: analyzing ? 'wait' : 'pointer', fontWeight: 500,
             }}>{analyzing ? '⏳ Analyzing…' : '🔍 Analyze'}</button>
-
             {dirty && (
               <button onClick={saveBrain} disabled={saving} style={{
-                background: '#34d399', border: 'none', borderRadius: 7,
-                color: '#000', padding: '5px 14px', fontSize: 12,
-                fontWeight: 700, cursor: saving ? 'wait' : 'pointer',
+                background: '#34d399', border: 'none', borderRadius: 7, color: '#000',
+                padding: '5px 14px', fontSize: 12, fontWeight: 700, cursor: saving ? 'wait' : 'pointer',
               }}>{saving ? 'Saving…' : '💾 Save'}</button>
             )}
           </div>
@@ -907,9 +813,8 @@ export default function AITraining({ onBrainUpdate }) {
               {dirty && (
                 <div style={{ padding: '0 28px 28px' }}>
                   <button onClick={saveBrain} disabled={saving} style={{
-                    background: '#34d399', border: 'none', borderRadius: 9,
-                    color: '#000', padding: '11px 28px', fontSize: 13,
-                    fontWeight: 700, cursor: 'pointer', width: '100%',
+                    background: '#34d399', border: 'none', borderRadius: 9, color: '#000',
+                    padding: '11px 28px', fontSize: 13, fontWeight: 700, cursor: 'pointer', width: '100%',
                   }}>{saving ? 'Saving…' : '💾 Save changes'}</button>
                 </div>
               )}
@@ -921,7 +826,6 @@ export default function AITraining({ onBrainUpdate }) {
         {activeTab === 'chat' && (
           <>
             <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px 0' }}>
-
               {showStarters && (
                 <div style={{ padding: '48px 0 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20 }}>
                   <div style={{ textAlign: 'center' }}>
@@ -929,8 +833,7 @@ export default function AITraining({ onBrainUpdate }) {
                       width: 56, height: 56, borderRadius: 16, margin: '0 auto 14px',
                       background: '#34d39912', border: '1px solid #34d39930',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 24, color: '#34d399',
-                      animation: 'pulse-green 3s ease-in-out infinite',
+                      fontSize: 24, color: '#34d399', animation: 'pulse-green 3s ease-in-out infinite',
                     }}>⬡</div>
                     <h3 style={{ margin: '0 0 4px', color: '#e2e8f0', fontSize: 16, fontWeight: 700 }}>Brain AI</h3>
                     <p style={{ color: '#334155', fontSize: 13, margin: 0 }}>What do you want to teach me today?</p>
@@ -938,12 +841,11 @@ export default function AITraining({ onBrainUpdate }) {
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center', maxWidth: 520 }}>
                     {STARTERS.map((s, i) => (
                       <button key={i} className="at-starter" onClick={() => send(s.text)} style={{
-                        background: '#0d1117', border: '1px solid #0f172a',
-                        color: '#475569', borderRadius: 22, padding: '7px 16px',
-                        fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+                        background: '#0d1117', border: '1px solid #0f172a', color: '#475569',
+                        borderRadius: 22, padding: '7px 16px', fontSize: 12,
+                        cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
                       }}>
-                        <span>{s.icon}</span>
-                        <span>{s.label}</span>
+                        <span>{s.icon}</span><span>{s.label}</span>
                       </button>
                     ))}
                   </div>
@@ -956,15 +858,11 @@ export default function AITraining({ onBrainUpdate }) {
                     <div key={msg.id} className="at-msg" style={{ textAlign: 'center', margin: '12px 0' }}>
                       <span style={{
                         fontSize: 11, color: '#334155', background: '#0d1117',
-                        borderRadius: 20, padding: '4px 14px', border: '1px solid #0f172a',
-                        display: 'inline-block',
-                      }}>
-                        {msg.content}
-                      </span>
+                        borderRadius: 20, padding: '4px 14px', border: '1px solid #0f172a', display: 'inline-block',
+                      }}>{msg.content}</span>
                     </div>
                   );
                 }
-
                 const isUser = msg.role === 'user';
                 return (
                   <div key={msg.id} className="at-msg" style={{
@@ -982,8 +880,7 @@ export default function AITraining({ onBrainUpdate }) {
                       <div style={{
                         background: isUser ? '#0f172a' : '#0d1117',
                         borderRadius: isUser ? '14px 14px 4px 14px' : '4px 14px 14px 14px',
-                        padding: '11px 15px',
-                        border: `1px solid ${isUser ? '#1e293b' : '#0f172a'}`,
+                        padding: '11px 15px', border: `1px solid ${isUser ? '#1e293b' : '#0f172a'}`,
                       }}>
                         {msg.images?.length > 0 && (
                           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
@@ -998,14 +895,12 @@ export default function AITraining({ onBrainUpdate }) {
                           <MessageText text={msg.content} />
                         </p>
                       </div>
-
                       {msg.ruleUpdates?.length > 0 && msg.type === 'mixed' && (
                         <div style={{ marginTop: 8 }}>
                           {msg.ruleUpdates.map((rule, i) => <RuleChip key={i} rule={rule} onAdd={addRule} />)}
                         </div>
                       )}
-
-                      {msg.ruleUpdates?.length > 0 && msg.type === 'training' && (
+                      {msg.ruleUpdates?.length > 0 && (msg.type === 'training' || msg.type === 'mixed') && (
                         <div style={{ marginTop: 5, display: 'flex', alignItems: 'center', gap: 5, paddingLeft: 2 }}>
                           <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#34d399', display: 'inline-block' }} />
                           <span style={{ fontSize: 11, color: '#34d39980' }}>
@@ -1013,7 +908,6 @@ export default function AITraining({ onBrainUpdate }) {
                           </span>
                         </div>
                       )}
-
                       <div style={{ fontSize: 10, color: '#1e293b', marginTop: 5, paddingLeft: 2 }}>{msg.time}</div>
                     </div>
                   </div>
@@ -1027,10 +921,7 @@ export default function AITraining({ onBrainUpdate }) {
                     border: '1px solid #34d39930', display: 'flex', alignItems: 'center',
                     justifyContent: 'center', fontSize: 13, color: '#34d399',
                   }}>⬡</div>
-                  <div style={{
-                    background: '#0d1117', borderRadius: '4px 14px 14px 14px',
-                    padding: '12px 16px', border: '1px solid #0f172a',
-                  }}>
+                  <div style={{ background: '#0d1117', borderRadius: '4px 14px 14px 14px', padding: '12px 16px', border: '1px solid #0f172a' }}>
                     <TypingDots />
                   </div>
                 </div>
@@ -1057,21 +948,16 @@ export default function AITraining({ onBrainUpdate }) {
             <div style={{ borderTop: '1px solid #0f172a', background: '#080b14', flexShrink: 0 }}>
               <ImagePreview images={images} onRemove={i => setImages(prev => prev.filter((_, j) => j !== i))} />
               <div style={{ display: 'flex', gap: 8, padding: '12px 16px', alignItems: 'flex-end' }}>
-
-                {/* Image button */}
                 <button className="at-img-btn" onClick={() => fileInputRef.current?.click()} title="Attach screenshot" style={{
-                  background: '#0d1117', border: '1px solid #0f172a',
-                  color: '#334155', borderRadius: 9, padding: '9px 11px',
-                  fontSize: 15, cursor: 'pointer', flexShrink: 0, lineHeight: 1,
+                  background: '#0d1117', border: '1px solid #0f172a', color: '#334155',
+                  borderRadius: 9, padding: '9px 11px', fontSize: 15, cursor: 'pointer', flexShrink: 0, lineHeight: 1,
                 }}>🖼️</button>
                 <input ref={fileInputRef} type="file" accept="image/*" multiple style={{ display: 'none' }}
                   onChange={e => { [...e.target.files].forEach(handleImageFile); e.target.value = ''; }} />
 
-                {/* Doc button */}
                 <button className="at-img-btn" onClick={() => docInputRef.current?.click()} title="Upload document (PDF, TXT, DOCX)" style={{
-                  background: '#0d1117', border: '1px solid #0f172a',
-                  color: '#334155', borderRadius: 9, padding: '9px 11px',
-                  fontSize: 15, cursor: 'pointer', flexShrink: 0, lineHeight: 1,
+                  background: '#0d1117', border: '1px solid #0f172a', color: '#334155',
+                  borderRadius: 9, padding: '9px 11px', fontSize: 15, cursor: 'pointer', flexShrink: 0, lineHeight: 1,
                 }}>📄</button>
                 <input ref={docInputRef} type="file" accept=".pdf,.txt,.doc,.docx" style={{ display: 'none' }}
                   onChange={e => { if (e.target.files[0]) handleDocFileWithSend(e.target.files[0]); e.target.value = ''; }} />
