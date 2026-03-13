@@ -48,6 +48,7 @@ function nowTime() {
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+// ── Fixed: creates new array references so React detects the change ──
 function mergeBrainRules(brain, ruleUpdates) {
   const updated = { ...brain };
   ruleUpdates.forEach(rule => {
@@ -397,6 +398,26 @@ function ReviewModal({ results, onAdd, onClose }) {
   );
 }
 
+// ── Save Toast ──
+function SaveToast({ message }) {
+  if (!message) return null;
+  const isError = message.startsWith('⚠️') || message.startsWith('❌');
+  return (
+    <div style={{
+      position: 'fixed', bottom: 24, right: 24, zIndex: 9999,
+      background: isError ? '#7f1d1d' : '#166534',
+      color: '#fff', padding: '10px 18px', borderRadius: 8,
+      fontSize: 13, fontWeight: 500,
+      boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+      border: `1px solid ${isError ? '#ef444430' : '#22c55e30'}`,
+      animation: 'fadeSlideUp 0.2s ease forwards',
+      display: 'flex', alignItems: 'center', gap: 8,
+    }}>
+      {message}
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Main component
 // ─────────────────────────────────────────────────────────────────────────────
@@ -414,15 +435,25 @@ export default function AITraining({ onBrainUpdate }) {
   const [analyzing, setAnalyzing] = useState(false);
   const [interview, setInterview] = useState(null);
   const [interviewDone, setInterviewDone] = useState(false);
+  const [saveToast, setSaveToast] = useState(null);          // ── NEW
   const bottomRef = useRef(null);
   const fileInputRef = useRef(null);
   const docInputRef = useRef(null);
   const textareaRef = useRef(null);
+  const toastTimer = useRef(null);
+
+  // ── Helper: show toast and auto-dismiss ──
+  const showToast = useCallback((msg, duration = 3500) => {
+    setSaveToast(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setSaveToast(null), duration);
+  }, []);
 
   useEffect(() => {
     apiFetch('/ai/training/brain')
       .then(d => { if (d.brain) setBrain({ ...EMPTY_BRAIN, ...d.brain }); })
       .catch(() => {});
+    return () => { if (toastTimer.current) clearTimeout(toastTimer.current); };
   }, []);
 
   useEffect(() => {
@@ -560,23 +591,28 @@ export default function AITraining({ onBrainUpdate }) {
       };
       setMessages(prev => [...prev, aiMsg]);
 
-if (data.ruleUpdates?.length > 0) {
-  // Single setBrain call — avoids race condition from calling addRules + setBrain together
-  setBrain(prev => {
-    const updated = mergeBrainRules(prev, data.ruleUpdates);
-    // persist to DB in background
-    apiFetch('/ai/training/brain', { method: 'PUT', body: JSON.stringify({ brain: updated }) })
-      .then(() => { setDirty(false); onBrainUpdate?.(); })
-      .catch(() => {});
-    return updated;
-  });
-}
+      // ── Fixed: single setBrain call with new array refs + toast confirmation ──
+      if (data.ruleUpdates?.length > 0) {
+        setBrain(prev => {
+          const updated = mergeBrainRules(prev, data.ruleUpdates);
+          apiFetch('/ai/training/brain', { method: 'PUT', body: JSON.stringify({ brain: updated }) })
+            .then(() => {
+              setDirty(false);
+              onBrainUpdate?.();
+              showToast(`✅ ${data.ruleUpdates.length} rule${data.ruleUpdates.length > 1 ? 's' : ''} saved to brain`);
+            })
+            .catch(() => {
+              showToast('⚠️ Rules extracted but save failed — will retry', 4500);
+            });
+          return updated;
+        });
+      }
     } catch (e) {
       setMessages(prev => [...prev, { id: Date.now() + 1, role: 'system', content: `Error: ${e.message}`, time: nowTime() }]);
     } finally {
       setTyping(false);
     }
-  }, [input, images, messages, brain, addRules]);
+  }, [input, images, messages, brain, showToast, onBrainUpdate]);
 
   // Doc upload → dedicated extract-rules endpoint → saves directly to DB
   const handleDocFileWithSend = useCallback(async (file) => {
@@ -612,14 +648,14 @@ if (data.ruleUpdates?.length > 0) {
       const extractData = await extractRes.json();
 
       if (extractData.rules?.length > 0) {
-        // Sync local state — DB was already updated by backend
-        addRules(extractData.rules);
+        // ── Fixed: single setBrain call for doc upload too ──
         setBrain(prev => {
           const updated = mergeBrainRules(prev, extractData.rules);
           setDirty(false);
           onBrainUpdate?.();
           return updated;
         });
+        showToast(`✅ ${extractData.rules.length} rules extracted from "${file.name}" and saved`);
         addSystemMessage(`🧠 ${extractData.rules.length} rules extracted from "${file.name}" and saved to brain.`);
         setMessages(prev => [...prev, {
           id: Date.now(), role: 'ai',
@@ -632,7 +668,7 @@ if (data.ruleUpdates?.length > 0) {
     } catch (e) {
       addSystemMessage(`❌ Failed to process "${file.name}": ${e.message}`);
     }
-  }, [brain, addRules, onBrainUpdate]);
+  }, [brain, onBrainUpdate, showToast]);
 
   const answerInterviewQuestion = useCallback(async (question, answer) => {
     const nextIndex = (interview?.currentIndex ?? 0) + 1;
@@ -1011,6 +1047,9 @@ if (data.ruleUpdates?.length > 0) {
           onClose={() => setAnalyzeResults(null)}
         />
       )}
+
+      {/* ── Save toast — bottom right confirmation ── */}
+      <SaveToast message={saveToast} />
     </>
   );
 }
