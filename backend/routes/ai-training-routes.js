@@ -177,7 +177,7 @@ RESPONSE FORMAT — valid JSON only, no markdown:
 
       try {
         const requestBody = JSON.stringify({
-          model: process.env.AI_MODEL || 'claude-sonnet-4-6'
+          model: process.env.AI_MODEL || 'claude-sonnet-4-6',
           max_tokens: 1500,
           system: systemPrompt,
           messages: [{ role: 'user', content: `Analyze these ${batch.length} conversations:\n\n${batch.join('\n\n')}` }],
