@@ -559,16 +559,17 @@ export default function AITraining({ onBrainUpdate }) {
       };
       setMessages(prev => [...prev, aiMsg]);
 
-      if (data.ruleUpdates?.length > 0) {
-        // Backend already saved to DB — just sync local state
-        addRules(data.ruleUpdates);
-        setBrain(prev => {
-          const updated = mergeBrainRules(prev, data.ruleUpdates);
-          setDirty(false); // backend already saved
-          onBrainUpdate?.();
-          return updated;
-        });
-      }
+if (data.ruleUpdates?.length > 0) {
+  // Single setBrain call — avoids race condition from calling addRules + setBrain together
+  setBrain(prev => {
+    const updated = mergeBrainRules(prev, data.ruleUpdates);
+    // persist to DB in background
+    apiFetch('/ai/training/brain', { method: 'PUT', body: JSON.stringify({ brain: updated }) })
+      .then(() => { setDirty(false); onBrainUpdate?.(); })
+      .catch(() => {});
+    return updated;
+  });
+}
     } catch (e) {
       setMessages(prev => [...prev, { id: Date.now() + 1, role: 'system', content: `Error: ${e.message}`, time: nowTime() }]);
     } finally {
