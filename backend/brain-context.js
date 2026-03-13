@@ -5,7 +5,7 @@
  *  1. Detects what the customer is actually asking about
  *  2. Boosts rules relevant to that topic (they appear first + more of them)
  *  3. Still includes general rules but deprioritized
- *  4. Deduplicates near-identical rules
+ *  4. Deduplicates near-identical rules (with higher threshold for product rules)
  *  5. Keeps total output under ~1400 chars
  */
 
@@ -49,8 +49,9 @@ const TOPIC_PRIORITY = {
 };
 
 // Caps per category: [primary, secondary, tertiary, rest...]
+// dosing primary (productKnowledge) bumped to 10 so all peptide protocols survive
 const TOPIC_CAPS = {
-  dosing:   [6, 5, 4, 3, 2],
+  dosing:   [10, 5, 4, 3, 2],
   shipping: [5, 5, 4, 3, 2],
   refund:   [5, 5, 4, 3, 2],
   general:  [5, 4, 3, 3, 2],
@@ -80,14 +81,19 @@ function similarity(a, b) {
   return overlap / Math.max(ka.size, kb.size);
 }
 
-// Global dedup pool — avoids the same rule appearing across categories
-function deduplicate(rules, max, threshold = 0.5, globalSeen = []) {
+/**
+ * Deduplicate rules.
+ * isProduct=true → threshold raised to 0.75 so different peptide protocols
+ * (which share vocab like "bac water", "mg", "vial") are never collapsed.
+ */
+function deduplicate(rules, max, threshold = 0.5, globalSeen = [], isProduct = false) {
+  const effectiveThreshold = isProduct ? 0.75 : threshold;
   const kept = [];
   for (const rule of rules) {
     if (!rule?.text) continue;
     const isDupe =
-      kept.some(k => similarity(k.text, rule.text) >= threshold) ||
-      globalSeen.some(k => similarity(k.text, rule.text) >= threshold);
+      kept.some(k => similarity(k.text, rule.text) >= effectiveThreshold) ||
+      globalSeen.some(k => similarity(k.text, rule.text) >= effectiveThreshold);
     if (!isDupe) {
       kept.push(rule);
       globalSeen.push(rule);
@@ -116,7 +122,6 @@ function formatBrainContext(brain, topic = 'general') {
   const globalSeen = [];
   const sections = [];
 
-  // Add topic header if not general
   if (topic !== 'general') {
     sections.push(`[Optimized for topic: ${topic.toUpperCase()}]`);
   }
@@ -126,8 +131,9 @@ function formatBrainContext(brain, topic = 'general') {
     if (!rules?.length) return;
 
     const cap = caps[idx] ?? 2;
-    const threshold = idx === 0 ? 0.45 : 0.5; // slightly more aggressive dedup for lower-priority categories
-    const deduped = deduplicate(rules, cap, threshold, globalSeen);
+    const threshold = idx === 0 ? 0.45 : 0.5;
+    const isProduct = categoryKey === 'productKnowledge';
+    const deduped = deduplicate(rules, cap, threshold, globalSeen, isProduct);
     if (!deduped.length) return;
 
     const meta = CATEGORY_META[categoryKey];
