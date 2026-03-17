@@ -1375,8 +1375,8 @@
   }
   #psk-scan-overlay.open { display:flex; animation:psk-fadein .22s ease-out; }
   #psk-scan-modal {
-    background:#fff; border-radius:22px; width:96%; max-width:560px;
-    height:88vh; max-height:720px; position:relative; overflow:hidden;
+    background:#fff; border-radius:22px; width:96%; max-width:900px;
+    height:90vh; max-height:860px; position:relative; overflow:hidden;
     box-shadow:0 28px 72px rgba(0,0,0,.22),0 4px 16px rgba(0,0,0,.10);
     animation:psk-slideup .3s cubic-bezier(.22,1,.36,1);
     display:flex; flex-direction:column;
@@ -1776,8 +1776,8 @@
   }
 
   function openScanPopup() {
-    var w = Math.min(520, window.screen.availWidth - 40);
-    var h = Math.min(720, window.screen.availHeight - 60);
+    var w = Math.min(900, window.screen.availWidth - 40);
+    var h = Math.min(820, window.screen.availHeight - 40);
     var left = Math.round((window.screen.availWidth  - w) / 2);
     var top  = Math.round((window.screen.availHeight - h) / 2);
     var popup = window.open(
