@@ -1192,7 +1192,7 @@
     display:flex; align-items:center; gap:8px; white-space:nowrap;
     font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
     box-shadow:0 2px 14px rgba(0,0,0,.10),0 1px 3px rgba(0,0,0,.06);
-    transition:box-shadow .18s,transform .12s,border-color .18s;
+    transition:box-shadow .18s,transform .12s,border-color .18s,opacity .2s;
   }
   #psk-btn:hover { box-shadow:0 6px 20px rgba(0,0,0,.13); border-color:#3bbe28; transform:translateY(-2px); }
   #psk-btn:active { transform:translateY(0); }
@@ -1455,15 +1455,27 @@
     /* Divider labels smaller */
     .psk-divider-label { font-size:10px; margin:16px 0 10px; }
 
-    /* Scan modal — full screen bottom sheet */
-    #psk-scan-overlay { align-items:flex-end; }
-    #psk-scan-modal {
-      width:100%; max-width:100%; height:94vh; max-height:94vh;
-      border-radius:18px 18px 0 0;
-      animation:psk-sheet-up .32s cubic-bezier(.22,1,.36,1);
+    /* Scan modal — true full screen on mobile */
+    #psk-scan-overlay {
+      align-items:stretch;
+      justify-content:stretch;
+      padding:0;
     }
-    #psk-scan-header { padding:13px 16px; }
+    #psk-scan-modal {
+      width:100%;
+      max-width:100%;
+      height:100%;
+      max-height:100%;
+      border-radius:0;
+      animation:psk-sheet-up .28s cubic-bezier(.22,1,.36,1);
+    }
+    #psk-scan-header {
+      padding:14px 16px;
+      /* Extra top padding for iPhone notch / status bar */
+      padding-top:max(14px, env(safe-area-inset-top));
+    }
     #psk-scan-header-title strong { font-size:13px; }
+    #psk-scan-iframe-wrap { height:0; flex:1; }
   }
 
   /* Very small screens */
@@ -1776,10 +1788,20 @@
   }
 
   function openScanPopup() {
-    var w = Math.min(900, window.screen.availWidth - 40);
-    var h = Math.min(820, window.screen.availHeight - 40);
-    var left = Math.round((window.screen.availWidth  - w) / 2);
-    var top  = Math.round((window.screen.availHeight - h) / 2);
+    var isMobile = window.innerWidth <= 768;
+    var w, h, left, top;
+    if (isMobile) {
+      // Fill the whole screen on mobile
+      w    = window.screen.availWidth;
+      h    = window.screen.availHeight;
+      left = 0;
+      top  = 0;
+    } else {
+      w    = Math.min(900, window.screen.availWidth - 40);
+      h    = Math.min(820, window.screen.availHeight - 40);
+      left = Math.round((window.screen.availWidth  - w) / 2);
+      top  = Math.round((window.screen.availHeight - h) / 2);
+    }
     var popup = window.open(
       PEPSCAN_URL,
       'pepscan',
@@ -1787,7 +1809,6 @@
       ',scrollbars=yes,resizable=yes,toolbar=no,menubar=no,location=no,status=no'
     );
     if (!popup) {
-      // Popup blocker triggered — last resort: open in same tab
       window.location.href = PEPSCAN_URL;
     } else {
       popup.focus();
@@ -1934,6 +1955,43 @@
   }
 
   function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+  /* ── Hide PepStack btn when chat widget is open ── */
+  function syncBtnVisibility() {
+    var iframe = document.getElementById('chat-widget-iframe');
+    var chatBtn = document.getElementById('chat-widget-button');
+    var open = (iframe && iframe.classList.contains('open')) ||
+               (chatBtn && chatBtn.classList.contains('active'));
+    btn.style.opacity       = open ? '0' : '';
+    btn.style.pointerEvents = open ? 'none' : '';
+    btn.style.transform     = open ? 'translateY(8px)' : '';
+  }
+
+  // Watch class changes on the chat button (most reliable signal)
+  function attachChatObserver() {
+    var chatBtn = document.getElementById('chat-widget-button');
+    var chatIframe = document.getElementById('chat-widget-iframe');
+    if (!chatBtn && !chatIframe) return false;
+
+    var observer = new MutationObserver(syncBtnVisibility);
+    if (chatBtn)    observer.observe(chatBtn,    { attributes: true, attributeFilter: ['class'] });
+    if (chatIframe) observer.observe(chatIframe, { attributes: true, attributeFilter: ['class'] });
+    return true;
+  }
+
+  // Chat widget may not be in DOM yet — poll until found then attach
+  if (!attachChatObserver()) {
+    var pollTimer = setInterval(function () {
+      if (attachChatObserver()) {
+        clearInterval(pollTimer);
+        syncBtnVisibility();
+      }
+    }, 300);
+    // Give up after 15s
+    setTimeout(function () { clearInterval(pollTimer); }, 15000);
+  }
+
+  syncBtnVisibility();
 
   console.log('✅ PepStack widget loaded');
 })();
