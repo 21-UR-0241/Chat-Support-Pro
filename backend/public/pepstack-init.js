@@ -477,6 +477,8 @@
 
 
 
+
+
 (function () {
   'use strict';
 
@@ -674,11 +676,109 @@
   .psk-step-pill { height:3px; flex:1; border-radius:99px; background:#f3f4f6; transition:background .35s; }
   .psk-step-pill.active { background:#3bbe28; }
 
-  @media (max-width:480px) {
-    #psk-modal { padding:26px 20px 24px; border-radius:20px; }
-    .psk-heading { font-size:20px; }
+  /* ── Scan modal ── */
+  #psk-scan-overlay {
+    display:none; position:fixed; inset:0; background:rgba(17,24,39,.62);
+    z-index:99999; align-items:center; justify-content:center; backdrop-filter:blur(8px);
+  }
+  #psk-scan-overlay.open { display:flex; animation:psk-fadein .22s ease-out; }
+  #psk-scan-modal {
+    background:#fff; border-radius:22px; width:96%; max-width:560px;
+    height:88vh; max-height:720px; position:relative; overflow:hidden;
+    box-shadow:0 28px 72px rgba(0,0,0,.22),0 4px 16px rgba(0,0,0,.10);
+    animation:psk-slideup .3s cubic-bezier(.22,1,.36,1);
+    display:flex; flex-direction:column;
+  }
+  #psk-scan-header {
+    display:flex; align-items:center; gap:10px; padding:14px 18px 14px 20px;
+    border-bottom:1.5px solid #f3f4f6; flex-shrink:0; background:#fff; border-radius:22px 22px 0 0;
+  }
+  #psk-scan-header .psk-logo-icon { width:32px; height:32px; font-size:16px; flex-shrink:0; }
+  #psk-scan-header-title { flex:1; }
+  #psk-scan-header-title strong { font-size:13.5px; font-weight:800; color:#111827; display:block; letter-spacing:-.1px; }
+  #psk-scan-header-title span { font-size:11px; color:#9ca3af; font-weight:500; }
+  #psk-scan-close {
+    background:#f3f4f6; border:none; border-radius:50%;
+    width:32px; height:32px; display:flex; align-items:center; justify-content:center;
+    cursor:pointer; color:#6b7280; font-size:15px; transition:background .14s,color .14s; flex-shrink:0;
+  }
+  #psk-scan-close:hover { background:#e5e7eb; color:#111827; }
+  #psk-scan-iframe-wrap { flex:1; position:relative; overflow:hidden; }
+  #psk-scan-iframe { width:100%; height:100%; border:none; display:block; }
+  #psk-scan-loading {
+    position:absolute; inset:0; background:#fff;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px;
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; transition:opacity .3s;
+  }
+  #psk-scan-loading.hidden { opacity:0; pointer-events:none; }
+  #psk-scan-loading .psk-spinner { width:36px; height:36px; }
+  #psk-scan-loading p { font-size:13px; color:#9ca3af; font-weight:500; margin:0; }
+
+  /* ── Mobile ── */
+  @media (max-width:540px) {
+    /* Floating button — keep it compact */
+    #psk-btn {
+      font-size:12px; padding:9px 13px 9px 11px;
+      bottom:74px; left:12px;
+    }
+
+    /* Main modal — bottom sheet */
+    #psk-overlay { align-items:flex-end; }
+    #psk-modal {
+      width:100%; max-width:100%; max-height:92vh;
+      border-radius:20px 20px 0 0;
+      padding:20px 18px 32px;
+      animation:psk-sheet-up .32s cubic-bezier(.22,1,.36,1);
+    }
+    @keyframes psk-sheet-up {
+      from { transform:translateY(100%); opacity:.6; }
+      to   { transform:translateY(0);    opacity:1; }
+    }
+
+    /* Pull handle */
+    #psk-modal::before {
+      content:''; display:block; width:36px; height:4px;
+      background:#e5e7eb; border-radius:99px;
+      margin:0 auto 16px; flex-shrink:0;
+    }
+
+    .psk-close { top:14px; right:14px; }
+    .psk-heading { font-size:19px; }
+    .psk-sub { font-size:13px; margin-bottom:18px; }
+
+    /* Stack 2-col rows */
     .psk-row { grid-template-columns:1fr; gap:0; }
-    #psk-btn { font-size:12px; padding:9px 14px 9px 11px; }
+
+    /* Bigger tap targets on chips */
+    .psk-chip { padding:8px 14px; font-size:12.5px; }
+
+    /* Inputs / selects — larger tap area */
+    .psk-field input,
+    .psk-field select,
+    .psk-field textarea { padding:13px 14px; font-size:15px; }
+
+    .psk-btn-primary { padding:15px; font-size:15px; }
+    .psk-btn-scan    { padding:14px; font-size:13px; }
+
+    /* Divider labels smaller */
+    .psk-divider-label { font-size:10px; margin:16px 0 10px; }
+
+    /* Scan modal — full screen bottom sheet */
+    #psk-scan-overlay { align-items:flex-end; }
+    #psk-scan-modal {
+      width:100%; max-width:100%; height:94vh; max-height:94vh;
+      border-radius:18px 18px 0 0;
+      animation:psk-sheet-up .32s cubic-bezier(.22,1,.36,1);
+    }
+    #psk-scan-header { padding:13px 16px; }
+    #psk-scan-header-title strong { font-size:13px; }
+  }
+
+  /* Very small screens */
+  @media (max-width:360px) {
+    #psk-modal { padding:18px 14px 28px; }
+    .psk-heading { font-size:17px; }
+    .psk-chip { padding:7px 11px; font-size:12px; }
   }
   `;
   document.head.appendChild(style);
@@ -830,9 +930,9 @@
           </button>
 
           <div class="psk-or">or</div>
-          <a class="psk-btn-scan" href="${PEPSCAN_URL}" target="_blank" rel="noopener noreferrer">
+          <button class="psk-btn-scan" id="psk-scan-btn" type="button">
             &#128247; &nbsp;Scan my face for AI recommendations
-          </a>
+          </button>
         </div>
 
         <!-- Loader -->
@@ -850,6 +950,27 @@
           <button class="psk-btn-reset" id="psk-reset">&#8592; Start over</button>
         </div>
 
+      </div>
+    </div>
+
+    <!-- Scan face modal -->
+    <div id="psk-scan-overlay">
+      <div id="psk-scan-modal">
+        <div id="psk-scan-header">
+          <div class="psk-logo-icon">&#128247;</div>
+          <div id="psk-scan-header-title">
+            <strong>PepScan — Face Analysis</strong>
+            <span>AI recommendations based on your facial biomarkers</span>
+          </div>
+          <button id="psk-scan-close">&#215;</button>
+        </div>
+        <div id="psk-scan-iframe-wrap">
+          <div id="psk-scan-loading">
+            <div class="psk-spinner"></div>
+            <p>Loading PepScan&hellip;</p>
+          </div>
+          <iframe id="psk-scan-iframe" title="PepScan Face Analysis" allow="camera"></iframe>
+        </div>
       </div>
     </div>
   `;
@@ -887,6 +1008,31 @@
   let selectedGoal       = null;
   let selectedConditions = [];
   let condNone           = false;
+
+  /* ── scan modal ── */
+  const scanBtn      = document.getElementById('psk-scan-btn');
+  const scanOverlay  = document.getElementById('psk-scan-overlay');
+  const scanClose    = document.getElementById('psk-scan-close');
+  const scanIframe   = document.getElementById('psk-scan-iframe');
+  const scanLoading  = document.getElementById('psk-scan-loading');
+
+  scanBtn.addEventListener('click', function () {
+    scanOverlay.classList.add('open');
+    document.body.style.overflow = 'hidden';
+    if (!scanIframe.src) {
+      scanLoading.classList.remove('hidden');
+      scanIframe.src = PEPSCAN_URL;
+      scanIframe.onload = function () { scanLoading.classList.add('hidden'); };
+    }
+  });
+  scanClose.addEventListener('click', closeScanModal);
+  scanOverlay.addEventListener('click', function (e) { if (e.target === scanOverlay) closeScanModal(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && scanOverlay.classList.contains('open')) closeScanModal(); });
+  function closeScanModal() {
+    scanOverlay.classList.remove('open');
+    var ci = document.getElementById('chat-widget-iframe');
+    if (!ci || !ci.classList.contains('open')) document.body.style.overflow = '';
+  }
 
   /* ── modal ── */
   btn.addEventListener('click', openModal);
