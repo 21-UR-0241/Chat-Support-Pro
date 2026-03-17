@@ -6289,12 +6289,70 @@ app.use('/api/ai/training', aiTrainingRoutes);
 app.post('/pepstack', async (req, res) => {
   try {
     const { goal, age, sex, height, weight } = req.body;
-
+ 
     if (!goal) return res.status(400).json({ error: 'goal is required' });
-
+ 
     const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
     if (!ANTHROPIC_API_KEY) return res.status(500).json({ error: 'AI not configured' });
-
+ 
+    // ── Pull brain context ──────────────────────────────────────────────────
+    // Search brain using goal + body context so relevant product rules load
+    const brainSearchTerms = [
+      goal,
+      age    ? `age ${age}`    : '',
+      sex    ? sex             : '',
+      weight ? weight          : '',
+    ].filter(Boolean).join(' ');
+ 
+    let brainContext = '';
+    let brainSettings = {};
+    try {
+      brainContext  = await getBrainContext(db.pool, brainSearchTerms);
+      brainSettings = await getBrainSettings(db.pool);
+      console.log(`🧬 [PepStack] Brain loaded: ${brainContext.length} chars for goal="${goal}"`);
+    } catch (brainErr) {
+      console.warn('[PepStack] Brain load failed, continuing without:', brainErr.message);
+    }
+ 
+    // ── Build system prompt ─────────────────────────────────────────────────
+    const brainBlock = brainContext.trim() ? `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STORE KNOWLEDGE BASE — USE THIS AS YOUR PRIMARY SOURCE
+These are the actual products, protocols, and rules from this store.
+Your recommendations MUST come from this data first.
+Do NOT recommend peptides not listed here unless the brain has no relevant entry.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${brainContext}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+` : '';
+ 
+    const systemPrompt = `${brainBlock}You are a peptide protocol advisor for this store.
+A customer has provided their age, sex, height, weight, and primary goal.
+Use the store knowledge base above as your PRIMARY source for product names, dosing, and protocols.
+Only fall back to general peptide knowledge if the brain has no relevant entry for the goal.
+ 
+Respond ONLY with valid JSON — no markdown, no preamble, no extra text.
+ 
+JSON structure:
+{
+  "summary": "2-3 sentence personalised intro referencing their profile (age, sex, build, goal) and what the store offers for it",
+  "stack": [
+    {
+      "name": "Exact product name from store knowledge base",
+      "why": "1-2 sentences why this suits their specific profile and goal",
+      "dose": "Dosing guidance from brain rules, or standard research range if not in brain"
+    }
+  ],
+  "tip": "One practical stack or timing tip — reference actual products from the brain where possible"
+}
+ 
+Rules:
+- Recommend 2-4 peptides maximum, most important first
+- Use exact product names from the brain — do not paraphrase them
+- Reference the customer's body stats where relevant
+- Keep each field under 120 words
+- No disclaimers inside the JSON`;
+ 
     const userMsg = [
       `Goal: ${goal}`,
       age    ? `Age: ${age}`       : null,
@@ -6302,43 +6360,42 @@ app.post('/pepstack', async (req, res) => {
       height ? `Height: ${height}` : null,
       weight ? `Weight: ${weight}` : null,
     ].filter(Boolean).join('\n');
-
+ 
+    // ── Brain injected into user turn too (same dual-injection as suggestions) ──
+    const userPrompt = brainContext.trim()
+      ? `${brainBlock}Customer profile:\n${userMsg}\n\nUsing the store knowledge base above, recommend the best peptide stack for this customer. Return only JSON.`
+      : `Customer profile:\n${userMsg}\n\nRecommend the best peptide stack for this customer. Return only JSON.`;
+ 
     const requestBody = JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 700,
-      system: `You are a peptide protocol advisor for a Canadian/US peptides e-commerce store.
-Use the customer's age, sex, height, weight, and goal to give a personalised stack recommendation.
-Respond ONLY with valid JSON — no markdown, no preamble.
-Structure:
-{
-  "summary": "2-3 sentence personalised intro referencing their profile",
-  "stack": [
-    { "name": "Peptide name", "why": "why it suits their profile", "dose": "typical research dosing" }
-  ],
-  "tip": "one practical stack or timing tip"
-}
-Rules: 2-4 peptides max, most important first. No disclaimers in JSON. Research peptides only.
-Goal mapping: Fat Loss→AOD-9604/Frag176-191/CJC-1295+Ipamorelin, Muscle Building→BPC-157/TB-500/CJC-1295/IGF-1LR3, Recovery→BPC-157/TB-500/GHK-Cu, Anti-Aging→Epithalon/GHK-Cu/Thymosin Alpha-1, Cognitive→Semax/Selank/Dihexa, Sleep→DSIP/Epithalon, Hormonal→Kisspeptin-10/Gonadorelin, Injury→BPC-157/TB-500, Libido→PT-141/Kisspeptin-10, Wellness→BPC-157/Thymosin Alpha-1/GHK-Cu`,
-      messages: [{ role: 'user', content: userMsg }]
+      model:       'claude-haiku-4-5-20251001',
+      max_tokens:  800,
+      system:      systemPrompt,
+      messages:    [{ role: 'user', content: userPrompt }]
     });
-
+ 
     const data = await callAnthropicAPIWithRetry(requestBody, ANTHROPIC_API_KEY);
-    const raw = data.content?.[0]?.text || '';
+    const raw     = data.content?.[0]?.text || '';
     const cleaned = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-
+ 
     let parsed;
-    try { parsed = JSON.parse(cleaned); }
-    catch (e) {
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch (e) {
       console.error('[PepStack] JSON parse error:', raw);
       return res.status(500).json({ error: 'Failed to parse AI response' });
     }
-
+ 
     return res.json(parsed);
   } catch (err) {
     console.error('[PepStack] Error:', err.message);
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
+ 
+
+
+
+
 // ============ STORE ENDPOINTS ============
 
 app.get('/api/stores', authenticateToken, async (req, res) => {
