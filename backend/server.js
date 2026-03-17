@@ -1792,94 +1792,452 @@ app.post('/api/widget/presence', async (req, res) => {
 });
 
 
+function extractAdminStyle(chatHistory, agentStyleSamples = []) {
+ 
+  // Use dedicated samples if available, otherwise parse from chatHistory string
+  let agentLines = agentStyleSamples.filter(s => s && s.trim().length > 8);
+ 
+  if (agentLines.length === 0 && chatHistory) {
+    agentLines = chatHistory
+      .split('\n')
+      .filter(line => line.startsWith('Agent:'))
+      .map(line => line.replace(/^Agent:\s*/, '').trim())
+      .filter(line => line.length > 8);
+  }
+ 
+  if (agentLines.length === 0) return null;
+ 
+  const allText = agentLines.join(' ');
+ 
+  // ── Length ────────────────────────────────────────────────────────────────
+  const avgWords = Math.round(
+    agentLines.reduce((sum, l) => sum + l.split(/\s+/).filter(Boolean).length, 0) / agentLines.length
+  );
+  const lengthStyle = avgWords <= 12  ? 'very short (under 12 words)'
+    : avgWords <= 25 ? 'short (12–25 words)'
+    : avgWords <= 55 ? 'medium (25–55 words)'
+    : 'long (55+ words)';
+ 
+  // ── Greeting ──────────────────────────────────────────────────────────────
+  const greetingLines = agentLines.filter(l => /^(hi|hey|hello|heya|sup)\b/i.test(l.trim()));
+  const greetingRatio = greetingLines.length / agentLines.length;
+  const greetingNote  = greetingRatio >= 0.3
+    ? `often opens with "${greetingLines[0].split(' ')[0]}" — do the same`
+    : 'usually jumps straight into the reply without a greeting — do the same';
+ 
+  // ── Casing ────────────────────────────────────────────────────────────────
+  const lowercaseLines = agentLines.filter(l => /[a-z]/.test(l) && l === l.toLowerCase());
+  const writesLowercase = lowercaseLines.length / agentLines.length >= 0.4;
+ 
+  // ── Punctuation ───────────────────────────────────────────────────────────
+  const exclamationCount = (allText.match(/!/g) || []).length;
+  const usesExclamation  = exclamationCount / agentLines.length >= 0.4;
+  const usesEllipsis     = /\.{2,}|…/.test(allText);
+  const usesEmoji        = /[\u{1F300}-\u{1FFFF}]/u.test(allText);
+  const emojiMatches     = allText.match(/[\u{1F300}-\u{1FFFF}]/gu) || [];
+ 
+  // ── Contractions ──────────────────────────────────────────────────────────
+  const contractions    = (allText.match(/\b(i'm|i'll|i've|i'd|we're|we'll|we've|don't|can't|won't|it's|that's|you're|you'll|they're|there's|let's|isn't|wasn't|didn't|couldn't|wouldn't|shouldn't)\b/gi) || []).length;
+  const usesContractions = contractions / agentLines.length >= 0.5;
+ 
+  // ── Casual vocabulary ─────────────────────────────────────────────────────
+  const vocab = {
+    usesJust:       /\bjust\b/i.test(allText),
+    usesActually:   /\bactually\b/i.test(allText),
+    usesAlright:    /\balright\b|\baight\b/i.test(allText),
+    usesTotally:    /\btotally\b/i.test(allText),
+    usesPerfect:    /\bperfect\b/i.test(allText),
+    usesGotIt:      /\bgot it\b|\bgotcha\b/i.test(allText),
+    usesNoProblem:  /\bno problem\b|\bnp\b|\bno worries\b/i.test(allText),
+    usesAbsolutely: /\babsolutely\b/i.test(allText),
+    usesSure:       /\bsure\b/i.test(allText),
+    usesYep:        /\byep\b|\byup\b/i.test(allText),
+  };
+ 
+  // ── Sign-offs ─────────────────────────────────────────────────────────────
+  const signoffs = {
+    lmk:       /\blmk\b|let me know/i.test(allText),
+    reachOut:  /reach out|feel free/i.test(allText),
+    thankYou:  /\bthank you\b/i.test(allText),
+    thanks:    /\bthanks[!.]?\s*$/im.test(allText),
+    cheers:    /\bcheers\b/i.test(allText),
+    takecare:  /\btake care\b/i.test(allText),
+  };
+ 
+  // ── Empathy phrases actually used (not generic ones) ──────────────────────
+  const empathyPatterns = [
+    /so sorry/i, /really sorry/i, /apologize/i, /totally understand/i,
+    /completely understand/i, /i get it/i, /makes sense/i,
+    /that's frustrating/i, /that sucks/i, /not okay/i, /not right/i,
+    /we messed up/i, /our fault/i, /my bad/i,
+  ];
+  const empathyPhrases = empathyPatterns
+    .filter(p => p.test(allText))
+    .map(p => p.source.replace(/\\/g, '').replace(/\\b/g, ''));
+ 
+  // ── Sentence structure ────────────────────────────────────────────────────
+  const avgSentences = agentLines.reduce((sum, l) => {
+    return sum + (l.match(/[.!?]+/g) || []).length;
+  }, 0) / agentLines.length;
+  const writesSingleSentence = avgSentences <= 1.3;
+  const writesMultipleSentences = avgSentences >= 2.5;
+ 
+  // ── Characteristic phrases (verbatim recurring patterns) ─────────────────
+  // Find 2–4 word n-grams that appear more than once — these are the agent's
+  // habitual phrases that make them sound like themselves
+  const phraseMap = {};
+  agentLines.forEach(line => {
+    const words = line.toLowerCase().split(/\s+/).filter(Boolean);
+    for (let i = 0; i < words.length - 1; i++) {
+      const bigram = `${words[i]} ${words[i + 1]}`;
+      if (!/^(the |a |an |to |of |in |is |it |at |on |be |by |do |go )/.test(bigram)) {
+        phraseMap[bigram] = (phraseMap[bigram] || 0) + 1;
+      }
+    }
+  });
+  const recurringPhrases = Object.entries(phraseMap)
+    .filter(([, count]) => count >= 2)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 5)
+    .map(([phrase]) => phrase);
+ 
+  // ── Sample messages — most recent non-trivial replies ────────────────────
+  const sampleLines = agentLines
+    .filter(l => l.split(/\s+/).length >= 5) // at least 5 words
+    .slice(-8); // last 8 substantial messages
+ 
+  return {
+    avgWords, lengthStyle,
+    greetingNote, greetingRatio,
+    writesLowercase,
+    usesExclamation, usesEllipsis,
+    usesEmoji, emojiMatches: emojiMatches.slice(0, 3),
+    usesContractions,
+    vocab, signoffs, empathyPhrases,
+    writesSingleSentence, writesMultipleSentences,
+    recurringPhrases,
+    sampleLines,
+    totalSamplesAnalyzed: agentLines.length,
+  };
+}
+ 
+ 
+// ─────────────────────────────────────────────────────────────────────────────
+// buildAdminStyleBlock
+// Converts the fingerprint into a tight, specific instruction block.
+// Includes real sample messages so the model pattern-matches the voice directly.
+// ─────────────────────────────────────────────────────────────────────────────
+function buildAdminStyleBlock(style) {
+  if (!style) return '';
+ 
+  const rules = [];
+ 
+  // Length
+  rules.push(`Match the agent's message length: ${style.lengthStyle} per reply.`);
+ 
+  // Greeting
+  rules.push(`The agent ${style.greetingNote}.`);
+ 
+  // Casing
+  if (style.writesLowercase) {
+    rules.push(`The agent often writes in lowercase — mirror that. Don't correct their casing style.`);
+  }
+ 
+  // Contractions
+  if (style.usesContractions) {
+    rules.push(`Use contractions freely (I'll, we'll, don't, it's, you're) — the agent does.`);
+  } else {
+    rules.push(`Avoid contractions — the agent writes without them.`);
+  }
+ 
+  // Exclamation marks
+  if (style.usesExclamation) {
+    rules.push(`Use exclamation marks naturally — the agent uses them to sound warm and enthusiastic.`);
+  } else {
+    rules.push(`Don't use exclamation marks — the agent keeps an even, calm tone.`);
+  }
+ 
+  // Ellipsis
+  if (style.usesEllipsis) {
+    rules.push(`The agent uses ellipses (…) as a natural pause or trail-off. Mirror this sparingly.`);
+  }
+ 
+  // Emoji
+  if (style.usesEmoji && style.emojiMatches.length > 0) {
+    rules.push(`The agent uses emoji: ${style.emojiMatches.join(' ')} — use these same ones where natural.`);
+  }
+ 
+  // Sentence count
+  if (style.writesSingleSentence) {
+    rules.push(`The agent usually writes in single sentences. Keep replies tight and punchy.`);
+  } else if (style.writesMultipleSentences) {
+    rules.push(`The agent writes in multi-sentence paragraphs — match that flow.`);
+  }
+ 
+  // Casual vocab
+  const casualWords = Object.entries(style.vocab)
+    .filter(([, v]) => v)
+    .map(([k]) => k.replace('uses', '').replace('Uses', '').toLowerCase())
+    .filter(w => w.length > 1);
+  if (casualWords.length > 0) {
+    rules.push(`The agent naturally uses words like: "${casualWords.join('", "')}". Use them where they fit.`);
+  }
+ 
+  // Sign-offs
+  if (style.signoffs.lmk) {
+    rules.push(`End with "let me know" or "lmk" when inviting a response.`);
+  } else if (style.signoffs.reachOut) {
+    rules.push(`Close with "feel free to reach out" or similar — the agent uses this.`);
+  } else if (style.signoffs.cheers) {
+    rules.push(`The agent signs off with "cheers" — use this where appropriate.`);
+  } else if (style.signoffs.takecare) {
+    rules.push(`The agent uses "take care" as a sign-off.`);
+  }
+ 
+  // Empathy
+  if (style.empathyPhrases.length > 0) {
+    rules.push(`When empathy is needed, use phrasing close to what the agent actually says: "${style.empathyPhrases.slice(0, 3).join('", "')}".`);
+  }
+ 
+  // Recurring phrases
+  if (style.recurringPhrases.length > 0) {
+    rules.push(`The agent habitually uses these phrases — weave them in naturally: "${style.recurringPhrases.join('", "')}".`);
+  }
+ 
+  const sampleBlock = style.sampleLines.length > 0
+    ? `\nREAL MESSAGES from this agent — match this exact voice, rhythm, and vocabulary:\n${style.sampleLines.map(l => `  • "${l}"`).join('\n')}`
+    : '';
+ 
+  return `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ADMIN WRITING STYLE — mirror this precisely (non-negotiable)
+Based on ${style.totalSamplesAnalyzed} real messages from this agent.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${rules.map((r, i) => `${i + 1}. ${r}`).join('\n')}
+${sampleBlock}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+}
+ 
+ 
+// ─────────────────────────────────────────────────────────────────────────────
+// Route — now destructures agentStyleSamples from req.body
+// ─────────────────────────────────────────────────────────────────────────────
 app.post('/api/ai/suggestions', authenticateToken, async (req, res) => {
   try {
-      const {
-        clientMessage,
-        chatHistory,
-        recentContext,
-        conversationId,
-        customerName,
-        customerEmail,
-        storeName,
-        storeIdentifier,
-        analysis,
-        adminNote,
-        messageEdited,
-      } = req.body;
+    const {
+      clientMessage,
+      chatHistory,
+      agentStyleSamples = [],
+      recentContext,
+      customerName,
+      customerEmail,
+      storeName,
+      analysis,
+      adminNote,
+      messageEdited,
+      detailedAnswerMode,
+    } = req.body;
 
-      let brainSettings = req.body.brainSettings || {};
-      
+    let brainSettings = req.body.brainSettings || {};
+
     if (!clientMessage) {
       return res.status(400).json({ error: 'clientMessage is required' });
     }
 
-    const contextQuality = recentContext?.contextQuality || 'minimal';
+    const contextQuality  = recentContext?.contextQuality  || 'minimal';
     const messageRichness = recentContext?.messageRichness || 'brief';
-    
-    console.log(`✦ [AI] Request — context: ${contextQuality}, richness: ${messageRichness}, edited: ${!!messageEdited}, note: "${adminNote || ''}", text: "${clientMessage.substring(0, 80)}..."`);
+
+    console.log(`✦ [AI] context: ${contextQuality}, richness: ${messageRichness}, agentSamples: ${agentStyleSamples.length}, detailedMode: ${!!detailedAnswerMode}`);
 
     const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
     if (!ANTHROPIC_API_KEY) {
-      console.log('✦ [AI] No ANTHROPIC_API_KEY set, using smart fallback suggestions');
-      const suggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
-      return res.json({ suggestions });
-    }
-    //don't remove!!
-    // const conversationState = analyzeConversationState(chatHistory, clientMessage, analysis);
-    // const analysisBlock = buildEnhancedAnalysisBlock(analysis, conversationState, recentContext);
-    // const customerContext = buildCustomerContext(customerName, customerEmail, conversationState);
-    // const policyBlock = buildPolicyBlock();
-    // const systemPrompt = buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness);
-    // const userPrompt = buildUserPrompt(chatHistory, clientMessage, messageEdited, adminNote, conversationState, recentContext);
-
-
-    //added
-    const conversationState = analyzeConversationState(chatHistory, clientMessage, analysis);
-    const analysisBlock = buildEnhancedAnalysisBlock(analysis, conversationState, recentContext);
-    const customerContext = buildCustomerContext(customerName, customerEmail, conversationState);
-    const policyBlock = buildPolicyBlock();
-   let brainContext = '';
-      try {
-        brainContext = await getBrainContext(db.pool, clientMessage);
-        if (!brainSettings.length && !brainSettings.tone && !brainSettings.empathy) {
-          brainSettings = await getBrainSettings(db.pool);
-          if (brainSettings.tone) console.log('🧠 [Brain] Settings loaded from DB (no localStorage)');
-        }
-      } catch (brainErr) {
-        console.error('🧠 [Brain] Failed to load, continuing without:', brainErr.message);
+      const fallback = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
+      if (detailedAnswerMode) {
+        return res.json({
+          detailedAnswers: [
+            { label: 'Empathetic',     text: fallback[0] || '' },
+            { label: 'Thorough',       text: fallback[1] || '' },
+            { label: 'Above & Beyond', text: fallback[2] || '' },
+          ],
+        });
       }
-    const systemPrompt = buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness, brainContext, brainSettings);
-    const userPrompt = buildUserPrompt(chatHistory, clientMessage, messageEdited, adminNote, conversationState, recentContext);
+      return res.json({ suggestions: fallback });
+    }
+
+    const conversationState = analyzeConversationState(chatHistory, clientMessage, analysis);
+    const analysisBlock     = buildEnhancedAnalysisBlock(analysis, conversationState, recentContext);
+    const customerContext   = buildCustomerContext(customerName, customerEmail, conversationState);
+    const policyBlock       = buildPolicyBlock();
+
+    // ── Admin style ───────────────────────────────────────────────────────────
+    const adminStyle      = extractAdminStyle(chatHistory, agentStyleSamples);
+    const adminStyleBlock = buildAdminStyleBlock(adminStyle);
+    if (adminStyle) {
+      console.log(`✦ [AI] Style: avg ${adminStyle.avgWords}w, ${adminStyle.sampleLines.length} samples, lowercase:${adminStyle.writesLowercase}, contractions:${adminStyle.usesContractions}`);
+    } else {
+      console.log(`✦ [AI] No style yet — not enough agent replies`);
+    }
+
+    // ── Brain ─────────────────────────────────────────────────────────────────
+    const detectedTopics   = analysis?.detectedTopics || [];
+    const detectedIssue    = analysis?.detectedIssue || recentContext?.detectedIssue || '';
+    const brainSearchTerms = [clientMessage, ...detectedTopics, detectedIssue].filter(Boolean).join(' ');
+
+    let brainContext = '';
+    try {
+      brainContext = await getBrainContext(db.pool, brainSearchTerms);
+      console.log('🧠 [DEBUG] brainSearchTerms:', brainSearchTerms);
+      console.log('🧠 [DEBUG] brainContext length:', brainContext.length);
+      console.log('🧠 [DEBUG] brainContext preview:', brainContext.substring(0, 400));
+      console.log(`🧠 [Brain] ${brainContext.length} chars for topic derived from: "${clientMessage.substring(0, 60)}"`);
+      if (!brainSettings.length && !brainSettings.tone && !brainSettings.empathy) {
+        brainSettings = await getBrainSettings(db.pool);
+      }
+    } catch (brainErr) {
+      console.error('🧠 [Brain] Failed:', brainErr.message);
+    }
+
+    // ── Reusable brain block for user prompts ─────────────────────────────────
+    // Injecting brain into the USER turn (not just system prompt) is what forces
+    // the model to use it. System prompt = rules/background. User turn = what
+    // the model directly responds to. Brain must be in both.
+    const brainUserBlock = brainContext?.trim() ? `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ANSWER FROM BRAIN — BUILD YOUR REPLIES FROM THIS DATA FIRST
+If the answer to the customer's question exists below, use it immediately.
+Do NOT say "let me check" or "let me get back to you" when the data is here.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${brainContext}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+` : '';
+
+    // ── DETAILED MODE ─────────────────────────────────────────────────────────
+    if (detailedAnswerMode) {
+      const brainSystemSection = brainContext?.trim() ? `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BRAIN RULES — READ FIRST. Override all other guidelines.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${brainContext}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Use brain data as the ONLY source of truth for product info, protocols, dosing,
+and policies. Do NOT cross-apply rules between products. All 3 replies must use
+exact values from the matching brain rule. If the answer is here — use it NOW.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+` : '';
+
+      const systemPrompt = `${brainSystemSection}${adminStyleBlock ? `${adminStyleBlock}\n\n` : ''}You are ghostwriting detailed replies for a human support agent. All three styles must sound like the SAME person — only depth and empathy level differ, never the core voice or vocabulary.
+
+Write three distinct, highly detailed replies (8–15 sentences each), in flowing paragraphs, going well beyond what the customer asked. If brain data is provided in the user message, your replies MUST be built from that data — not from general knowledge.
+
+Rules:
+- No placeholder text — only real values from the conversation
+- Write directly to the customer, no preamble
+- No bullet points
+- If brain contains the answer, use it immediately — never say "let me check"
+
+${policyBlock     ? `Policies:\n${policyBlock}\n`                : ''}
+${customerContext ? `Customer context:\n${customerContext}\n`    : ''}
+${analysisBlock   ? `Conversation analysis:\n${analysisBlock}\n` : ''}
+
+Empathetic: Deep emotional validation first. Acknowledge extensively, then give the full answer with warmth.
+Thorough: Every product detail, step, policy, and expectation from the brain data. Nothing left unanswered.
+Above & Beyond: Everything in Thorough plus extras — related products, tips, what to expect, follow-up offer.
+
+Return ONLY valid JSON:
+{
+  "detailedAnswers": [
+    { "label": "Empathetic",     "text": "..." },
+    { "label": "Thorough",       "text": "..." },
+    { "label": "Above & Beyond", "text": "..." }
+  ]
+}`;
+
+      // ← FIX: brainUserBlock injected here so model responds FROM the brain data
+      const userPrompt = `${brainUserBlock}Conversation history:
+${chatHistory || '(none)'}
+
+Customer's message:
+${clientMessage}
+${adminNote ? `\nAdmin note: ${adminNote}` : ''}
+
+Using the brain data above as your primary source, write 3 detailed replies. Return only the JSON.`;
+
+      const requestBody = JSON.stringify({
+        model: 'claude-sonnet-4-6', max_tokens: 4000, temperature: 0.5,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+      });
+
+      const anthropicData = await callAnthropicAPIWithRetry(requestBody, ANTHROPIC_API_KEY);
+      const rawContent = anthropicData.content?.[0]?.text || '';
+      console.log('✦ [DEBUG] RAW Claude response:', rawContent);
+      console.log(`✦ [AI] Detailed raw (first 300): ${rawContent.substring(0, 300)}`);
+
+      let parsed;
+      try {
+        parsed = JSON.parse(rawContent.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim());
+      } catch {
+        console.error('✦ [AI] Failed to parse detailed response');
+        const fallback = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
+        return res.json({
+          detailedAnswers: [
+            { label: 'Empathetic',     text: fallback[0] || rawContent },
+            { label: 'Thorough',       text: fallback[1] || rawContent },
+            { label: 'Above & Beyond', text: fallback[2] || rawContent },
+          ],
+          fallback: true,
+        });
+      }
+
+      const detailedAnswers = Array.isArray(parsed.detailedAnswers)
+        ? parsed.detailedAnswers.slice(0, 3)
+        : [
+            { label: 'Empathetic',     text: rawContent },
+            { label: 'Thorough',       text: rawContent },
+            { label: 'Above & Beyond', text: rawContent },
+          ];
+
+      console.log(`✦ [AI] Detailed answers: ${detailedAnswers.length}`);
+      return res.json({ detailedAnswers });
+    }
+
+    // ── NORMAL SUGGESTIONS MODE ───────────────────────────────────────────────
+    const systemPrompt = buildSystemPrompt(
+      storeName, customerContext, analysisBlock, policyBlock,
+      contextQuality, messageRichness,
+      brainContext, brainSettings,
+      adminStyleBlock,
+    );
+
+    // ← FIX: brainContext passed as 7th arg so buildUserPrompt injects it into
+    // the user turn. Previously this arg was missing — brain never reached the
+    // message the model was actually responding to.
+    const userPrompt = buildUserPrompt(
+      chatHistory, clientMessage, messageEdited, adminNote,
+      conversationState, recentContext,
+      brainContext,  // ← was missing
+    );
+
     const requestBody = JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1500,
-      temperature: 0.3,
+      model: 'claude-sonnet-4-6', max_tokens: 1500, temperature: 0.3,
       system: systemPrompt,
-      messages: [
-        { role: 'user', content: userPrompt },
-      ],
+      messages: [{ role: 'user', content: userPrompt }],
     });
 
-    console.log(`✦ [AI] Calling Anthropic API — model: ${process.env.AI_MODEL || 'claude-sonnet-4-6'}`);
-
-    //don't remove!
-    // const anthropicData = await callAnthropicAPI(requestBody, ANTHROPIC_API_KEY);
+    console.log(`✦ [AI] Calling Anthropic — brain: ${brainContext.length} chars, style: ${adminStyleBlock.length} chars`);
 
     const anthropicData = await callAnthropicAPIWithRetry(requestBody, ANTHROPIC_API_KEY);
-
-    const rawContent = anthropicData.content?.[0]?.text || '';
-    console.log(`✦ [AI] Raw response (first 200 chars): ${rawContent.substring(0, 200)}`);
+    const rawContent    = anthropicData.content?.[0]?.text || '';
+    console.log(`✦ [AI] Raw (first 200): ${rawContent.substring(0, 200)}`);
 
     let parsed;
     try {
-      const cleaned = rawContent.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-      parsed = JSON.parse(cleaned);
-    } catch (parseErr) {
-      console.error('✦ [AI] Failed to parse response:', rawContent);
-      const suggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
-      return res.json({ suggestions, fallback: true });
+      parsed = JSON.parse(rawContent.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim());
+    } catch {
+      return res.json({
+        suggestions: generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote),
+        fallback: true,
+      });
     }
 
     let suggestions = Array.isArray(parsed.suggestions)
@@ -1888,38 +2246,211 @@ app.post('/api/ai/suggestions', authenticateToken, async (req, res) => {
         ? parsed.slice(0, 3)
         : generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
 
-        console.log(`✦ [AI] BEFORE VALIDATE:`, JSON.stringify(suggestions));
-        console.log(`✦ [AI] orderNumber detected:`, conversationState?.orderNumber);
-        suggestions = validateSuggestions(suggestions, conversationState, chatHistory);
-        console.log(`✦ [AI] AFTER VALIDATE (${suggestions.length}):`, JSON.stringify(suggestions));
+    suggestions = validateSuggestions(suggestions, conversationState, chatHistory);
+    console.log('✦ [DEBUG] suggestions after validate:', JSON.stringify(suggestions));
+    console.log('✦ [DEBUG] suggestions count:', suggestions.length);
+    console.log(`✦ [AI] AFTER VALIDATE (${suggestions.length})`);
 
-        if (suggestions.length === 0) {
-          console.log('✦ [AI] FALLBACK FIRED — all suggestions filtered');
-          suggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
-        } else if (suggestions.length < 3) {
-          console.log(`✦ [AI] ${suggestions.length} suggestion(s) passed — returning Claude output only`);
-        }
-
-      //don't remove!
-    // suggestions = validateSuggestions(suggestions, conversationState, chatHistory);
-    // if (suggestions.length < 3) {
-    //   const fallbackSuggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
-    //   suggestions = [...suggestions, ...fallbackSuggestions].slice(0, 3);
-    // }
+    if (suggestions.length === 0) {
+      suggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
+    }
 
     res.json({ suggestions });
 
   } catch (error) {
-    console.error('✦ [AI] Suggestions endpoint error:', error.message, error.stack);
-    const suggestions = generateSmartFallbackSuggestions(
-      req.body?.clientMessage || '',
-      req.body?.chatHistory || '',
-      req.body?.analysis || {},
-      req.body?.adminNote || ''
-    );
-    res.json({ suggestions, fallback: true });
+    console.error('✦ [AI] Endpoint error:', error.message, error.stack);
+
+    if (req.body?.detailedAnswerMode) {
+      const fallback = generateSmartFallbackSuggestions(
+        req.body?.clientMessage || '', req.body?.chatHistory || '',
+        req.body?.analysis || {},     req.body?.adminNote   || ''
+      );
+      return res.json({
+        detailedAnswers: [
+          { label: 'Empathetic',     text: fallback[0] || 'Unable to generate at this time.' },
+          { label: 'Thorough',       text: fallback[1] || 'Unable to generate at this time.' },
+          { label: 'Above & Beyond', text: fallback[2] || 'Unable to generate at this time.' },
+        ],
+        fallback: true,
+      });
+    }
+
+    res.json({
+      suggestions: generateSmartFallbackSuggestions(
+        req.body?.clientMessage || '', req.body?.chatHistory || '',
+        req.body?.analysis || {},     req.body?.adminNote   || ''
+      ),
+      fallback: true,
+    });
   }
 });
+
+
+
+app.get('/api/ai/brain-debug', authenticateToken, async (req, res) => {
+  try {
+    const result = await db.pool.query(
+      `SELECT brain_data, updated_at FROM ai_training_brain ORDER BY updated_at DESC LIMIT 1`
+    );
+ 
+    if (!result.rows.length) {
+      return res.json({ status: 'empty', message: 'No brain data in database' });
+    }
+ 
+    const brain = result.rows[0].brain_data;
+    const updatedAt = result.rows[0].updated_at;
+ 
+    // Count entries per category
+    const summary = {};
+    for (const [key, val] of Object.entries(brain || {})) {
+      summary[key] = Array.isArray(val) ? val.length : typeof val;
+    }
+ 
+    // Sample first 3 productKnowledge entries
+    const productSample = (brain?.productKnowledge || []).slice(0, 3).map(r =>
+      typeof r === 'string' ? r : r?.text
+    );
+ 
+    return res.json({
+      status: 'found',
+      updatedAt,
+      categorySummary: summary,
+      productKnowledgeSample: productSample,
+      totalCategories: Object.keys(brain || {}).length,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// app.post('/api/ai/suggestions', authenticateToken, async (req, res) => {
+//   try {
+//       const {
+//         clientMessage,
+//         chatHistory,
+//         recentContext,
+//         conversationId,
+//         customerName,
+//         customerEmail,
+//         storeName,
+//         storeIdentifier,
+//         analysis,
+//         adminNote,
+//         messageEdited,
+//       } = req.body;
+
+//       let brainSettings = req.body.brainSettings || {};
+      
+//     if (!clientMessage) {
+//       return res.status(400).json({ error: 'clientMessage is required' });
+//     }
+
+//     const contextQuality = recentContext?.contextQuality || 'minimal';
+//     const messageRichness = recentContext?.messageRichness || 'brief';
+    
+//     console.log(`✦ [AI] Request — context: ${contextQuality}, richness: ${messageRichness}, edited: ${!!messageEdited}, note: "${adminNote || ''}", text: "${clientMessage.substring(0, 80)}..."`);
+
+//     const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+
+//     if (!ANTHROPIC_API_KEY) {
+//       console.log('✦ [AI] No ANTHROPIC_API_KEY set, using smart fallback suggestions');
+//       const suggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
+//       return res.json({ suggestions });
+//     }
+//     //don't remove!!
+//     // const conversationState = analyzeConversationState(chatHistory, clientMessage, analysis);
+//     // const analysisBlock = buildEnhancedAnalysisBlock(analysis, conversationState, recentContext);
+//     // const customerContext = buildCustomerContext(customerName, customerEmail, conversationState);
+//     // const policyBlock = buildPolicyBlock();
+//     // const systemPrompt = buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness);
+//     // const userPrompt = buildUserPrompt(chatHistory, clientMessage, messageEdited, adminNote, conversationState, recentContext);
+
+
+//     //added
+//     const conversationState = analyzeConversationState(chatHistory, clientMessage, analysis);
+//     const analysisBlock = buildEnhancedAnalysisBlock(analysis, conversationState, recentContext);
+//     const customerContext = buildCustomerContext(customerName, customerEmail, conversationState);
+//     const policyBlock = buildPolicyBlock();
+//    let brainContext = '';
+//       try {
+//         brainContext = await getBrainContext(db.pool, clientMessage);
+//         if (!brainSettings.length && !brainSettings.tone && !brainSettings.empathy) {
+//           brainSettings = await getBrainSettings(db.pool);
+//           if (brainSettings.tone) console.log('🧠 [Brain] Settings loaded from DB (no localStorage)');
+//         }
+//       } catch (brainErr) {
+//         console.error('🧠 [Brain] Failed to load, continuing without:', brainErr.message);
+//       }
+//     const systemPrompt = buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness, brainContext, brainSettings);
+//     const userPrompt = buildUserPrompt(chatHistory, clientMessage, messageEdited, adminNote, conversationState, recentContext);
+//     const requestBody = JSON.stringify({
+//       model: 'claude-sonnet-4-6',
+//       max_tokens: 1500,
+//       temperature: 0.3,
+//       system: systemPrompt,
+//       messages: [
+//         { role: 'user', content: userPrompt },
+//       ],
+//     });
+
+//     console.log(`✦ [AI] Calling Anthropic API — model: ${process.env.AI_MODEL || 'claude-sonnet-4-6'}`);
+
+//     //don't remove!
+//     // const anthropicData = await callAnthropicAPI(requestBody, ANTHROPIC_API_KEY);
+
+//     const anthropicData = await callAnthropicAPIWithRetry(requestBody, ANTHROPIC_API_KEY);
+
+//     const rawContent = anthropicData.content?.[0]?.text || '';
+//     console.log(`✦ [AI] Raw response (first 200 chars): ${rawContent.substring(0, 200)}`);
+
+//     let parsed;
+//     try {
+//       const cleaned = rawContent.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+//       parsed = JSON.parse(cleaned);
+//     } catch (parseErr) {
+//       console.error('✦ [AI] Failed to parse response:', rawContent);
+//       const suggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
+//       return res.json({ suggestions, fallback: true });
+//     }
+
+//     let suggestions = Array.isArray(parsed.suggestions)
+//       ? parsed.suggestions.slice(0, 3)
+//       : Array.isArray(parsed)
+//         ? parsed.slice(0, 3)
+//         : generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
+
+//         console.log(`✦ [AI] BEFORE VALIDATE:`, JSON.stringify(suggestions));
+//         console.log(`✦ [AI] orderNumber detected:`, conversationState?.orderNumber);
+//         suggestions = validateSuggestions(suggestions, conversationState, chatHistory);
+//         console.log(`✦ [AI] AFTER VALIDATE (${suggestions.length}):`, JSON.stringify(suggestions));
+
+//         if (suggestions.length === 0) {
+//           console.log('✦ [AI] FALLBACK FIRED — all suggestions filtered');
+//           suggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
+//         } else if (suggestions.length < 3) {
+//           console.log(`✦ [AI] ${suggestions.length} suggestion(s) passed — returning Claude output only`);
+//         }
+
+//       //don't remove!
+//     // suggestions = validateSuggestions(suggestions, conversationState, chatHistory);
+//     // if (suggestions.length < 3) {
+//     //   const fallbackSuggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
+//     //   suggestions = [...suggestions, ...fallbackSuggestions].slice(0, 3);
+//     // }
+
+//     res.json({ suggestions });
+
+//   } catch (error) {
+//     console.error('✦ [AI] Suggestions endpoint error:', error.message, error.stack);
+//     const suggestions = generateSmartFallbackSuggestions(
+//       req.body?.clientMessage || '',
+//       req.body?.chatHistory || '',
+//       req.body?.analysis || {},
+//       req.body?.adminNote || ''
+//     );
+//     res.json({ suggestions, fallback: true });
+//   }
+// });
 
 app.post('/api/ai/feedback', authenticateToken, async (req, res) => {
   try {
@@ -2120,106 +2651,91 @@ app.post('/api/ai/feedback', authenticateToken, async (req, res) => {
 // }
 
 
-function buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness, brainContext = '', brainSettings = {}) {
+
+function buildSystemPrompt(
+  storeName, customerContext, analysisBlock, policyBlock,
+  contextQuality, messageRichness,
+  brainContext = '', brainSettings = {},
+  adminStyleBlock = ''
+) {
+
+  // ── Brain rules — position 0 ───────────────────────────────────────────────
+  const hasBrain = brainContext && brainContext.trim().length > 0;
+
+  const brainBlock = hasBrain ? `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BRAIN RULES — READ THIS BEFORE ANYTHING ELSE
+Mandatory store-owner instructions. Override ALL other guidelines including
+context quality hints, general training data, and any "gather info first" rules.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${brainContext}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CRITICAL BRAIN ENFORCEMENT:
+1. If the customer is asking about a product, protocol, dosing, recommendation,
+   or anything the brain rules cover — ANSWER IT NOW using the brain rules.
+   Do NOT say "let me check", "let me find out", or "let me get back to you".
+   You already have the answer. Use it.
+2. Only stall (ask for more info, say you'll check) when the brain does NOT
+   contain the answer AND you genuinely need external info (e.g. order status,
+   tracking number, account details).
+3. Do NOT cross-apply one product's rule to another.
+4. ALL 3 suggestions must use exact values from the matching brain rule.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+` : '';
+
+  // ── Admin style — position 1 ───────────────────────────────────────────────
+  const styleSection = adminStyleBlock ? `${adminStyleBlock}\n` : '';
+
+  // ── Context quality — ONLY applies when brain doesn't have the answer ──────
+  // When brain context exists and matches, skip "gather info" guidance entirely.
   let contextGuidance = '';
-  
-  if (contextQuality === 'minimal') {
-    if (messageRichness === 'very_brief' || messageRichness === 'brief') {
-      contextGuidance = `
-⚠️ LIMITED CONTEXT: Customer's first brief message with no conversation history yet.
-- This is likely a greeting or very general inquiry
-- Your suggestions should be opening responses: greet professionally, ask what they need help with
-- Don't make assumptions - gather information first
-- Keep it friendly and welcoming
-`;
-    } else {
-      contextGuidance = `
-ℹ️ DETAILED FIRST MESSAGE: Customer provided substantial information in their first message.
-- They've given you good context to work with despite no conversation history
-- Focus on addressing their specific concern directly
-- Ask for any missing critical information (order number, photos, etc.)
-- Show you understand their issue and are taking action
-`;
+  if (!hasBrain) {
+    // No brain — use standard context guidance
+    if (contextQuality === 'minimal') {
+      contextGuidance = messageRichness === 'very_brief' || messageRichness === 'brief'
+        ? `⚠️ FIRST BRIEF MESSAGE — greet and ask what they need. Don't assume.`
+        : `ℹ️ DETAILED FIRST MESSAGE — address their concern directly. Ask only for missing critical info.`;
+    } else if (contextQuality === 'basic') {
+      contextGuidance = `ℹ️ BASIC CONTEXT — build on what's been discussed.`;
+    } else if (contextQuality === 'good') {
+      contextGuidance = `✓ GOOD CONTEXT — avoid repeating what's been asked. Move toward resolution.`;
+    } else if (contextQuality === 'excellent') {
+      contextGuidance = `✓ EXCELLENT CONTEXT — customer may be losing patience. Be efficient.`;
     }
-  } else if (contextQuality === 'basic') {
-    contextGuidance = `
-ℹ️ BASIC CONTEXT: Early in the conversation (1-2 exchanges).
-- Build on what's been discussed so far
-- Continue gathering information if needed
-- Start moving toward solutions if you have enough details
-- Reference specific things they've mentioned
-`;
-  } else if (contextQuality === 'good') {
-    contextGuidance = `
-✓ GOOD CONTEXT: You have sufficient conversation history (2+ exchanges each side).
-- Base suggestions on the full conversation context
-- Avoid repeating what's already been asked or said
-- Focus on moving toward resolution
-- Be specific and reference prior discussion points
-`;
-  } else if (contextQuality === 'excellent') {
-    contextGuidance = `
-✓ EXCELLENT CONTEXT: Rich conversation history with multiple exchanges.
-- You have deep context - use it to provide highly relevant suggestions
-- The customer may be losing patience - be efficient and solution-oriented
-- Avoid any repetition - you know what's been discussed
-- Focus on concrete next steps and resolution
-`;
+  } else {
+    // Brain exists — only stall for things the brain doesn't cover
+    contextGuidance = contextQuality === 'minimal'
+      ? `ℹ️ FIRST MESSAGE: Answer what you can from brain rules directly. Only ask follow-up questions for things the brain rules don't cover.`
+      : `✓ Use conversation history + brain rules to give a complete, specific answer.`;
   }
 
-  // ── Build reply quality block from admin brain settings ──────────────────
-  const len = brainSettings.length || 'medium';
-  const tone = brainSettings.tone || 'friendly-professional';
+  // ── Reply quality ──────────────────────────────────────────────────────────
+  const len     = brainSettings.length  || 'medium';
+  const tone    = brainSettings.tone    || 'friendly-professional';
   const empathy = brainSettings.empathy || 'high';
 
   const lengthRule = len === 'long'
-    ? `Each reply must be **4-6 sentences minimum**. Write thorough, detailed responses like a knowledgeable human agent. Cover the issue, the resolution path, and reassurance. Never give one-liners or short answers.`
+    ? `4–6 sentences minimum. Thorough — cover the issue, resolution, and reassurance.`
     : len === 'short'
-    ? `Each reply must be **1-2 sentences**. Be extremely direct and concise. One clear action or answer per reply.`
-    : `Each reply must be **2-4 sentences**. Specific and actionable — enough detail to be helpful, not overwhelming.`;
+    ? `1–2 sentences. One clear action per reply.`
+    : `2–4 sentences. Specific and actionable.`;
 
-  const toneRule = tone === 'formal'
-    ? `Use formal, professional language throughout. Avoid contractions (use "I will" not "I'll"). No casual phrases.`
-    : tone === 'casual'
-    ? `Use casual, conversational language. Contractions are encouraged. Sound like a helpful colleague, not a corporate agent.`
-    : `Use friendly-professional language — warm and personable but not overly casual. Contractions are fine.`;
+  const toneRule = tone === 'formal'   ? `Formal, professional. No contractions.`
+    : tone === 'casual' ? `Casual, conversational. Contractions encouraged.`
+    : `Friendly-professional — warm but not overly casual.`;
 
-  const empathyRule = empathy === 'high'
-    ? `Always lead with empathy before jumping to solutions. Acknowledge the customer's experience first.`
-    : empathy === 'low'
-    ? `Skip empathy preambles. Get straight to the solution — customers want answers, not sympathy.`
-    : `Brief empathy acknowledgment is enough before moving to the solution. Don't over-apologize.`;
+  const empathyRule = empathy === 'high' ? `Lead with empathy before solutions.`
+    : empathy === 'low'  ? `Skip empathy preambles. Get straight to the solution.`
+    : `Brief empathy acknowledgment, then solution.`;
 
   const qualityBlock = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-REPLY QUALITY REQUIREMENTS (set by admin — non-negotiable):
+REPLY QUALITY (admin-set — non-negotiable):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-LENGTH: ${lengthRule}
-TONE: ${toneRule}
+LENGTH:  ${lengthRule}
+TONE:    ${toneRule}
 EMPATHY: ${empathyRule}`;
 
-  return `You are an expert customer support reply assistant for ${storeName || 'an e-commerce store'}. Your job is to suggest exactly 3 reply options that the support agent can immediately send to the customer.
-
-${brainContext ? `
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 1 — READ BRAIN RULES FIRST (before generating anything):
-Search these admin-defined rules for any product, protocol, dosing, or policy
-mentioned in the customer's message. Use these as your ONLY source of truth
-for any numbers, ratios, or protocols. Do NOT use your training data when a brain rule exists.
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-${brainContext}
-
-⚠️ PRODUCT PROTOCOL ENFORCEMENT:
-If a brain rule specifies exact numbers for a product (BAC water volume, concentration, dosing, mg/mL ratios):
-- Match the numbers to the SPECIFIC PRODUCT being asked about
-- Do NOT cross-apply one product's protocol to another product
-- Do NOT invent alternative ratios for the same product across suggestions
-- ALL 3 suggestions must use those EXACT numbers — no exceptions, no "alternative" math
-- Example: if brain says "Retatrutide 10mg → 1mL → 10mg/mL", all 3 suggestions must use 1mL, never 2mL
-- Example: if brain says "BPC-157 → 2mL → 5mg/mL", that 2mL is correct FOR BPC-157 only
-- Suggestions can differ in tone, empathy level, or follow-up question — NEVER in product-specific numbers
-- Brain rules per product are the ONLY source of truth — your training data is irrelevant when a brain rule exists
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-` : ''}
+  return `${brainBlock}${styleSection}You are ghostwriting replies for a specific human support agent at ${storeName || 'this store'}. The customer must feel like they are talking to the same knowledgeable person every time.
 
 ${qualityBlock}
 
@@ -2232,119 +2748,606 @@ ${analysisBlock}
 ${policyBlock}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CORE RULES — Follow these strictly:
+CORE RULES:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. Every suggestion MUST reference specific details — product names, the customer's stated goal, issue described, or something they actually said. Replies that could apply to ANY customer are not acceptable.
 
-1. **Write as a human support agent**, NEVER as an AI or bot. Use first person ("I'll check", "Let me help").
+2. NEVER say "let me check", "let me find out", or "let me get back to you" when the brain rules already contain the answer. If you know it, say it now.
 
-2. **Reply length:** ${lengthRule}
+3. NEVER say "let me check" for general product/knowledge questions. Only use it for things that require a real-time lookup (order status, tracking, account balance, etc.).
 
-3. **Base every reply on actual details** from the conversation:
-   - Reference specific order numbers, product names, or issues they mentioned
-   - Never ask for information the customer already provided
-   - Never repeat what the agent already said or asked
+4. Never ask for information already provided. Never repeat what the agent already said.
 
-4. **Vary the 3 suggestions strategically:**
-   - Suggestion 1: Direct, helpful answer to their main question
-   - Suggestion 2: Different angle or addresses a secondary concern
-   - Suggestion 3: If info is missing, ask a specific follow-up. If info is complete, offer next step (escalation, confirmation, additional help)
+5. Vary the 3 suggestions — different angles, not the same reply reworded:
+   - Suggestion 1: Direct, complete answer using brain knowledge
+   - Suggestion 2: Same answer with different emphasis or additional context
+   - Suggestion 3: Answer + a natural follow-up or next step
 
-5. **Match the customer's emotional state:**
-   - Very upset → Lead with strong empathy, show urgency, take immediate action
-   - Frustrated → Acknowledge concern with empathy, then solution
-   - Neutral → Be professional and efficient
-   - Positive → Match their friendly energy
-   - Grateful → Be warm but brief
+6. Match the customer's emotional state (upset → empathy first; neutral → efficient; grateful → brief and warm).
 
-6. **Never use these robotic phrases:**
-   - "I understand your frustration" (too generic)
-   - "I apologize for any inconvenience"
-   - "Please be advised"
-   - "Kindly"
-   - "As per our policy"
-   - "I appreciate your patience" (unless they've actually been patient)
+7. Never use: "I understand your frustration", "I apologize for any inconvenience", "Please be advised", "Kindly", "As per our policy", "That's a great question".
 
-7. **Use natural, varied empathy language:**
-   - "I'm so sorry this happened"
-   - "That's not the experience we want for you"
-   - "I can see how frustrating this must be"
-   - "I completely understand"
-
-8. **Don't make promises you can't keep:**
-   - Never promise specific timeframes unless confirmed
-   - Don't promise refund amounts or outcomes
-   - Use phrases like "I'll check" or "Let me review" instead
-
-9. **No emojis** unless the customer used them first.
-
-10. **If customer is repeating themselves or following up:**
-    - Acknowledge they've been waiting: "I apologize for the delay getting this resolved"
-    - Show action: "Let me prioritize this" or "I'm escalating this now"
-    - Don't make them explain again
+8. No promises on timeframes or amounts unless confirmed.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EXAMPLES OF EXCELLENT REPLIES:
+GOOD vs BAD examples for product knowledge questions:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Customer: "My goal is to lose weight. What peptides can you recommend?"
 
-Example 1 - Product Damage:
-Customer: "My order #12345 arrived completely damaged! The box was crushed and the ceramic vase is in pieces."
-Agent should say:
-✓ "I'm so sorry your order arrived damaged. I've pulled up order #12345 and can see the vase set you ordered. Could you send a quick photo of the damage? I'll get a replacement shipped out right away."
-✗ "I understand your frustration. Can you provide your order number?"
+✓ GOOD (uses brain knowledge to actually answer):
+"For weight loss, Semaglutide and Tirzepatide are our most effective options — both work by suppressing appetite and improving insulin sensitivity. Semaglutide is great for steady, consistent results while Tirzepatide tends to produce faster initial weight loss. Would you like more details on dosing or how to get started?"
 
-Example 2 - Angry Customer:
-Customer: "WHERE IS MY PACKAGE?? I ordered 2 weeks ago and NOTHING! This is ridiculous!"
-Agent should say:
-✓ "I completely understand your frustration — 2 weeks is too long. Let me check the status of your order right now. Could you share your order number? It's in your confirmation email and starts with #."
-✗ "I apologize for any inconvenience. Please provide your order number so I can look into this."
-
-Example 3 - Follow-up (customer already asked):
-Customer: "I'm still waiting for an update on my refund. I asked about this yesterday."
-Agent should say:
-✓ "I apologize for the delay getting this resolved. Let me check the status of your refund right now and get you an answer within the hour."
-✗ "Thank you for your patience. Can you provide your order number?"
-
-Example 4 - Simple Gratitude:
-Customer: "Thanks so much for the refund!"
-Agent should say:
-✓ "You're very welcome! Don't hesitate to reach out if you need anything else."
-✗ "I'm glad I could assist you today. Is there anything else I can help you with regarding your order?"
-
-Example 5 - Multiple Issues:
-Customer: "My order #98765 is late AND I was charged twice! This is unacceptable."
-Agent should say:
-✓ "I sincerely apologize — that's definitely not right. I've pulled up order #98765 and I can see both issues. Let me check the shipping status and the duplicate charge right now. I'll have answers for you within 10 minutes."
-✗ "I understand your concern. Let me look into this for you."
-
-Example 6 - Product Question:
-Customer: "Does the blue hoodie come in size XL?"
-Agent should say:
-✓ "Great question! Let me check the current stock on the blue hoodie in XL. Which specific style are you looking at — the Classic or the Premium?"
-✗ "Thank you for your inquiry. Can you provide more details about which product you're interested in?"
-
-Example 7 - Detailed First Message:
-Customer: "Hi, my order #12345 arrived damaged. The box was crushed and the ceramic vase inside is broken into pieces. I need a refund or replacement ASAP."
-Agent should say:
-✓ "I'm so sorry your ceramic vase from order #12345 arrived damaged. Could you send a quick photo of the damage? I'll process a replacement for you right away."
-✗ "Hello! Thank you for contacting us. Can you provide your order number?"
+✗ BAD (useless stall — never do this):
+"That's a great question! Let me find the answer for you — one moment."
+"I'd be happy to help. Let me check and get back to you with the details."
+"Let me look into that. Could you provide any additional details?"
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-THINKING PROCESS:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Before generating replies, quickly think through:
-1. Is there a brain rule for the specific product or topic being asked about?
-2. What is the customer's primary need right now?
-3. What information do we have vs. what's missing?
-4. What tone matches their emotional state?
-5. What has the agent already tried/said/asked?
-6. Is this a repeat question or follow-up?
-
-Then generate your 3 suggestions.
-
-Respond ONLY with valid JSON in this exact format:
-{"suggestions": ["reply 1", "reply 2", "reply 3"]}`;
+Respond ONLY with valid JSON: {"suggestions": ["reply 1", "reply 2", "reply 3"]}`;
 }
+
+function buildUserPrompt(
+  chatHistory, clientMessage, messageEdited, adminNote,
+  conversationState, recentContext,
+  brainContext = ''   // ← new param
+) {
+ 
+  // ── Question type classification ──────────────────────────────────────────
+  const msgLower = clientMessage.toLowerCase();
+ 
+  const isKnowledgeQuestion = /recommend|suggest|best for|good for|help with|goal|looking for|want to|trying to|lose weight|weight loss|fat loss|burn fat|muscle|build|anti.?aging|healing|recovery|sleep|energy|libido|cognitive|focus|what (peptide|product|should)|which (peptide|product)|what do you (have|offer|carry|sell)|how does|how do|what is|tell me about|explain|difference between|compare|dosing|dose|protocol|reconstitut/i.test(msgLower);
+ 
+  const isOrderQuestion = /order|tracking|shipped|delivery|refund|return|cancel|charge|payment|where is|status|when will/i.test(msgLower);
+ 
+  const questionType = isKnowledgeQuestion && !isOrderQuestion
+    ? 'PRODUCT/KNOWLEDGE — answer directly from brain data below. Do NOT stall.'
+    : isOrderQuestion
+    ? 'ORDER/ACCOUNT — may need lookup. Ask for order number if not provided.'
+    : 'GENERAL — use brain data if applicable.';
+ 
+  // ── Brain block — injected directly into user turn ────────────────────────
+  // This is the core fix. By placing brain context here (in the message the
+  // model is directly responding to) rather than only in the system prompt,
+  // the model treats it as the immediate source to draw from — not background.
+  const brainBlock = brainContext?.trim() ? `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ANSWER FROM BRAIN — USE THIS DATA TO WRITE YOUR REPLIES
+This is the store's knowledge base. Your replies must come from here first.
+If the answer to the customer's question exists below, use it immediately.
+Do NOT say "let me check" or "let me get back to you" when the data is here.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${brainContext}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+` : '';
+ 
+  // ── Conversation signals ──────────────────────────────────────────────────
+  const signals = [`QUESTION TYPE: ${questionType}`];
+ 
+  if (conversationState?.orderNumber)   signals.push(`Order number: #${conversationState.orderNumber}`);
+  if (conversationState?.customerEmail) signals.push(`Customer email: ${conversationState.customerEmail}`);
+ 
+  const issue = conversationState?.detectedIssue || recentContext?.detectedIssue;
+  if (issue) signals.push(`Issue: ${issue.replace(/_/g, ' ')}`);
+ 
+  const wants = conversationState?.customerWants || recentContext?.customerWants || {};
+  const wantsList = Object.entries(wants).filter(([, v]) => v).map(([k]) => k.replace(/_/g, ' '));
+  if (wantsList.length > 0) signals.push(`Customer wants: ${wantsList.join(', ')}`);
+ 
+  if (conversationState?.sentiment && conversationState.sentiment !== 'neutral') {
+    signals.push(`Sentiment: ${conversationState.sentiment.replace(/_/g, ' ')}`);
+  }
+  if (conversationState?.isUrgent) signals.push(`Urgent: yes`);
+  if (conversationState?.isRepeat) signals.push(`REPEAT/FOLLOW-UP: already asked about this`);
+ 
+  const alreadyDone = [];
+  if (conversationState?.agentAskedForOrder)     alreadyDone.push('asked for order number');
+  if (conversationState?.agentAskedForEmail)     alreadyDone.push('asked for email');
+  if (conversationState?.agentAskedForPhoto)     alreadyDone.push('asked for photo');
+  if (conversationState?.agentAlreadyApologized) alreadyDone.push('apologized');
+  if (conversationState?.agentOfferedRefund)     alreadyDone.push('offered refund');
+  if (conversationState?.agentOfferedReplacement)alreadyDone.push('offered replacement');
+  if (alreadyDone.length > 0) signals.push(`Agent already: ${alreadyDone.join(', ')} — do NOT repeat`);
+ 
+  const topics = conversationState?.detectedTopics || [];
+  if (topics.length > 0) signals.push(`Topics: ${topics.join(', ')}`);
+  if (messageEdited) signals.push(`Admin edited this message to guide suggestions`);
+ 
+  // ── Recent exchange ───────────────────────────────────────────────────────
+  const lastAgent    = recentContext?.lastAgentMessages?.filter(Boolean).at(-1);
+  const prevCustomer = recentContext?.lastCustomerMessages?.filter(Boolean).at(-2);
+  const recentLines  = [];
+  if (lastAgent)    recentLines.push(`Last agent reply: "${lastAgent}"`);
+  if (prevCustomer) recentLines.push(`Previous customer message: "${prevCustomer}"`);
+ 
+  // ── Assemble — brain first, then signals, then history, then message ──────
+  const signalsBlock = `SIGNALS:\n${signals.map(s => `• ${s}`).join('\n')}`;
+  const recentBlock  = recentLines.length > 0 ? `\nRECENT:\n${recentLines.join('\n')}` : '';
+  const historyBlock = chatHistory ? `\nCONVERSATION HISTORY:\n${chatHistory}` : '';
+  const noteBlock    = adminNote ? `\nADMIN NOTE: ${adminNote}` : '';
+ 
+  return `${brainBlock}${signalsBlock}${recentBlock}${historyBlock}
+ 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CUSTOMER MESSAGE:
+${clientMessage}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${noteBlock}
+ 
+Using the brain data above as your primary source, write 3 specific replies for this customer. If the brain contains the answer, use it now — do not stall. Return JSON only.`;
+}
+
+
+app.post('/api/ai/suggestions', authenticateToken, async (req, res) => {
+  try {
+    const {
+      clientMessage,
+      chatHistory,
+      recentContext,
+      customerName,
+      customerEmail,
+      storeName,
+      analysis,
+      adminNote,
+      messageEdited,
+      detailedAnswerMode,
+    } = req.body;
+
+    let brainSettings = req.body.brainSettings || {};
+
+    if (!clientMessage) {
+      return res.status(400).json({ error: 'clientMessage is required' });
+    }
+
+    const contextQuality  = recentContext?.contextQuality  || 'minimal';
+    const messageRichness = recentContext?.messageRichness || 'brief';
+
+    console.log(`✦ [AI] Request — context: ${contextQuality}, richness: ${messageRichness}, edited: ${!!messageEdited}, detailedMode: ${!!detailedAnswerMode}, note: "${adminNote || ''}", text: "${clientMessage.substring(0, 80)}..."`);
+
+    const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+
+    if (!ANTHROPIC_API_KEY) {
+      console.log('✦ [AI] No API key — using fallback');
+      const fallback = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
+      if (detailedAnswerMode) {
+        return res.json({
+          detailedAnswers: [
+            { label: 'Empathetic',     text: fallback[0] || '' },
+            { label: 'Thorough',       text: fallback[1] || '' },
+            { label: 'Above & Beyond', text: fallback[2] || '' },
+          ],
+        });
+      }
+      return res.json({ suggestions: fallback });
+    }
+
+    const conversationState = analyzeConversationState(chatHistory, clientMessage, analysis);
+    const analysisBlock     = buildEnhancedAnalysisBlock(analysis, conversationState, recentContext);
+    const customerContext   = buildCustomerContext(customerName, customerEmail, conversationState);
+    const policyBlock       = buildPolicyBlock();
+
+    // ── Brain: search with enriched terms so more rules are matched ───────────
+    const detectedTopics   = analysis?.detectedTopics || [];
+    const detectedIssue    = analysis?.detectedIssue || recentContext?.detectedIssue || '';
+    const brainSearchTerms = [clientMessage, ...detectedTopics, detectedIssue].filter(Boolean).join(' ');
+
+    let brainContext = '';
+    try {
+      brainContext = await getBrainContext(db.pool, brainSearchTerms);
+      console.log(`🧠 [Brain] Loaded ${brainContext.length} chars for: "${brainSearchTerms.substring(0, 100)}"`);
+      if (!brainSettings.length && !brainSettings.tone && !brainSettings.empathy) {
+        brainSettings = await getBrainSettings(db.pool);
+        if (brainSettings.tone) console.log('🧠 [Brain] Settings loaded from DB');
+      }
+    } catch (brainErr) {
+      console.error('🧠 [Brain] Failed to load, continuing without:', brainErr.message);
+    }
+
+    // ── DETAILED MODE ─────────────────────────────────────────────────────────
+    if (detailedAnswerMode) {
+      console.log('✦ [AI] Detailed mode — generating 3 styled replies');
+
+      // Brain rules go first, same pattern as buildSystemPrompt
+      const brainSection = brainContext ? `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BRAIN RULES — READ THIS BEFORE ANYTHING ELSE
+Mandatory store-owner instructions. Override all other guidelines and your training data.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${brainContext}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ENFORCEMENT: Use brain rules as the ONLY source of truth for any product numbers,
+protocols, dosing, ratios, or policies. Do NOT cross-apply rules between products.
+All 3 reply styles must use the exact values from the matching brain rule.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+` : '';
+
+      const systemPrompt = `${brainSection}You are a world-class customer support specialist for this store.
+
+Write three distinct, highly detailed customer support replies to the same customer message.
+
+Each reply must be LONG (8–15 sentences), written in flowing paragraphs (no bullet points), and go well beyond what the customer asked — proactively covering related policies, next steps, reassurances, and helpful context they didn't think to request.
+
+Rules:
+- No placeholder text like [Name] or [Order #] — only use real values from the conversation
+- Write directly to the customer, no preamble or meta-commentary
+- No bullet points or numbered lists
+- All three replies must comply with the brain rules above
+
+${policyBlock       ? `\nPolicies:\n${policyBlock}`                : ''}
+${customerContext   ? `\nCustomer context:\n${customerContext}`    : ''}
+${analysisBlock     ? `\nConversation analysis:\n${analysisBlock}` : ''}
+
+Style definitions:
+- Empathetic: Lead with deep emotional validation. Acknowledge their situation extensively, then resolve with warmth and personal care.
+- Thorough: Focus on completeness. Cover every step, policy, timeline, and what to expect. Leave no question unanswered.
+- Above & Beyond: Do everything in Thorough, then add more — a discount offer, follow-up check-in, tips to avoid the issue, or related helpful info they never asked for.
+
+Return ONLY valid JSON in this exact shape:
+{
+  "detailedAnswers": [
+    { "label": "Empathetic",     "text": "..." },
+    { "label": "Thorough",       "text": "..." },
+    { "label": "Above & Beyond", "text": "..." }
+  ]
+}`;
+
+      const userPrompt = `Conversation history:\n${chatHistory || '(none)'}
+
+Customer's message:\n${clientMessage}
+${adminNote ? `\nAdmin note: ${adminNote}` : ''}
+
+Write the 3 detailed replies following all brain rules. Return only the JSON.`;
+
+      const requestBody = JSON.stringify({
+        model:       'claude-sonnet-4-6',
+        max_tokens:  4000,
+        temperature: 0.5,
+        system:      systemPrompt,
+        messages:    [{ role: 'user', content: userPrompt }],
+      });
+
+      const anthropicData = await callAnthropicAPIWithRetry(requestBody, ANTHROPIC_API_KEY);
+      const rawContent    = anthropicData.content?.[0]?.text || '';
+      console.log(`✦ [AI] Detailed raw (first 300): ${rawContent.substring(0, 300)}`);
+
+      let parsed;
+      try {
+        const cleaned = rawContent.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+        parsed = JSON.parse(cleaned);
+      } catch {
+        console.error('✦ [AI] Failed to parse detailed response');
+        const fallback = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
+        return res.json({
+          detailedAnswers: [
+            { label: 'Empathetic',     text: fallback[0] || rawContent },
+            { label: 'Thorough',       text: fallback[1] || rawContent },
+            { label: 'Above & Beyond', text: fallback[2] || rawContent },
+          ],
+          fallback: true,
+        });
+      }
+
+      const detailedAnswers = Array.isArray(parsed.detailedAnswers)
+        ? parsed.detailedAnswers.slice(0, 3)
+        : [
+            { label: 'Empathetic',     text: rawContent },
+            { label: 'Thorough',       text: rawContent },
+            { label: 'Above & Beyond', text: rawContent },
+          ];
+
+      console.log(`✦ [AI] Detailed answers: ${detailedAnswers.length}`);
+      return res.json({ detailedAnswers });
+    }
+
+    // ── NORMAL SUGGESTIONS MODE ───────────────────────────────────────────────
+    // Pass raw brainContext — buildSystemPrompt handles its own formatting/placement
+    const systemPrompt = buildSystemPrompt(
+      storeName, customerContext, analysisBlock, policyBlock,
+      contextQuality, messageRichness,
+      brainContext,   // raw — NOT pre-formatted
+      brainSettings
+    );
+    const userPrompt = buildUserPrompt(chatHistory, clientMessage, messageEdited, adminNote, conversationState, recentContext);
+
+    const requestBody = JSON.stringify({
+      model:       'claude-sonnet-4-6',
+      max_tokens:  1500,
+      temperature: 0.3,
+      system:      systemPrompt,
+      messages:    [{ role: 'user', content: userPrompt }],
+    });
+
+    console.log(`✦ [AI] Calling Anthropic — model: ${process.env.AI_MODEL || 'claude-sonnet-4-6'}`);
+
+    const anthropicData = await callAnthropicAPIWithRetry(requestBody, ANTHROPIC_API_KEY);
+    const rawContent    = anthropicData.content?.[0]?.text || '';
+    console.log(`✦ [AI] Raw response (first 200): ${rawContent.substring(0, 200)}`);
+
+    let parsed;
+    try {
+      const cleaned = rawContent.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+      parsed = JSON.parse(cleaned);
+    } catch {
+      console.error('✦ [AI] Failed to parse response:', rawContent);
+      return res.json({
+        suggestions: generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote),
+        fallback: true,
+      });
+    }
+
+    let suggestions = Array.isArray(parsed.suggestions)
+      ? parsed.suggestions.slice(0, 3)
+      : Array.isArray(parsed)
+        ? parsed.slice(0, 3)
+        : generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
+
+    console.log(`✦ [AI] BEFORE VALIDATE:`, JSON.stringify(suggestions));
+    console.log(`✦ [AI] orderNumber detected:`, conversationState?.orderNumber);
+    suggestions = validateSuggestions(suggestions, conversationState, chatHistory);
+    console.log(`✦ [AI] AFTER VALIDATE (${suggestions.length}):`, JSON.stringify(suggestions));
+
+    if (suggestions.length === 0) {
+      console.log('✦ [AI] FALLBACK FIRED — all suggestions filtered');
+      suggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
+    } else if (suggestions.length < 3) {
+      console.log(`✦ [AI] ${suggestions.length} suggestion(s) passed`);
+    }
+
+    res.json({ suggestions });
+
+  } catch (error) {
+    console.error('✦ [AI] Endpoint error:', error.message, error.stack);
+
+    if (req.body?.detailedAnswerMode) {
+      const fallback = generateSmartFallbackSuggestions(
+        req.body?.clientMessage || '', req.body?.chatHistory || '',
+        req.body?.analysis || {},     req.body?.adminNote   || ''
+      );
+      return res.json({
+        detailedAnswers: [
+          { label: 'Empathetic',     text: fallback[0] || 'Unable to generate at this time.' },
+          { label: 'Thorough',       text: fallback[1] || 'Unable to generate at this time.' },
+          { label: 'Above & Beyond', text: fallback[2] || 'Unable to generate at this time.' },
+        ],
+        fallback: true,
+      });
+    }
+
+    res.json({
+      suggestions: generateSmartFallbackSuggestions(
+        req.body?.clientMessage || '', req.body?.chatHistory || '',
+        req.body?.analysis || {},     req.body?.adminNote   || ''
+      ),
+      fallback: true,
+    });
+  }
+});
+
+
+// function buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness, brainContext = '', brainSettings = {}) {
+//   let contextGuidance = '';
+  
+//   if (contextQuality === 'minimal') {
+//     if (messageRichness === 'very_brief' || messageRichness === 'brief') {
+//       contextGuidance = `
+// ⚠️ LIMITED CONTEXT: Customer's first brief message with no conversation history yet.
+// - This is likely a greeting or very general inquiry
+// - Your suggestions should be opening responses: greet professionally, ask what they need help with
+// - Don't make assumptions - gather information first
+// - Keep it friendly and welcoming
+// `;
+//     } else {
+//       contextGuidance = `
+// ℹ️ DETAILED FIRST MESSAGE: Customer provided substantial information in their first message.
+// - They've given you good context to work with despite no conversation history
+// - Focus on addressing their specific concern directly
+// - Ask for any missing critical information (order number, photos, etc.)
+// - Show you understand their issue and are taking action
+// `;
+//     }
+//   } else if (contextQuality === 'basic') {
+//     contextGuidance = `
+// ℹ️ BASIC CONTEXT: Early in the conversation (1-2 exchanges).
+// - Build on what's been discussed so far
+// - Continue gathering information if needed
+// - Start moving toward solutions if you have enough details
+// - Reference specific things they've mentioned
+// `;
+//   } else if (contextQuality === 'good') {
+//     contextGuidance = `
+// ✓ GOOD CONTEXT: You have sufficient conversation history (2+ exchanges each side).
+// - Base suggestions on the full conversation context
+// - Avoid repeating what's already been asked or said
+// - Focus on moving toward resolution
+// - Be specific and reference prior discussion points
+// `;
+//   } else if (contextQuality === 'excellent') {
+//     contextGuidance = `
+// ✓ EXCELLENT CONTEXT: Rich conversation history with multiple exchanges.
+// - You have deep context - use it to provide highly relevant suggestions
+// - The customer may be losing patience - be efficient and solution-oriented
+// - Avoid any repetition - you know what's been discussed
+// - Focus on concrete next steps and resolution
+// `;
+//   }
+
+//   // ── Build reply quality block from admin brain settings ──────────────────
+//   const len = brainSettings.length || 'medium';
+//   const tone = brainSettings.tone || 'friendly-professional';
+//   const empathy = brainSettings.empathy || 'high';
+
+//   const lengthRule = len === 'long'
+//     ? `Each reply must be **4-6 sentences minimum**. Write thorough, detailed responses like a knowledgeable human agent. Cover the issue, the resolution path, and reassurance. Never give one-liners or short answers.`
+//     : len === 'short'
+//     ? `Each reply must be **1-2 sentences**. Be extremely direct and concise. One clear action or answer per reply.`
+//     : `Each reply must be **2-4 sentences**. Specific and actionable — enough detail to be helpful, not overwhelming.`;
+
+//   const toneRule = tone === 'formal'
+//     ? `Use formal, professional language throughout. Avoid contractions (use "I will" not "I'll"). No casual phrases.`
+//     : tone === 'casual'
+//     ? `Use casual, conversational language. Contractions are encouraged. Sound like a helpful colleague, not a corporate agent.`
+//     : `Use friendly-professional language — warm and personable but not overly casual. Contractions are fine.`;
+
+//   const empathyRule = empathy === 'high'
+//     ? `Always lead with empathy before jumping to solutions. Acknowledge the customer's experience first.`
+//     : empathy === 'low'
+//     ? `Skip empathy preambles. Get straight to the solution — customers want answers, not sympathy.`
+//     : `Brief empathy acknowledgment is enough before moving to the solution. Don't over-apologize.`;
+
+//   const qualityBlock = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// REPLY QUALITY REQUIREMENTS (set by admin — non-negotiable):
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// LENGTH: ${lengthRule}
+// TONE: ${toneRule}
+// EMPATHY: ${empathyRule}`;
+
+//   return `You are an expert customer support reply assistant for ${storeName || 'an e-commerce store'}. Your job is to suggest exactly 3 reply options that the support agent can immediately send to the customer.
+
+// ${brainContext ? `
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STEP 1 — READ BRAIN RULES FIRST (before generating anything):
+// Search these admin-defined rules for any product, protocol, dosing, or policy
+// mentioned in the customer's message. Use these as your ONLY source of truth
+// for any numbers, ratios, or protocols. Do NOT use your training data when a brain rule exists.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ${brainContext}
+
+// ⚠️ PRODUCT PROTOCOL ENFORCEMENT:
+// If a brain rule specifies exact numbers for a product (BAC water volume, concentration, dosing, mg/mL ratios):
+// - Match the numbers to the SPECIFIC PRODUCT being asked about
+// - Do NOT cross-apply one product's protocol to another product
+// - Do NOT invent alternative ratios for the same product across suggestions
+// - ALL 3 suggestions must use those EXACT numbers — no exceptions, no "alternative" math
+// - Example: if brain says "Retatrutide 10mg → 1mL → 10mg/mL", all 3 suggestions must use 1mL, never 2mL
+// - Example: if brain says "BPC-157 → 2mL → 5mg/mL", that 2mL is correct FOR BPC-157 only
+// - Suggestions can differ in tone, empathy level, or follow-up question — NEVER in product-specific numbers
+// - Brain rules per product are the ONLY source of truth — your training data is irrelevant when a brain rule exists
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ` : ''}
+
+// ${qualityBlock}
+
+// ${contextGuidance}
+
+// ${customerContext}
+
+// ${analysisBlock}
+
+// ${policyBlock}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CORE RULES — Follow these strictly:
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// 1. **Write as a human support agent**, NEVER as an AI or bot. Use first person ("I'll check", "Let me help").
+
+// 2. **Reply length:** ${lengthRule}
+
+// 3. **Base every reply on actual details** from the conversation:
+//    - Reference specific order numbers, product names, or issues they mentioned
+//    - Never ask for information the customer already provided
+//    - Never repeat what the agent already said or asked
+
+// 4. **Vary the 3 suggestions strategically:**
+//    - Suggestion 1: Direct, helpful answer to their main question
+//    - Suggestion 2: Different angle or addresses a secondary concern
+//    - Suggestion 3: If info is missing, ask a specific follow-up. If info is complete, offer next step (escalation, confirmation, additional help)
+
+// 5. **Match the customer's emotional state:**
+//    - Very upset → Lead with strong empathy, show urgency, take immediate action
+//    - Frustrated → Acknowledge concern with empathy, then solution
+//    - Neutral → Be professional and efficient
+//    - Positive → Match their friendly energy
+//    - Grateful → Be warm but brief
+
+// 6. **Never use these robotic phrases:**
+//    - "I understand your frustration" (too generic)
+//    - "I apologize for any inconvenience"
+//    - "Please be advised"
+//    - "Kindly"
+//    - "As per our policy"
+//    - "I appreciate your patience" (unless they've actually been patient)
+
+// 7. **Use natural, varied empathy language:**
+//    - "I'm so sorry this happened"
+//    - "That's not the experience we want for you"
+//    - "I can see how frustrating this must be"
+//    - "I completely understand"
+
+// 8. **Don't make promises you can't keep:**
+//    - Never promise specific timeframes unless confirmed
+//    - Don't promise refund amounts or outcomes
+//    - Use phrases like "I'll check" or "Let me review" instead
+
+// 9. **No emojis** unless the customer used them first.
+
+// 10. **If customer is repeating themselves or following up:**
+//     - Acknowledge they've been waiting: "I apologize for the delay getting this resolved"
+//     - Show action: "Let me prioritize this" or "I'm escalating this now"
+//     - Don't make them explain again
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// EXAMPLES OF EXCELLENT REPLIES:
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Example 1 - Product Damage:
+// Customer: "My order #12345 arrived completely damaged! The box was crushed and the ceramic vase is in pieces."
+// Agent should say:
+// ✓ "I'm so sorry your order arrived damaged. I've pulled up order #12345 and can see the vase set you ordered. Could you send a quick photo of the damage? I'll get a replacement shipped out right away."
+// ✗ "I understand your frustration. Can you provide your order number?"
+
+// Example 2 - Angry Customer:
+// Customer: "WHERE IS MY PACKAGE?? I ordered 2 weeks ago and NOTHING! This is ridiculous!"
+// Agent should say:
+// ✓ "I completely understand your frustration — 2 weeks is too long. Let me check the status of your order right now. Could you share your order number? It's in your confirmation email and starts with #."
+// ✗ "I apologize for any inconvenience. Please provide your order number so I can look into this."
+
+// Example 3 - Follow-up (customer already asked):
+// Customer: "I'm still waiting for an update on my refund. I asked about this yesterday."
+// Agent should say:
+// ✓ "I apologize for the delay getting this resolved. Let me check the status of your refund right now and get you an answer within the hour."
+// ✗ "Thank you for your patience. Can you provide your order number?"
+
+// Example 4 - Simple Gratitude:
+// Customer: "Thanks so much for the refund!"
+// Agent should say:
+// ✓ "You're very welcome! Don't hesitate to reach out if you need anything else."
+// ✗ "I'm glad I could assist you today. Is there anything else I can help you with regarding your order?"
+
+// Example 5 - Multiple Issues:
+// Customer: "My order #98765 is late AND I was charged twice! This is unacceptable."
+// Agent should say:
+// ✓ "I sincerely apologize — that's definitely not right. I've pulled up order #98765 and I can see both issues. Let me check the shipping status and the duplicate charge right now. I'll have answers for you within 10 minutes."
+// ✗ "I understand your concern. Let me look into this for you."
+
+// Example 6 - Product Question:
+// Customer: "Does the blue hoodie come in size XL?"
+// Agent should say:
+// ✓ "Great question! Let me check the current stock on the blue hoodie in XL. Which specific style are you looking at — the Classic or the Premium?"
+// ✗ "Thank you for your inquiry. Can you provide more details about which product you're interested in?"
+
+// Example 7 - Detailed First Message:
+// Customer: "Hi, my order #12345 arrived damaged. The box was crushed and the ceramic vase inside is broken into pieces. I need a refund or replacement ASAP."
+// Agent should say:
+// ✓ "I'm so sorry your ceramic vase from order #12345 arrived damaged. Could you send a quick photo of the damage? I'll process a replacement for you right away."
+// ✗ "Hello! Thank you for contacting us. Can you provide your order number?"
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// THINKING PROCESS:
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Before generating replies, quickly think through:
+// 1. Is there a brain rule for the specific product or topic being asked about?
+// 2. What is the customer's primary need right now?
+// 3. What information do we have vs. what's missing?
+// 4. What tone matches their emotional state?
+// 5. What has the agent already tried/said/asked?
+// 6. Is this a repeat question or follow-up?
+
+// Then generate your 3 suggestions.
+
+// Respond ONLY with valid JSON in this exact format:
+// {"suggestions": ["reply 1", "reply 2", "reply 3"]}`;
+// }
 
 
 
