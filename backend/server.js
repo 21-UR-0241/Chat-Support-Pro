@@ -7099,6 +7099,41 @@ app.delete('/api/messages/:id', authenticateToken, async (req, res) => {
 
 // ============ WIDGET PRESENCE TRACKING ============
 
+// app.post('/api/widget/presence', async (req, res) => {
+//   try {
+//     const { conversationId, customerEmail, storeId, status, lastActivityAt } = req.body;
+
+//     if (!conversationId || !customerEmail) {
+//       return res.status(400).json({ error: 'conversationId and customerEmail required' });
+//     }
+
+//     const validStatuses = ['online', 'away', 'offline'];
+//     const safeStatus = validStatuses.includes(status) ? status : 'offline';
+
+//     await db.pool.query(`
+//       INSERT INTO customer_presence 
+//         (conversation_id, customer_email, store_id, status, last_activity_at, last_heartbeat_at, ws_connected, updated_at)
+//       VALUES ($1, $2, $3, $4, $5, NOW(), FALSE, NOW())
+//       ON CONFLICT (conversation_id)
+//       DO UPDATE SET
+//         status = $4,
+//         last_activity_at = $5,
+//         last_heartbeat_at = NOW(),
+//         updated_at = NOW()
+//     `, [conversationId, customerEmail, storeId || null, safeStatus, lastActivityAt || new Date()]);
+
+//     if (safeStatus === 'online') {
+//       cancelPendingEmail(conversationId);
+//     }
+
+//     res.json({ ok: true });
+//   } catch (error) {
+//     console.error('[Presence REST] Error:', error);
+//     res.status(500).json({ error: 'Failed to update presence' });
+//   }
+// });
+
+
 app.post('/api/widget/presence', async (req, res) => {
   try {
     const { conversationId, customerEmail, storeId, status, lastActivityAt } = req.body;
@@ -7109,6 +7144,18 @@ app.post('/api/widget/presence', async (req, res) => {
 
     const validStatuses = ['online', 'away', 'offline'];
     const safeStatus = validStatuses.includes(status) ? status : 'offline';
+
+    const exists = await db.pool.query(
+      'SELECT id FROM conversations WHERE id = $1 LIMIT 1',
+      [conversationId]
+    );
+
+    if (exists.rowCount === 0) {
+      return res.status(410).json({
+        error: 'conversation_not_found',
+        message: 'Conversation no longer exists'
+      });
+    }
 
     await db.pool.query(`
       INSERT INTO customer_presence 
@@ -7132,7 +7179,6 @@ app.post('/api/widget/presence', async (req, res) => {
     res.status(500).json({ error: 'Failed to update presence' });
   }
 });
-
 
 function extractAdminStyle(chatHistory, agentStyleSamples = []) {
  

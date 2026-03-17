@@ -964,54 +964,112 @@
       }
     }
 
+    // function sendPresenceViaApi(statusOverride) {
+    //   if (!conversationId || !customerEmail || !STORE_ID) return;
+
+    //   var status = statusOverride || (isCustomerActive ? 'online' : 'away');
+
+    //   fetch(API_URL + '/api/widget/presence', {
+    //     method: 'POST',
+    //     headers: { 'Content-Type': 'application/json' },
+    //     body: JSON.stringify({
+    //       conversationId: parseInt(conversationId),
+    //       customerEmail: customerEmail,
+    //       storeIdentifier: STORE_ID,
+    //       status: status,
+    //       lastActivityAt: new Date(lastActivityTime).toISOString()
+    //     })
+    //   }).catch(function (err) {
+    //     console.warn('[Presence API] Failed:', err.message);
+    //   });
+    // }
+
     function sendPresenceViaApi(statusOverride) {
-      if (!conversationId || !customerEmail || !STORE_ID) return;
+  if (!conversationId || !customerEmail || !STORE_ID) return;
 
-      var status = statusOverride || (isCustomerActive ? 'online' : 'away');
+  var status = statusOverride || (isCustomerActive ? 'online' : 'away');
 
-      fetch(API_URL + '/api/widget/presence', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          conversationId: parseInt(conversationId),
-          customerEmail: customerEmail,
-          storeIdentifier: STORE_ID,
-          status: status,
-          lastActivityAt: new Date(lastActivityTime).toISOString()
-        })
-      }).catch(function (err) {
-        console.warn('[Presence API] Failed:', err.message);
-      });
+  fetch(API_URL + '/api/widget/presence', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      conversationId: parseInt(conversationId),
+      customerEmail: customerEmail,
+      storeIdentifier: STORE_ID,
+      status: status,
+      lastActivityAt: new Date(lastActivityTime).toISOString()
+    })
+  }).then(function(res) {
+    if (res.status === 410) {
+      console.log('[Presence] Conversation gone — stopping heartbeat');
+      stopActivityTracking();
+      conversationId = null;
+      localStorage.removeItem('chat_conv_' + STORE_ID);
     }
+  }).catch(function(err) {
+    console.warn('[Presence API] Failed:', err.message);
+  });
+}
+
+
+    // window.addEventListener('beforeunload', function () {
+    //   if (conversationId && customerEmail) {
+    //     var payload = JSON.stringify({
+    //       conversationId: parseInt(conversationId),
+    //       customerEmail: customerEmail,
+    //       storeIdentifier: STORE_ID,
+    //       status: 'offline',
+    //       lastActivityAt: new Date(lastActivityTime).toISOString()
+    //     });
+
+    //     if (navigator.sendBeacon) {
+    //       navigator.sendBeacon(
+    //         API_URL + '/api/widget/presence',
+    //         new Blob([payload], { type: 'application/json' })
+    //       );
+    //     }
+
+    //     if (ws && ws.readyState === WebSocket.OPEN) {
+    //       ws.send(JSON.stringify({
+    //         type: 'presence',
+    //         conversationId: parseInt(conversationId),
+    //         status: 'offline',
+    //         customerEmail: customerEmail
+    //       }));
+    //       ws.close();
+    //     }
+    //   }
+    // });
+
 
     window.addEventListener('beforeunload', function () {
-      if (conversationId && customerEmail) {
-        var payload = JSON.stringify({
-          conversationId: parseInt(conversationId),
-          customerEmail: customerEmail,
-          storeIdentifier: STORE_ID,
-          status: 'offline',
-          lastActivityAt: new Date(lastActivityTime).toISOString()
-        });
-
-        if (navigator.sendBeacon) {
-          navigator.sendBeacon(
-            API_URL + '/api/widget/presence',
-            new Blob([payload], { type: 'application/json' })
-          );
-        }
-
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'presence',
-            conversationId: parseInt(conversationId),
-            status: 'offline',
-            customerEmail: customerEmail
-          }));
-          ws.close();
-        }
-      }
+  if (conversationId && customerEmail) {  // conversationId will be null after 410
+    var payload = JSON.stringify({
+      conversationId: parseInt(conversationId),
+      customerEmail: customerEmail,
+      storeIdentifier: STORE_ID,
+      status: 'offline',
+      lastActivityAt: new Date(lastActivityTime).toISOString()
     });
+
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon(
+        API_URL + '/api/widget/presence',
+        new Blob([payload], { type: 'application/json' })
+      );
+    }
+
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'presence',
+        conversationId: parseInt(conversationId),
+        status: 'offline',
+        customerEmail: customerEmail
+      }));
+      ws.close();
+    }
+  }
+});
 
     // =========================================================
     // END PRESENCE TRACKING
