@@ -127,10 +127,82 @@
   color: #667781;
 }
 
+/* ========================================
+   CHAT ACTIONS + SEND EMAIL BUTTON
+   ======================================== */
+
 .chat-actions {
   display: flex;
   gap: 4px;
   align-items: center;
+}
+
+/* Send Email pill button */
+.send-email-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1.5px solid rgba(0, 168, 132, 0.35);
+  background: #fff;
+  color: #00a884;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  position: relative;
+  flex-shrink: 0;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.send-email-btn:hover {
+  background: #f0fdf9;
+  border-color: #00a884;
+  box-shadow: 0 1px 4px rgba(0, 168, 132, 0.15);
+}
+
+.send-email-btn:active {
+  background: #e6f7f3;
+  box-shadow: none;
+}
+
+.send-email-btn--no-email {
+  border-color: #e2e8f0;
+  color: #94a3b8;
+}
+
+.send-email-btn--no-email:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  box-shadow: none;
+}
+
+.send-email-btn__icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  display: block;
+}
+
+.send-email-btn__label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.send-email-btn__dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f87171;
+  border: 2px solid #f0f2f5;
 }
 
 .icon-btn {
@@ -743,7 +815,7 @@
 }
 
 /* ========================================
-   INPUT ACTION BUTTONS (emoji + attach) — standalone in flex row
+   INPUT ACTION BUTTONS (emoji + attach)
    ======================================== */
 .emoji-toggle-btn {
   width: 38px;
@@ -819,7 +891,6 @@
   to   { opacity: 1; transform: scale(1) translateY(0); }
 }
 
-/* Search */
 .emoji-picker-search {
   padding: 10px 12px 8px;
   border-bottom: 1px solid #f0f2f5;
@@ -848,7 +919,6 @@
   color: #aab4bc;
 }
 
-/* Category tabs */
 .emoji-category-tabs {
   display: flex;
   gap: 2px;
@@ -888,7 +958,6 @@
   box-shadow: 0 0 0 2px #00a884 inset;
 }
 
-/* Emoji grid */
 .emoji-grid {
   display: grid;
   grid-template-columns: repeat(8, 1fr);
@@ -1164,16 +1233,19 @@
     right: auto;
   }
 
-  /* On desktop keep picker anchored to right of wrapper */
   .emoji-picker {
     right: 0;
     left: auto;
     width: 320px;
   }
 
-  /* Legal banner slightly smaller on desktop since sidebar may be present */
   .legal-alert-banner {
     font-size: 13px;
+  }
+
+  /* Send Email button full label on desktop */
+  .send-email-btn__label {
+    display: inline;
   }
 }
 
@@ -1218,11 +1290,31 @@
   }
 
   .legal-alert-priority {
-    display: none; /* hide on small screens to save space */
+    display: none;
   }
 
   .legal-alert-snippet {
-    display: none; /* hide snippet on mobile, title + term is enough */
+    display: none;
+  }
+
+  /* Send Email button: icon only on mobile, no label */
+  .send-email-btn {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 50%;
+    justify-content: center;
+    gap: 0;
+    border-color: rgba(0, 168, 132, 0.3);
+  }
+
+  .send-email-btn__label {
+    display: none;
+  }
+
+  .send-email-btn__icon {
+    width: 15px;
+    height: 15px;
   }
 
   .templates-dropdown {
@@ -1511,7 +1603,6 @@
     border: none;
   }
 
-  /* Emoji picker on mobile — full width, anchored above input */
   .emoji-picker {
     width: calc(100vw - 32px);
     right: -12px;
@@ -1713,6 +1804,24 @@
     min-width: 36px;
   }
 
+  /* Send Email icon-only in landscape too */
+  .send-email-btn {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 50%;
+    gap: 0;
+  }
+
+  .send-email-btn__label {
+    display: none;
+  }
+
+  .send-email-btn__icon {
+    width: 15px;
+    height: 15px;
+  }
+
   .emoji-picker {
     max-height: 260px;
   }
@@ -1721,7 +1830,6 @@
     max-height: 140px;
   }
 
-  /* Compact legal banner in landscape */
   .legal-alert-banner {
     padding: 6px 12px;
   }

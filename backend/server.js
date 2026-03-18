@@ -5397,7 +5397,6 @@ const session = require('express-session');
 const shopifyAppRoutes = require('./routes/shopify-app-routes');
 const fileRoutes = require('./routes/fileroutes');
 const { handleOfflineEmailNotification, cancelPendingEmail, startEmailSweep, stopEmailSweep } = require('../frontend/src/admin/services/emailService');
-
 //added
 const aiTrainingRoutes = require('./routes/ai-training-routes');
 const { getBrainContext, refreshBrainCache, getBrainSettings } = require('./brain-context');
@@ -6270,6 +6269,121 @@ app.get('/auth', async (req, res) => {
   } catch (error) {
     console.error('Auth error:', error);
     res.status(500).json({ error: 'Authentication failed' });
+  }
+});
+
+// ============ EMAIL SEND (INLINE) ============
+app.post('/api/email/send', authenticateToken, async (req, res) => {
+  const { to, subject, body, conversationId, customerName } = req.body;
+  if (!to || !subject || !body) {
+    return res.status(400).json({ error: 'to, subject, and body are required' });
+  }
+  try {
+    let brandName = 'Support', brandColor = '#1a5632', fromAddress = 'support@pepscustomercare.com';
+    let storeDomain = '', resolvedName = customerName || '';
+
+    if (conversationId) {
+      const r = await db.pool.query(
+        `SELECT c.customer_name, s.brand_name, s.shop_domain, s.primary_color,
+                s.email_from_address, s.email_brand_color
+         FROM conversations c JOIN stores s ON c.shop_id = s.id WHERE c.id = $1`,
+        [conversationId]
+      );
+      if (r.rows.length) {
+        const row = r.rows[0];
+        brandName    = row.brand_name         || brandName;
+        brandColor   = row.email_brand_color  || row.primary_color || brandColor;
+        fromAddress  = row.email_from_address || fromAddress;
+        storeDomain  = (row.shop_domain || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+        resolvedName = resolvedName || row.customer_name || '';
+      }
+    }
+
+    const apiKey = process.env.RESEND_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'Email service not configured (missing RESEND_API_KEY)' });
+
+    const agentName = req.user?.name || req.user?.email || 'Support Team';
+    const year      = new Date().getFullYear();
+    const greeting  = resolvedName ? `Hi ${resolvedName},` : 'Hi there,';
+    const time      = new Date().toLocaleString('en-US', {
+      month: 'short', day: 'numeric', year: 'numeric',
+      hour: 'numeric', minute: '2-digit',
+    });
+    const safeBody  = body.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+    const emailHtml = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Message from ${brandName}</title></head>
+<body style="margin:0;padding:0;background:#f6f6f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f6f6f7;">
+  <tr><td align="center" style="padding:40px 16px 24px;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;">
+      <tr><td style="padding-bottom:24px;">
+        <table cellpadding="0" cellspacing="0"><tr>
+          <td style="vertical-align:middle;padding-right:10px;">
+            <img src="https://chatsupportpullzone.b-cdn.net/uploads/shopify_logo-removebg-preview.png" width="100" height="auto" alt="Shopify" style="display:block;border:0;"/>
+          </td>
+          <td style="vertical-align:middle;"><span style="font-size:16px;font-weight:600;color:#202223;">${brandName}</span></td>
+        </tr></table>
+      </td></tr>
+      <tr><td style="background:#fff;border-radius:8px;border:1px solid #e1e3e5;overflow:hidden;">
+        <table width="100%" cellpadding="0" cellspacing="0">
+          <tr><td style="height:4px;background:${brandColor};border-radius:8px 8px 0 0;"></td></tr>
+        </table>
+        <table width="100%" cellpadding="0" cellspacing="0">
+          <tr><td style="padding:32px 36px 36px;">
+            <h1 style="margin:0 0 4px;font-size:22px;font-weight:700;color:#202223;">You have a new message</h1>
+            <p style="margin:0 0 24px;font-size:14px;color:#6d7175;line-height:1.5;">${greeting} You have a new message from <strong>${agentName}</strong> at <strong>${brandName}</strong>.</p>
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;"><tr><td style="height:1px;background:#e1e3e5;"></td></tr></table>
+            <table width="100%" cellpadding="0" cellspacing="0">
+              <tr><td>
+                <p style="margin:0 0 6px;font-size:13px;font-weight:600;color:#212326;">${agentName} <span style="font-size:12px;color:#8c9196;font-weight:400;margin-left:8px;">${time}</span></p>
+                <div style="background:#f6f6f7;border-radius:6px;padding:14px 16px;font-size:14px;color:#202223;line-height:1.6;white-space:pre-wrap;border:1px solid #e1e3e5;">${safeBody}</div>
+              </td></tr>
+            </table>
+          </td></tr>
+        </table>
+      </td></tr>
+      <tr><td style="padding:24px 0 0;text-align:center;">
+        <p style="margin:0 0 4px;font-size:12px;color:#8c9196;">This message was sent to you by the support team at ${storeDomain || brandName}.</p>
+        <p style="margin:0;font-size:11px;color:#babec3;">&copy; ${year} ${brandName}</p>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body></html>`;
+
+    // Same fetch pattern as emailService.js — already proven to work
+    const resendRes  = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from:    `${brandName} <${fromAddress}>`,
+        to:      [to],
+        subject,
+        html:    emailHtml,
+        text:    `${greeting}\n\n${agentName}:\n${body}`,
+      }),
+    });
+
+    const resendBody = await resendRes.json();
+    console.log('[Email/send] Resend status:', resendRes.status, JSON.stringify(resendBody));
+
+    if (!resendRes.ok) {
+      console.error('[Email/send] Resend rejected:', resendBody);
+      return res.status(502).json({ error: resendBody?.message || `Resend error ${resendRes.status}` });
+    }
+
+    console.log(`[Email/send] ✅ Sent to ${to} (Resend: ${resendBody.id}) conv ${conversationId}`);
+    res.json({ ok: true, id: resendBody.id });
+
+  } catch (err) {
+    console.error('[Email/send] Error:', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
