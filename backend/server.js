@@ -5396,6 +5396,7 @@ const { hashPassword, verifyPassword, generateToken, authenticateToken } = requi
 const session = require('express-session');
 const shopifyAppRoutes = require('./routes/shopify-app-routes');
 const fileRoutes = require('./routes/fileroutes');
+// const { handleOfflineEmailNotification, cancelPendingEmail, startEmailSweep, stopEmailSweep } = require('./services/emailService');
 const { handleOfflineEmailNotification, cancelPendingEmail, startEmailSweep, stopEmailSweep } = require('../frontend/src/admin/services/emailService');
 //added
 const aiTrainingRoutes = require('./routes/ai-training-routes');
@@ -6521,6 +6522,82 @@ app.get('/api/stores', authenticateToken, async (req, res) => {
   }
 });
 
+
+app.get('/api/stores/all', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    const result = await db.pool.query(
+      'SELECT * FROM stores ORDER BY brand_name ASC'
+    );
+    res.json(result.rows.map(snakeToCamel));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+ 
+// CREATE store
+app.post('/api/stores', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    const { storeIdentifier, shopDomain, brandName, isActive } = req.body;
+    if (!storeIdentifier || !shopDomain || !brandName) {
+      return res.status(400).json({ error: 'storeIdentifier, shopDomain, and brandName are required' });
+    }
+    const result = await db.pool.query(
+      `INSERT INTO stores (store_identifier, shop_domain, brand_name, is_active, access_token, installed_at, updated_at)
+       VALUES ($1, $2, $3, $4, '', NOW(), NOW()) RETURNING *`,
+      [storeIdentifier, shopDomain, brandName, isActive !== false]
+    );
+    res.status(201).json(snakeToCamel(result.rows[0]));
+  } catch (error) {
+    if (error.code === '23505') {
+      return res.status(409).json({ error: 'A store with that identifier or domain already exists' });
+    }
+    res.status(500).json({ error: error.message });
+  }
+});
+ 
+// UPDATE store
+app.put('/api/stores/:id', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    const { shopDomain, brandName, isActive } = req.body;
+    const result = await db.pool.query(
+      `UPDATE stores SET shop_domain = $1, brand_name = $2, is_active = $3, updated_at = NOW()
+       WHERE id = $4 RETURNING *`,
+      [shopDomain, brandName, isActive !== false, req.params.id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Store not found' });
+    res.json(snakeToCamel(result.rows[0]));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+ 
+
+// DELETE store (hard delete)
+app.delete('/api/stores/:id', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    const result = await db.pool.query(
+      `DELETE FROM stores WHERE id = $1 RETURNING id`,
+      [req.params.id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Store not found' });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/api/customer-context/:storeId/:email', authenticateToken, async (req, res) => {
   try {
     const store = await db.getStoreByIdentifier(req.params.storeId);
@@ -6808,6 +6885,182 @@ app.get('/api/conversations', authenticateToken, async (req, res) => {
   }
 });
 
+
+app.get('/api/conversations/linked/:email', authenticateToken, async (req, res) => {
+  try {
+    const { email } = req.params;
+    const { excludeConversationId } = req.query;
+ 
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({ error: 'Valid email required' });
+    }
+ 
+    // JOIN stores to get brand_name for each conversation
+    // Works even if the store is inactive — we use LEFT JOIN so
+    // conversations from deleted/inactive stores still appear
+    const result = await pool.query(`
+      SELECT 
+        c.id,
+        c.status,
+        c.created_at,
+        c.updated_at,
+        c.shop_domain,
+        c.shop_id,
+        COALESCE(s.brand_name, c.shop_domain, 'Unknown Store') AS brand_name,
+        m.content        AS last_message_content,
+        m.sender_type    AS last_message_sender_type,
+        m.timestamp      AS last_message_at
+      FROM conversations c
+      LEFT JOIN stores s
+        ON c.shop_id = s.id
+      LEFT JOIN LATERAL (
+        SELECT content, sender_type, timestamp
+        FROM messages
+        WHERE conversation_id = c.id
+        ORDER BY timestamp DESC
+        LIMIT 1
+      ) m ON true
+      WHERE c.customer_email = $1
+        ${excludeConversationId ? 'AND c.id != $2' : ''}
+      ORDER BY c.updated_at DESC
+    `, excludeConversationId
+        ? [email, parseInt(excludeConversationId)]
+        : [email]
+    );
+ 
+    if (!result.rows.length) {
+      return res.json({ linkedConversations: [], storeCount: 0 });
+    }
+ 
+    // Group by shop_id — use brand_name as the display label
+    const byStore = {};
+    for (const row of result.rows) {
+      // Key by shop_id (stable) but display brand_name
+      const storeKey = row.shop_id || row.shop_domain || 'unknown';
+ 
+      if (!byStore[storeKey]) {
+        byStore[storeKey] = {
+          storeIdentifier: row.shop_domain,
+          storeName: row.brand_name,  // ← brand_name from stores table
+          shopId: row.shop_id,
+          conversations: [],
+        };
+      }
+ 
+      byStore[storeKey].conversations.push({
+        id: row.id,
+        status: row.status,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        messageCount: 0, // not needed for preview
+        lastMessage: row.last_message_content
+          ? {
+              content: row.last_message_content,
+              senderType: row.last_message_sender_type,
+              createdAt: row.last_message_at,
+            }
+          : null,
+      });
+    }
+ 
+    const storeGroups = Object.values(byStore);
+ 
+    return res.json({
+      customerEmail: email,
+      linkedConversations: storeGroups,
+      storeCount: storeGroups.length,
+      totalConversations: result.rows.length,
+    });
+  } catch (error) {
+    console.error('❌ [linked-conversations] Error:', error);
+    return res.status(500).json({ error: 'Failed to fetch linked conversations' });
+  }
+});
+
+
+// GET /api/widget/history?email=john@example.com&excludeConversationId=123
+app.get('/api/widget/history', async (req, res) => {
+  try {
+    const { email, excludeConversationId } = req.query;
+ 
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({ error: 'Valid email required' });
+    }
+ 
+    const result = await pool.query(`
+      SELECT
+        c.id,
+        c.status,
+        c.updated_at,
+        c.shop_id,
+        c.shop_domain,
+        COALESCE(s.brand_name, c.shop_domain, 'Unknown Store') AS brand_name,
+        m.content      AS last_message_content,
+        m.sender_type  AS last_message_sender_type,
+        m.timestamp    AS last_message_at
+      FROM conversations c
+      LEFT JOIN stores s
+        ON c.shop_id = s.id
+      LEFT JOIN LATERAL (
+        SELECT content, sender_type, timestamp
+        FROM messages
+        WHERE conversation_id = c.id
+        ORDER BY timestamp DESC
+        LIMIT 1
+      ) m ON true
+      WHERE c.customer_email = $1
+        ${excludeConversationId ? 'AND c.id != $2' : ''}
+      ORDER BY c.updated_at DESC
+    `, excludeConversationId ? [email, parseInt(excludeConversationId)] : [email]);
+ 
+    if (!result.rows.length) {
+      return res.json({ linkedConversations: [], storeCount: 0, totalConversations: 0 });
+    }
+ 
+    // Group by shop_id — use brand_name as display label
+    const byStore = {};
+    for (const row of result.rows) {
+      const storeKey = row.shop_id || row.shop_domain || 'unknown';
+ 
+      if (!byStore[storeKey]) {
+        byStore[storeKey] = {
+          storeIdentifier: row.shop_domain,
+          storeName: row.brand_name,
+          shopId: row.shop_id,
+          conversations: [],
+        };
+      }
+ 
+      byStore[storeKey].conversations.push({
+        id: row.id,
+        status: row.status,
+        updatedAt: row.updated_at,
+        // Only expose last message preview — no full content
+        lastMessage: row.last_message_content
+          ? {
+              // Truncate to 80 chars for safety — widget only needs a preview
+              content: row.last_message_content.substring(0, 80),
+              senderType: row.last_message_sender_type,
+              createdAt: row.last_message_at,
+            }
+          : null,
+      });
+    }
+ 
+    const storeGroups = Object.values(byStore);
+ 
+    return res.json({
+      linkedConversations: storeGroups,
+      storeCount: storeGroups.length,
+      totalConversations: result.rows.length,
+    });
+ 
+  } catch (error) {
+    console.error('❌ [widget/history] Error:', error);
+    return res.status(500).json({ error: 'Failed to fetch history' });
+  }
+});
+
 app.get('/api/conversations/:id', authenticateToken, async (req, res) => {
   try {
     const conversationId = parseInt(req.params.id);
@@ -6995,6 +7248,95 @@ app.get('/api/conversations/:id/messages', authenticateToken, async (req, res) =
   }
 });
 
+// app.post('/api/messages', authenticateToken, async (req, res) => {
+//   try {
+//     const { conversationId, senderType, senderName, content, storeId, fileData } = req.body;
+    
+//     if (!conversationId || !senderType) {
+//       return res.status(400).json({ error: 'Missing required fields' });
+//     }
+    
+//     if (!content && !fileData) {
+//       return res.status(400).json({ error: 'Message must have text or a file attachment' });
+//     }
+    
+//     const timestamp = new Date();
+//     const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+//     const tempMessage = {
+//       id: tempId,
+//       conversationId: conversationId,
+//       storeId: storeId,
+//       senderType: senderType,
+//       senderName: senderName,
+//       content: content || '',
+//       fileData: fileData,
+//       createdAt: timestamp,
+//       pending: true
+//     };
+    
+//     sendToConversation(conversationId, {
+//       type: 'new_message',
+//       message: snakeToCamel(tempMessage)
+//     });
+    
+//     broadcastToAgents({
+//       type: 'new_message',
+//       message: snakeToCamel(tempMessage),
+//       conversationId,
+//       storeId
+//     });
+    
+//     res.json(snakeToCamel(tempMessage));
+    
+//     setImmediate(async () => {
+//       try {
+//         const savedMessage = await db.saveMessage({
+//           conversation_id: conversationId,
+//           store_id: storeId,
+//           sender_type: senderType,
+//           sender_name: senderName,
+//           content: content || '',
+//           file_data: fileData ? JSON.stringify(fileData) : null,
+//           sent_at: timestamp
+//         });
+        
+//         sendToConversation(conversationId, {
+//           type: 'message_confirmed',
+//           tempId: tempId,
+//           message: snakeToCamel(savedMessage)
+//         });
+        
+//         broadcastToAgents({
+//           type: 'message_confirmed',
+//           tempId: tempId,
+//           message: snakeToCamel(savedMessage),
+//           conversationId,
+//           storeId
+//         });
+        
+//         if (senderType === 'agent') {
+//           handleOfflineEmailNotification(db.pool, savedMessage).catch(err =>
+//             console.error('[Offline Email] Failed:', err)
+//           );
+//         }
+        
+//       } catch (error) {
+//         console.error('Failed to save agent message:', error);
+        
+//         sendToConversation(conversationId, {
+//           type: 'message_failed',
+//           tempId: tempId
+//         });
+//       }
+//     });
+    
+//   } catch (error) {
+//     console.error('Send message error:', error);
+//     res.status(500).json({ error: error.message });
+//   }
+// });
+
 app.post('/api/messages', authenticateToken, async (req, res) => {
   try {
     const { conversationId, senderType, senderName, content, storeId, fileData } = req.body;
@@ -7047,6 +7389,9 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
           file_data: fileData ? JSON.stringify(fileData) : null,
           sent_at: timestamp
         });
+
+        // ✅ Re-fetch conversation so lastMessageSenderType reflects the agent reply
+        const updatedConversation = await db.getConversation(conversationId);
         
         sendToConversation(conversationId, {
           type: 'message_confirmed',
@@ -7059,7 +7404,10 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
           tempId: tempId,
           message: snakeToCamel(savedMessage),
           conversationId,
-          storeId
+          storeId,
+          // ✅ Pushes updated conversation to all agents so the
+          //    urgent/legal highlight clears immediately in ConversationList
+          conversation: snakeToCamel(updatedConversation)
         });
         
         if (senderType === 'agent') {
@@ -7083,6 +7431,7 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 
 app.post('/api/widget/messages', async (req, res) => {
   try {

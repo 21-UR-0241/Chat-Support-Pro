@@ -1,5 +1,4 @@
 
-
 // import React, { useState, useEffect, useRef, useCallback } from 'react';
 // import api from './services/api';
 // import { useConversations } from './hooks/useConversations';
@@ -12,6 +11,7 @@
 // import MobileMenu from './components/MobileMenu';
 // import ConversationNotes from './components/ConversationNotes';
 // import AnalyticsDashboard from './components/AnalyticsDashboard';
+// import AITraining from './components/AITraining';
 
 // function App() {
 //   const [employee, setEmployee] = useState(null);
@@ -170,89 +170,122 @@
 //     setShowNotesModal(false);
 //   }, []);
 
+
 //   useEffect(() => {
-//     if (!ws) return;
+//   if (!ws) return;
 
-//     const unsubscribe1 = ws.on('new_message', (data) => {
-//       const currentActiveConv = activeConversationRef.current;
-//       const currentConversations = conversationsRef.current;
+//   const unsubscribe1 = ws.on('new_message', (data) => {
+//     const currentActiveConv = activeConversationRef.current;
+//     const currentConversations = conversationsRef.current;
 
-//       console.log('📨 [App] New message received:', {
-//         conversationId: data.conversationId,
-//         senderType: data.message?.senderType || data.message?.sender_type,
-//         activeConversation: currentActiveConv?.id
-//       });
-
-//       const message = data.message || {};
-//       const senderType = message.senderType || message.sender_type;
-//       const conversationId = data.conversationId || message.conversationId;
-
-//       const isActiveConv = currentActiveConv?.id === conversationId;
-//       const conversationUpdate = {
-//         lastMessage: message.content || '',
-//         lastMessageAt: message.createdAt || message.created_at || new Date().toISOString(),
-//         lastSenderType: senderType,
-//         lastMessageSenderType: senderType,
-//       };
-
-//       if (senderType === 'customer' && !isActiveConv) {
-//         const existingConv = currentConversations.find(c => c.id === conversationId);
-//         const currentUnread = existingConv?.unreadCount || existingConv?.unread_count || 0;
-//         conversationUpdate.unreadCount = currentUnread + 1;
-//         conversationUpdate.unread_count = currentUnread + 1;
-//       }
-
-//       updateConversation(conversationId, conversationUpdate);
-
-//       if (senderType === 'agent') {
-//         console.log('🔕 [App] Agent message - clearing notifications for conversation:', conversationId);
-//         clearNotificationsForConversation(conversationId);
-//         return;
-//       }
-
-//       if (senderType === 'customer' && !isActiveConv) {
-//         const customerName =
-//           currentConversations.find(c => c.id === conversationId)?.customerName ||
-//           data.conversation?.customerName ||
-//           data.conversation?.customer_name ||
-//           'Guest';
-//         const messagePreview = message.content?.substring(0, 50) || 'New message';
-
-//         console.log('🔔 [App] Showing notification for customer message');
-//         showNotification(conversationId, customerName, messagePreview);
-//       }
-//       else if (senderType === 'customer' && isActiveConv) {
-//         console.log('⏭️ [App] Customer message in active conversation - auto marking read');
-//         handleMarkAsRead(conversationId);
-//       }
+//     console.log('📨 [App] New message received:', {
+//       conversationId: data.conversationId,
+//       senderType: data.message?.senderType || data.message?.sender_type,
+//       activeConversation: currentActiveConv?.id
 //     });
 
-//     const unsubscribe2 = ws.on('connected', () => {
-//       console.log('✅ [App] Connected to WebSocket');
-//       setError(null);
-//     });
+//     const message = data.message || {};
+//     const senderType = message.senderType || message.sender_type;
+//     const conversationId = data.conversationId || message.conversationId;
 
-//     const unsubscribe3 = ws.on('disconnected', () => {
-//       console.log('❌ [App] Disconnected from WebSocket');
-//     });
-
-//     const unsubscribe4 = ws.on('error', (error) => {
-//       console.error('[App] WebSocket error:', error);
-//       setError('WebSocket connection error. Retrying...');
-//     });
-
-//     const unsubscribe5 = ws.on('max_reconnect_reached', () => {
-//       setError('Unable to connect to server. Please refresh the page.');
-//     });
-
-//     return () => {
-//       unsubscribe1();
-//       unsubscribe2();
-//       unsubscribe3();
-//       unsubscribe4();
-//       unsubscribe5();
+//     const isActiveConv = currentActiveConv?.id === conversationId;
+//     const conversationUpdate = {
+//       lastMessage: message.content || '',
+//       lastMessageAt: message.createdAt || message.created_at || new Date().toISOString(),
+//       lastSenderType: senderType,
+//       lastMessageSenderType: senderType,
 //     };
-//   }, [ws, handleMarkAsRead, updateConversation]);
+
+//     if (senderType === 'customer' && !isActiveConv) {
+//       const existingConv = currentConversations.find(c => c.id === conversationId);
+//       const currentUnread = existingConv?.unreadCount || existingConv?.unread_count || 0;
+//       conversationUpdate.unreadCount = currentUnread + 1;
+//       conversationUpdate.unread_count = currentUnread + 1;
+//     }
+
+//     updateConversation(conversationId, conversationUpdate);
+
+//     if (senderType === 'agent') {
+//       console.log('🔕 [App] Agent message - clearing notifications for conversation:', conversationId);
+//       clearNotificationsForConversation(conversationId);
+//       return;
+//     }
+
+//     if (senderType === 'customer' && !isActiveConv) {
+//       const customerName =
+//         currentConversations.find(c => c.id === conversationId)?.customerName ||
+//         data.conversation?.customerName ||
+//         data.conversation?.customer_name ||
+//         'Guest';
+//       const messagePreview = message.content?.substring(0, 50) || 'New message';
+
+//       console.log('🔔 [App] Showing notification for customer message');
+//       showNotification(conversationId, customerName, messagePreview);
+//     } else if (senderType === 'customer' && isActiveConv) {
+//       console.log('⏭️ [App] Customer message in active conversation - auto marking read');
+//       handleMarkAsRead(conversationId);
+//     }
+//   });
+
+//   const unsubscribe2 = ws.on('connected', () => {
+//     console.log('✅ [App] Connected to WebSocket');
+//     setError(null);
+//   });
+
+//   const unsubscribe3 = ws.on('disconnected', () => {
+//     console.log('❌ [App] Disconnected from WebSocket');
+//   });
+
+//   const unsubscribe4 = ws.on('error', (error) => {
+//     console.error('[App] WebSocket error:', error);
+//     setError('WebSocket connection error. Retrying...');
+//   });
+
+//   const unsubscribe5 = ws.on('max_reconnect_reached', () => {
+//     setError('Unable to connect to server. Please refresh the page.');
+//   });
+
+//   // ── Legal threat detection ─────────────────────────────────────────
+//   const unsubscribe6 = ws.on('legal_threat_detected', (data) => {
+//     const alert = data.alert;
+//     if (!alert?.conversationId) return;
+
+//     const emoji = alert.severity === 'critical' ? '🚨'
+//                 : alert.severity === 'high'     ? '⚠️'
+//                 : '🔔';
+
+//     console.warn(`${emoji} [App] Legal threat — conv #${alert.conversationId} | ${alert.severity?.toUpperCase()} | "${alert.matchedTerm}"`);
+
+//     // Update sidebar list immediately — marks urgent + sets legal flag
+//     updateConversation(alert.conversationId, {
+//       priority: 'urgent',
+//       legalFlag: true,
+//       legalFlagSeverity: alert.severity,
+//       legalFlagTerm: alert.matchedTerm,
+//     });
+
+//     // Browser notification only if agent is looking at a different conversation
+//     const currentActiveConv = activeConversationRef.current;
+//     if (String(currentActiveConv?.id) !== String(alert.conversationId)) {
+//       showNotification(
+//         alert.conversationId,
+//         `${emoji} Legal Threat — ${alert.severity?.toUpperCase()}`,
+//         `"${alert.matchedTerm}" from ${alert.senderName || 'Customer'}`
+//       );
+//     }
+//   });
+//   // ──────────────────────────────────────────────────────────────────
+
+//   return () => {
+//     unsubscribe1();
+//     unsubscribe2();
+//     unsubscribe3();
+//     unsubscribe4();
+//     unsubscribe5();
+//     unsubscribe6();
+//   };
+// }, [ws, handleMarkAsRead, updateConversation]);
+
 
 //   useEffect(() => {
 //     if (activeConversation && ws) {
@@ -554,16 +587,16 @@
 //   </button>
 // )} */}
             
-//             {employee.role === 'admin' && activePage === 'dashboard' && (
-//               <button
-//                 className={`nav-btn ${showNotesModal ? 'nav-active' : ''}`}
-//                 onClick={handleShowNotes}
-//                 type="button"
-//                 title="My Notes"
-//               >
-//                 📝 Notes
-//               </button>
-//             )}
+// {activePage === 'dashboard' && (
+//   <button
+//     className={`nav-btn ${showNotesModal ? 'nav-active' : ''}`}
+//     onClick={handleShowNotes}
+//     type="button"
+//     title="My Notes"
+//   >
+//     📝 Notes
+//   </button>
+// )}
             
 //             {employee.role === 'admin' && (
 //               <button
@@ -574,6 +607,16 @@
 //                 👥 Employees
 //               </button>
 //             )}
+//                         {employee.role === 'admin' && (
+//               <button
+//                 className={`nav-btn ${activePage === 'training' ? 'nav-active' : ''}`}
+//                 onClick={() => setActivePage('training')}
+//                 type="button"
+//               >
+//                 🧠 AI Training
+//               </button>
+//             )}
+
 //           </div>
 
 //           {activePage === 'dashboard' && (
@@ -735,14 +778,19 @@
 //           />
 //         </div>
 //       )}
+//             {activePage === 'training' && (
+//         <div className="app-content full-width" style={{ height: 'calc(100vh - 60px)', overflow: 'hidden' }}>
+//           <ErrorBoundary>
+//             <AITraining onBrainUpdate={() => {}} />
+//           </ErrorBoundary>
+//         </div>
+//       )}
+      
 //     </div>
 //   );
 // }
 
 // export default App;
-
-
-
 
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
@@ -758,6 +806,7 @@ import MobileMenu from './components/MobileMenu';
 import ConversationNotes from './components/ConversationNotes';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
 import AITraining from './components/AITraining';
+import StoreManagement from './components/StoreManagement';
 
 function App() {
   const [employee, setEmployee] = useState(null);
@@ -1002,7 +1051,6 @@ function DashboardContent({ employee, onLogout }) {
 
     console.warn(`${emoji} [App] Legal threat — conv #${alert.conversationId} | ${alert.severity?.toUpperCase()} | "${alert.matchedTerm}"`);
 
-    // Update sidebar list immediately — marks urgent + sets legal flag
     updateConversation(alert.conversationId, {
       priority: 'urgent',
       legalFlag: true,
@@ -1010,7 +1058,6 @@ function DashboardContent({ employee, onLogout }) {
       legalFlagTerm: alert.matchedTerm,
     });
 
-    // Browser notification only if agent is looking at a different conversation
     const currentActiveConv = activeConversationRef.current;
     if (String(currentActiveConv?.id) !== String(alert.conversationId)) {
       showNotification(
@@ -1032,90 +1079,6 @@ function DashboardContent({ employee, onLogout }) {
   };
 }, [ws, handleMarkAsRead, updateConversation]);
 
-
-  // useEffect(() => {
-  //   if (!ws) return;
-
-  //   const unsubscribe1 = ws.on('new_message', (data) => {
-  //     const currentActiveConv = activeConversationRef.current;
-  //     const currentConversations = conversationsRef.current;
-
-  //     console.log('📨 [App] New message received:', {
-  //       conversationId: data.conversationId,
-  //       senderType: data.message?.senderType || data.message?.sender_type,
-  //       activeConversation: currentActiveConv?.id
-  //     });
-
-  //     const message = data.message || {};
-  //     const senderType = message.senderType || message.sender_type;
-  //     const conversationId = data.conversationId || message.conversationId;
-
-  //     const isActiveConv = currentActiveConv?.id === conversationId;
-  //     const conversationUpdate = {
-  //       lastMessage: message.content || '',
-  //       lastMessageAt: message.createdAt || message.created_at || new Date().toISOString(),
-  //       lastSenderType: senderType,
-  //       lastMessageSenderType: senderType,
-  //     };
-
-  //     if (senderType === 'customer' && !isActiveConv) {
-  //       const existingConv = currentConversations.find(c => c.id === conversationId);
-  //       const currentUnread = existingConv?.unreadCount || existingConv?.unread_count || 0;
-  //       conversationUpdate.unreadCount = currentUnread + 1;
-  //       conversationUpdate.unread_count = currentUnread + 1;
-  //     }
-
-  //     updateConversation(conversationId, conversationUpdate);
-
-  //     if (senderType === 'agent') {
-  //       console.log('🔕 [App] Agent message - clearing notifications for conversation:', conversationId);
-  //       clearNotificationsForConversation(conversationId);
-  //       return;
-  //     }
-
-  //     if (senderType === 'customer' && !isActiveConv) {
-  //       const customerName =
-  //         currentConversations.find(c => c.id === conversationId)?.customerName ||
-  //         data.conversation?.customerName ||
-  //         data.conversation?.customer_name ||
-  //         'Guest';
-  //       const messagePreview = message.content?.substring(0, 50) || 'New message';
-
-  //       console.log('🔔 [App] Showing notification for customer message');
-  //       showNotification(conversationId, customerName, messagePreview);
-  //     }
-  //     else if (senderType === 'customer' && isActiveConv) {
-  //       console.log('⏭️ [App] Customer message in active conversation - auto marking read');
-  //       handleMarkAsRead(conversationId);
-  //     }
-  //   });
-
-  //   const unsubscribe2 = ws.on('connected', () => {
-  //     console.log('✅ [App] Connected to WebSocket');
-  //     setError(null);
-  //   });
-
-  //   const unsubscribe3 = ws.on('disconnected', () => {
-  //     console.log('❌ [App] Disconnected from WebSocket');
-  //   });
-
-  //   const unsubscribe4 = ws.on('error', (error) => {
-  //     console.error('[App] WebSocket error:', error);
-  //     setError('WebSocket connection error. Retrying...');
-  //   });
-
-  //   const unsubscribe5 = ws.on('max_reconnect_reached', () => {
-  //     setError('Unable to connect to server. Please refresh the page.');
-  //   });
-
-  //   return () => {
-  //     unsubscribe1();
-  //     unsubscribe2();
-  //     unsubscribe3();
-  //     unsubscribe4();
-  //     unsubscribe5();
-  //   };
-  // }, [ws, handleMarkAsRead, updateConversation]);
 
   useEffect(() => {
     if (activeConversation && ws) {
@@ -1369,8 +1332,16 @@ function DashboardContent({ employee, onLogout }) {
     setActivePage('dashboard');
   };
 
+  // Re-sync the stores list in the sidebar after StoreManagement makes changes
+  const handleStoresUpdated = () => {
+    loadStores();
+  };
+
   useEffect(() => {
-    if ((activePage === 'employees' || activePage === 'analytics') && employee.role !== 'admin') {
+    if (
+      (activePage === 'employees' || activePage === 'analytics' || activePage === 'stores') &&
+      employee.role !== 'admin'
+    ) {
       console.warn('⚠️ Non-admin user attempted to access restricted page');
       setActivePage('dashboard');
     }
@@ -1406,7 +1377,7 @@ function DashboardContent({ employee, onLogout }) {
             >
               💬 Dashboard
             </button>
-            
+
 {/* {employee.role === 'admin' && (
   <button
     className={`nav-btn ${activePage === 'analytics' ? 'nav-active' : ''}`}
@@ -1416,7 +1387,7 @@ function DashboardContent({ employee, onLogout }) {
     📊 Analytics
   </button>
 )} */}
-            
+
 {activePage === 'dashboard' && (
   <button
     className={`nav-btn ${showNotesModal ? 'nav-active' : ''}`}
@@ -1427,7 +1398,17 @@ function DashboardContent({ employee, onLogout }) {
     📝 Notes
   </button>
 )}
-            
+
+            {employee.role === 'admin' && (
+              <button
+                className={`nav-btn ${activePage === 'stores' ? 'nav-active' : ''}`}
+                onClick={() => setActivePage('stores')}
+                type="button"
+              >
+                🏪 Stores
+              </button>
+            )}
+
             {employee.role === 'admin' && (
               <button
                 className={`nav-btn ${activePage === 'employees' ? 'nav-active' : ''}`}
@@ -1437,7 +1418,8 @@ function DashboardContent({ employee, onLogout }) {
                 👥 Employees
               </button>
             )}
-                        {employee.role === 'admin' && (
+
+            {employee.role === 'admin' && (
               <button
                 className={`nav-btn ${activePage === 'training' ? 'nav-active' : ''}`}
                 onClick={() => setActivePage('training')}
@@ -1446,7 +1428,6 @@ function DashboardContent({ employee, onLogout }) {
                 🧠 AI Training
               </button>
             )}
-
           </div>
 
           {activePage === 'dashboard' && (
@@ -1600,6 +1581,17 @@ function DashboardContent({ employee, onLogout }) {
         </div>
       )}
 
+      {activePage === 'stores' && (
+        <div className="app-content full-width" style={{ height: 'calc(100vh - 60px)', overflow: 'hidden', display: 'block' }}>
+          <ErrorBoundary>
+            <StoreManagement
+              onBack={handleBackToDashboard}
+              onStoresUpdated={handleStoresUpdated}
+            />
+          </ErrorBoundary>
+        </div>
+      )}
+
       {activePage === 'employees' && (
         <div className="app-content full-width">
           <EmployeeManagement
@@ -1608,14 +1600,15 @@ function DashboardContent({ employee, onLogout }) {
           />
         </div>
       )}
-            {activePage === 'training' && (
+
+      {activePage === 'training' && (
         <div className="app-content full-width" style={{ height: 'calc(100vh - 60px)', overflow: 'hidden' }}>
           <ErrorBoundary>
             <AITraining onBrainUpdate={() => {}} />
           </ErrorBoundary>
         </div>
       )}
-      
+
     </div>
   );
 }

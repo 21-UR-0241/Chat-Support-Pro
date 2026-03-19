@@ -2429,3 +2429,31 @@ body {
     line-height: 1.5;
   }
 }
+
+
+
+/* Full-width pages: take full height, let child handle scroll */
+.app-content.full-width {
+  height: calc(100vh - 60px);
+  overflow: hidden;        /* outer clips */
+  display: block;          /* override flex so child 100% height works */
+  width: 100%;
+  padding: 0;
+  margin: 0;
+  background: #f0f2f5;
+}
+ 
+/* Store management specific overrides */
+.store-management {
+  height: 100% !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+}
+ 
+.store-management-inner {
+  max-width: 1400px !important;
+  width: 100% !important;
+  margin: 0 auto !important;
+  padding: 28px 32px 60px !important;
+  box-sizing: border-box !important;
+}
