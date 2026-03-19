@@ -1,60 +1,5 @@
 import React, { useState, useEffect } from 'react';
-
-// ── Inline API helpers (no import of api.js needed) ─────────────────
-const BASE = '';
-
-const storeApi = {
-  getAll: async () => {
-    const token = localStorage.getItem('token');
-    const paths = ['/api/stores/all', '/api/stores'];
-    for (const path of paths) {
-      try {
-        const r = await fetch(`${BASE}${path}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (r.ok) return r.json();
-      } catch {
-        // try next path
-      }
-    }
-    throw new Error('Failed to fetch stores');
-  },
-
-  create: async (payload) => {
-    const token = localStorage.getItem('token');
-    const r = await fetch(`${BASE}/api/stores`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify(payload),
-    });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'Create failed');
-    return data;
-  },
-
-  update: async (id, payload) => {
-    const token = localStorage.getItem('token');
-    const r = await fetch(`${BASE}/api/stores/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify(payload),
-    });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'Update failed');
-    return data;
-  },
-
-  remove: async (id) => {
-    const token = localStorage.getItem('token');
-    const r = await fetch(`${BASE}/api/stores/${id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'Delete failed');
-    return data;
-  },
-};
+import api from '../services/api';
 
 const EMPTY_FORM = {
   store_identifier: '',
@@ -98,7 +43,7 @@ function StoreManagement({ onBack, onStoresUpdated }) {
     try {
       setLoading(true);
       setError(null);
-      const data = await storeApi.getAll();
+      const data = await api.fetch('/api/stores/all').catch(() => api.fetch('/api/stores'));
       const raw  = Array.isArray(data) ? data : (data?.stores || data?.data || []);
       console.log('🏪 [Stores] loaded:', raw.length, 'records');
       setStores(raw.map(normalize));
@@ -178,10 +123,10 @@ function StoreManagement({ onBack, onStoresUpdated }) {
         isActive:        form.is_active,
       };
       if (modalMode === 'add') {
-        await storeApi.create(payload);
+        await api.fetch('/api/stores', { method: 'POST', body: JSON.stringify(payload) });
         showSuccess(`Store "${payload.brandName}" added successfully`);
       } else {
-        await storeApi.update(editingStore.id, payload);
+        await api.fetch(`/api/stores/${editingStore.id}`, { method: 'PUT', body: JSON.stringify(payload) });
         showSuccess(`Store "${payload.brandName}" updated successfully`);
       }
       await loadStores();
@@ -203,7 +148,7 @@ function StoreManagement({ onBack, onStoresUpdated }) {
     setSaving(true);
     setError(null);
     try {
-      await storeApi.remove(deleteTarget.id);
+      await api.fetch(`/api/stores/${deleteTarget.id}`, { method: 'DELETE' });
       // Remove from local state immediately — backend soft-deletes (is_active=false)
       // so reloading would show it as inactive. We want it gone from the UI.
       setStores((prev) => prev.filter((s) => s.id !== deleteTarget.id));
@@ -221,11 +166,14 @@ function StoreManagement({ onBack, onStoresUpdated }) {
 
   const handleToggleActive = async (store) => {
     try {
-      await storeApi.update(store.id, {
-        storeIdentifier: store.store_identifier,
-        shopDomain:      store.shop_domain,
-        brandName:       store.brand_name,
-        isActive:        !store.is_active,
+      await api.fetch(`/api/stores/${store.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          storeIdentifier: store.store_identifier,
+          shopDomain:      store.shop_domain,
+          brandName:       store.brand_name,
+          isActive:        !store.is_active,
+        }),
       });
       showSuccess(store.is_active ? `"${store.brand_name}" deactivated` : `"${store.brand_name}" activated`);
       await loadStores();
