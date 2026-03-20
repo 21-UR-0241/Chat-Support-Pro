@@ -1246,7 +1246,7 @@
 
 
 
-//WAG BURAHIN
+// //WAG BURAHIN
 
 import React, { useState, useEffect, useRef } from 'react';
 import { formatDistanceToNow } from 'date-fns';
@@ -1752,6 +1752,28 @@ function ChatWindow({
     }
   };
 
+  const handlePaste = (e) => {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault();
+      const file = item.getAsFile();
+      if (!file) continue;
+      const maxSize = 10 * 1024 * 1024;
+      if (file.size > maxSize) { alert('Pasted image must be less than 10MB'); return; }
+      // Give it a filename with timestamp
+      const ext = item.type.split('/')[1] || 'png';
+      const namedFile = new File([file], `screenshot-${Date.now()}.${ext}`, { type: item.type });
+      setSelectedFile(namedFile);
+      const reader = new FileReader();
+      reader.onload = (ev) => setFilePreview({ type: 'image', url: ev.target.result, name: namedFile.name });
+      reader.readAsDataURL(namedFile);
+      break; // only handle first image
+    }
+  }
+};
+
   const handleRemoveFile = () => {
     setSelectedFile(null);
     setFilePreview(null);
@@ -2125,6 +2147,17 @@ function ChatWindow({
     }, 5000);
     return () => { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current); };
   }, [conversation?.id]);
+
+useEffect(() => {
+  const handleGlobalPaste = (e) => {
+    // Don't intercept if user is typing in an input/textarea other than ours
+    const tag = document.activeElement?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    handlePaste(e);
+  };
+  window.addEventListener('paste', handleGlobalPaste);
+  return () => window.removeEventListener('paste', handleGlobalPaste);
+}, [selectedFile]); // re-bind when selectedFile changes
 
   const loadMessages = async () => {
     try {
@@ -2606,10 +2639,11 @@ function ChatWindow({
           <textarea
             ref={textareaRef}
             className="chat-input"
-            placeholder="Type a message..."
+            placeholder="Type a message... (Ctrl+V to paste screenshot)"
             value={messageText}
             onChange={handleTyping}
             onKeyDown={handleKeyPress}
+            onPaste={handlePaste}
             rows="1"
             disabled={sending || uploading}
           />

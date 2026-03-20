@@ -6886,96 +6886,7 @@ app.get('/api/conversations', authenticateToken, async (req, res) => {
 });
 
 
-app.get('/api/conversations/linked/:email', authenticateToken, async (req, res) => {
-  try {
-    const { email } = req.params;
-    const { excludeConversationId } = req.query;
- 
-    if (!email || !email.includes('@')) {
-      return res.status(400).json({ error: 'Valid email required' });
-    }
- 
-    // JOIN stores to get brand_name for each conversation
-    // Works even if the store is inactive — we use LEFT JOIN so
-    // conversations from deleted/inactive stores still appear
-    const result = await pool.query(`
-      SELECT 
-        c.id,
-        c.status,
-        c.created_at,
-        c.updated_at,
-        c.shop_domain,
-        c.shop_id,
-        COALESCE(s.brand_name, c.shop_domain, 'Unknown Store') AS brand_name,
-        m.content        AS last_message_content,
-        m.sender_type    AS last_message_sender_type,
-        m.timestamp      AS last_message_at
-      FROM conversations c
-      LEFT JOIN stores s
-        ON c.shop_id = s.id
-      LEFT JOIN LATERAL (
-        SELECT content, sender_type, timestamp
-        FROM messages
-        WHERE conversation_id = c.id
-        ORDER BY timestamp DESC
-        LIMIT 1
-      ) m ON true
-      WHERE c.customer_email = $1
-        ${excludeConversationId ? 'AND c.id != $2' : ''}
-      ORDER BY c.updated_at DESC
-    `, excludeConversationId
-        ? [email, parseInt(excludeConversationId)]
-        : [email]
-    );
- 
-    if (!result.rows.length) {
-      return res.json({ linkedConversations: [], storeCount: 0 });
-    }
- 
-    // Group by shop_id — use brand_name as the display label
-    const byStore = {};
-    for (const row of result.rows) {
-      // Key by shop_id (stable) but display brand_name
-      const storeKey = row.shop_id || row.shop_domain || 'unknown';
- 
-      if (!byStore[storeKey]) {
-        byStore[storeKey] = {
-          storeIdentifier: row.shop_domain,
-          storeName: row.brand_name,  // ← brand_name from stores table
-          shopId: row.shop_id,
-          conversations: [],
-        };
-      }
- 
-      byStore[storeKey].conversations.push({
-        id: row.id,
-        status: row.status,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-        messageCount: 0, // not needed for preview
-        lastMessage: row.last_message_content
-          ? {
-              content: row.last_message_content,
-              senderType: row.last_message_sender_type,
-              createdAt: row.last_message_at,
-            }
-          : null,
-      });
-    }
- 
-    const storeGroups = Object.values(byStore);
- 
-    return res.json({
-      customerEmail: email,
-      linkedConversations: storeGroups,
-      storeCount: storeGroups.length,
-      totalConversations: result.rows.length,
-    });
-  } catch (error) {
-    console.error('❌ [linked-conversations] Error:', error);
-    return res.status(500).json({ error: 'Failed to fetch linked conversations' });
-  }
-});
+
 
 
 // GET /api/widget/history?email=john@example.com&excludeConversationId=123
@@ -7058,6 +6969,97 @@ app.get('/api/widget/history', async (req, res) => {
   } catch (error) {
     console.error('❌ [widget/history] Error:', error);
     return res.status(500).json({ error: 'Failed to fetch history' });
+  }
+});
+
+app.get('/api/conversations/linked/:email', authenticateToken, async (req, res) => {
+  try {
+    const { email } = req.params;
+    const { excludeConversationId } = req.query;
+ 
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({ error: 'Valid email required' });
+    }
+ 
+    // JOIN stores to get brand_name for each conversation
+    // Works even if the store is inactive — we use LEFT JOIN so
+    // conversations from deleted/inactive stores still appear
+    const result = await db.pool.query(`
+      SELECT 
+        c.id,
+        c.status,
+        c.created_at,
+        c.updated_at,
+        c.shop_domain,
+        c.shop_id,
+        COALESCE(s.brand_name, c.shop_domain, 'Unknown Store') AS brand_name,
+        m.content        AS last_message_content,
+        m.sender_type    AS last_message_sender_type,
+        m.timestamp      AS last_message_at
+      FROM conversations c
+      LEFT JOIN stores s
+        ON c.shop_id = s.id
+      LEFT JOIN LATERAL (
+        SELECT content, sender_type, timestamp
+        FROM messages
+        WHERE conversation_id = c.id
+        ORDER BY timestamp DESC
+        LIMIT 1
+      ) m ON true
+      WHERE c.customer_email = $1
+        ${excludeConversationId ? 'AND c.id != $2' : ''}
+      ORDER BY c.updated_at DESC
+    `, excludeConversationId
+        ? [email, parseInt(excludeConversationId)]
+        : [email]
+    );
+ 
+    if (!result.rows.length) {
+      return res.json({ linkedConversations: [], storeCount: 0 });
+    }
+ 
+    // Group by shop_id — use brand_name as the display label
+    const byStore = {};
+    for (const row of result.rows) {
+      // Key by shop_id (stable) but display brand_name
+      const storeKey = row.shop_id || row.shop_domain || 'unknown';
+ 
+      if (!byStore[storeKey]) {
+        byStore[storeKey] = {
+          storeIdentifier: row.shop_domain,
+          storeName: row.brand_name,  // ← brand_name from stores table
+          shopId: row.shop_id,
+          conversations: [],
+        };
+      }
+ 
+      byStore[storeKey].conversations.push({
+        id: row.id,
+        status: row.status,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        messageCount: 0, // not needed for preview
+        lastMessage: row.last_message_content
+          ? {
+              content: row.last_message_content,
+              senderType: row.last_message_sender_type,
+              createdAt: row.last_message_at,
+            }
+          : null,
+      });
+    }
+ 
+    const storeGroups = Object.values(byStore);
+ 
+    return res.json({
+      customerEmail: email,
+      linkedConversations: storeGroups,
+      storeCount: storeGroups.length,
+      totalConversations: result.rows.length,
+    });
+  } catch (error) {
+    console.error('❌ [linked-conversations] Error:', error);
+    return res.status(500).json({ error: 'Failed to fetch linked conversations' });
   }
 });
 
