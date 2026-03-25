@@ -1250,6 +1250,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { formatDistanceToNow } from 'date-fns';
+import heic2any from 'heic2any';
 import api from "../services/api";
 import MessageBubble from './MessageBubble';
 import CustomerInfo from './CustomerInfo';
@@ -1737,40 +1738,126 @@ function ChatWindow({
   // ============ FILE HANDLING ============
   const handleAttachClick = () => { if (fileInputRef.current) fileInputRef.current.click(); };
 
-  const handleFileSelect = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const maxSize = 10 * 1024 * 1024;
-    if (file.size > maxSize) { alert('File size must be less than 10MB'); return; }
-    setSelectedFile(file);
-    if (file.type.startsWith('image/')) {
-      const reader = new FileReader();
-      reader.onload = (e) => setFilePreview({ type: 'image', url: e.target.result, name: file.name });
-      reader.readAsDataURL(file);
-    } else {
-      setFilePreview({ type: 'file', name: file.name, size: formatFileSize(file.size) });
-    }
-  };
+  // const handleFileSelect = (e) => {
+  //   const file = e.target.files[0];
+  //   if (!file) return;
+  //   const maxSize = 10 * 1024 * 1024;
+  //   if (file.size > maxSize) { alert('File size must be less than 10MB'); return; }
+  //   setSelectedFile(file);
+  //   if (file.type.startsWith('image/')) {
+  //     const reader = new FileReader();
+  //     reader.onload = (e) => setFilePreview({ type: 'image', url: e.target.result, name: file.name });
+  //     reader.readAsDataURL(file);
+  //   } else {
+  //     setFilePreview({ type: 'file', name: file.name, size: formatFileSize(file.size) });
+  //   }
+  // };
 
-  const handlePaste = (e) => {
-  const items = e.clipboardData?.items;
-  if (!items) return;
-  for (const item of items) {
-    if (item.type.startsWith('image/')) {
-      e.preventDefault();
-      const file = item.getAsFile();
-      if (!file) continue;
-      const maxSize = 10 * 1024 * 1024;
-      if (file.size > maxSize) { alert('Pasted image must be less than 10MB'); return; }
-      // Give it a filename with timestamp
-      const ext = item.type.split('/')[1] || 'png';
-      const namedFile = new File([file], `screenshot-${Date.now()}.${ext}`, { type: item.type });
-      setSelectedFile(namedFile);
-      const reader = new FileReader();
-      reader.onload = (ev) => setFilePreview({ type: 'image', url: ev.target.result, name: namedFile.name });
-      reader.readAsDataURL(namedFile);
-      break; // only handle first image
+  const handleFileSelect = async (e) => {
+  let file = e.target.files[0];
+  if (!file) return;
+
+  const maxSize = 10 * 1024 * 1024;
+
+  // Convert HEIC → JPEG before anything else
+  const isHeic = file.type === 'image/heic' || file.type === 'image/heif'
+    || /\.(heic|heif)$/i.test(file.name);
+
+  if (isHeic) {
+    try {
+      const blob = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.85 });
+      file = new File(
+        [blob],
+        file.name.replace(/\.(heic|heif)$/i, '.jpg'),
+        { type: 'image/jpeg' }
+      );
+    } catch (err) {
+      console.error('HEIC conversion failed:', err);
+      alert('Could not convert HEIC image. Please export it as JPEG first.');
+      return;
     }
+  }
+
+  if (file.size > maxSize) { alert('File size must be less than 10MB'); return; }
+
+  setSelectedFile(file);
+  if (file.type.startsWith('image/')) {
+    const reader = new FileReader();
+    reader.onload = (e) => setFilePreview({ type: 'image', url: e.target.result, name: file.name });
+    reader.readAsDataURL(file);
+  } else {
+    setFilePreview({ type: 'file', name: file.name, size: formatFileSize(file.size) });
+  }
+};
+
+
+//   const handlePaste = (e) => {
+//   const items = e.clipboardData?.items;
+//   if (!items) return;
+//   for (const item of items) {
+//     if (item.type.startsWith('image/')) {
+//       e.preventDefault();
+//       const file = item.getAsFile();
+//       if (!file) continue;
+//       const maxSize = 10 * 1024 * 1024;
+//       if (file.size > maxSize) { alert('Pasted image must be less than 10MB'); return; }
+//       // Give it a filename with timestamp
+//       const ext = item.type.split('/')[1] || 'png';
+//       const namedFile = new File([file], `screenshot-${Date.now()}.${ext}`, { type: item.type });
+//       setSelectedFile(namedFile);
+//       const reader = new FileReader();
+//       reader.onload = (ev) => setFilePreview({ type: 'image', url: ev.target.result, name: namedFile.name });
+//       reader.readAsDataURL(namedFile);
+//       break; // only handle first image
+//     }
+//   }
+// };
+
+
+
+const handlePaste = async (e) => {
+  const items = Array.from(e.clipboardData?.items || []);
+  if (!items.length) return;
+
+  // Synchronous check — must happen before any await or the browser ignores preventDefault
+  const plainText = e.clipboardData.getData('text/plain') || '';
+  if (/file:\/\/[^\s]*\.hei[cf]/i.test(plainText.trim())) {
+    e.preventDefault();
+    alert('HEIC images cannot be pasted directly. Please share the photo as JPEG instead.');
+    return;
+  }
+
+  for (const item of items) {
+    if (!item.type.startsWith('image/')) continue;
+
+    e.preventDefault();
+    let file = item.getAsFile();
+    if (!file) continue;
+
+    const maxSize = 10 * 1024 * 1024;
+    if (file.size > maxSize) { alert('Pasted image must be less than 10MB'); return; }
+
+    const isHeic = file.type === 'image/heic' || file.type === 'image/heif'
+      || /\.hei[cf]$/i.test(file.name);
+
+    if (isHeic) {
+      try {
+        const blob = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.85 });
+        file = new File([blob], `screenshot-${Date.now()}.jpg`, { type: 'image/jpeg' });
+      } catch (err) {
+        console.error('HEIC conversion failed:', err);
+        alert('Could not convert HEIC image. Please share the photo as JPEG instead.');
+        return;
+      }
+    }
+
+    const ext = file.type.split('/')[1] || 'png';
+    const namedFile = new File([file], `screenshot-${Date.now()}.${ext}`, { type: file.type });
+    setSelectedFile(namedFile);
+    const reader = new FileReader();
+    reader.onload = (ev) => setFilePreview({ type: 'image', url: ev.target.result, name: namedFile.name });
+    reader.readAsDataURL(namedFile);
+    break;
   }
 };
 
@@ -2230,12 +2317,27 @@ useEffect(() => {
     }
   };
 
-  const handleTyping = (e) => {
-    setMessageText(e.target.value);
-    sendTypingIndicator(true);
-    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    typingTimeoutRef.current = setTimeout(() => sendTypingIndicator(false), 2000);
-  };
+  // const handleTyping = (e) => {
+  //   setMessageText(e.target.value);
+  //   sendTypingIndicator(true);
+  //   if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+  //   typingTimeoutRef.current = setTimeout(() => sendTypingIndicator(false), 2000);
+  // };
+
+
+const handleTyping = (e) => {
+  const val = e.target.value;
+  if (/file:\/\/[^\s]*\.hei[cf]/i.test(val)) {
+    setMessageText(messageText); // revert to previous value
+    return;
+  }
+  setMessageText(val);
+  sendTypingIndicator(true);
+  if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+  typingTimeoutRef.current = setTimeout(() => sendTypingIndicator(false), 2000);
+};
+
+
 
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); }
@@ -2650,7 +2752,7 @@ useEffect(() => {
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx"
+            accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.heic,.heif"
             onChange={handleFileSelect}
             style={{ display: 'none' }}
           />
