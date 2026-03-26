@@ -7174,6 +7174,41 @@ app.put('/api/conversations/:id/read', authenticateToken, async (req, res) => {
   }
 });
 
+app.put('/api/conversations/:id/unread', authenticateToken, async (req, res) => {
+  try {
+    const conversationId = parseInt(req.params.id);
+
+    // Set unread_count = 1 so the conversation appears unread in the list.
+    // last_message_sender_type is deliberately NOT changed — we only
+    // want to restore the unread badge, not re-trigger urgent/legal logic.
+    await db.pool.query(`
+      UPDATE conversations
+      SET
+        unread_count = 1,
+        updated_at   = NOW()
+      WHERE id = $1
+    `, [conversationId]);
+
+    const updatedConversation = await db.getConversation(conversationId);
+
+    if (!updatedConversation) {
+      return res.status(404).json({ error: 'Conversation not found' });
+    }
+
+    // Broadcast so the unread badge appears live in all open agent tabs
+    broadcastToAgents({
+      type: 'conversation_unread',
+      conversationId,
+      conversation: snakeToCamel(updatedConversation),
+    });
+
+    res.json({ success: true, conversationId });
+  } catch (error) {
+    console.error('Error marking conversation as unread:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.put('/api/conversations/:id/close', authenticateToken, async (req, res) => {
   try {
     const conversation = await db.closeConversation(parseInt(req.params.id));

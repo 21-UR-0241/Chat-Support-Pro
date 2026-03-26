@@ -355,7 +355,6 @@
 
 // export default new ApiService();
 
-
 // Use Vite proxy in development, full URL in production
 const API_URL = import.meta.env.PROD 
   ? import.meta.env.VITE_API_URL || 'https://chat-support-pro.onrender.com'
@@ -516,6 +515,10 @@ class ApiService {
 
   async markConversationRead(id) {
     return this.fetch(`/api/conversations/${id}/read`, { method: 'PUT' });
+  }
+
+  async markConversationUnread(id) {
+    return this.fetch(`/api/conversations/${id}/unread`, { method: 'PUT' });
   }
 
   // ============ Cross-Store History ============

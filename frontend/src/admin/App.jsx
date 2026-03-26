@@ -1,4 +1,5 @@
 
+
 // import React, { useState, useEffect, useRef, useCallback } from 'react';
 // import api from './services/api';
 // import { useConversations } from './hooks/useConversations';
@@ -12,6 +13,7 @@
 // import ConversationNotes from './components/ConversationNotes';
 // import AnalyticsDashboard from './components/AnalyticsDashboard';
 // import AITraining from './components/AITraining';
+// import StoreManagement from './components/StoreManagement';
 
 // function App() {
 //   const [employee, setEmployee] = useState(null);
@@ -256,7 +258,6 @@
 
 //     console.warn(`${emoji} [App] Legal threat — conv #${alert.conversationId} | ${alert.severity?.toUpperCase()} | "${alert.matchedTerm}"`);
 
-//     // Update sidebar list immediately — marks urgent + sets legal flag
 //     updateConversation(alert.conversationId, {
 //       priority: 'urgent',
 //       legalFlag: true,
@@ -264,7 +265,6 @@
 //       legalFlagTerm: alert.matchedTerm,
 //     });
 
-//     // Browser notification only if agent is looking at a different conversation
 //     const currentActiveConv = activeConversationRef.current;
 //     if (String(currentActiveConv?.id) !== String(alert.conversationId)) {
 //       showNotification(
@@ -539,8 +539,16 @@
 //     setActivePage('dashboard');
 //   };
 
+//   // Re-sync the stores list in the sidebar after StoreManagement makes changes
+//   const handleStoresUpdated = () => {
+//     loadStores();
+//   };
+
 //   useEffect(() => {
-//     if ((activePage === 'employees' || activePage === 'analytics') && employee.role !== 'admin') {
+//     if (
+//       (activePage === 'employees' || activePage === 'analytics' || activePage === 'stores') &&
+//       employee.role !== 'admin'
+//     ) {
 //       console.warn('⚠️ Non-admin user attempted to access restricted page');
 //       setActivePage('dashboard');
 //     }
@@ -576,7 +584,7 @@
 //             >
 //               💬 Dashboard
 //             </button>
-            
+
 // {/* {employee.role === 'admin' && (
 //   <button
 //     className={`nav-btn ${activePage === 'analytics' ? 'nav-active' : ''}`}
@@ -586,7 +594,7 @@
 //     📊 Analytics
 //   </button>
 // )} */}
-            
+
 // {activePage === 'dashboard' && (
 //   <button
 //     className={`nav-btn ${showNotesModal ? 'nav-active' : ''}`}
@@ -597,7 +605,17 @@
 //     📝 Notes
 //   </button>
 // )}
-            
+
+//             {employee.role === 'admin' && (
+//               <button
+//                 className={`nav-btn ${activePage === 'stores' ? 'nav-active' : ''}`}
+//                 onClick={() => setActivePage('stores')}
+//                 type="button"
+//               >
+//                 🏪 Stores
+//               </button>
+//             )}
+
 //             {employee.role === 'admin' && (
 //               <button
 //                 className={`nav-btn ${activePage === 'employees' ? 'nav-active' : ''}`}
@@ -607,7 +625,8 @@
 //                 👥 Employees
 //               </button>
 //             )}
-//                         {employee.role === 'admin' && (
+
+//             {employee.role === 'admin' && (
 //               <button
 //                 className={`nav-btn ${activePage === 'training' ? 'nav-active' : ''}`}
 //                 onClick={() => setActivePage('training')}
@@ -616,7 +635,6 @@
 //                 🧠 AI Training
 //               </button>
 //             )}
-
 //           </div>
 
 //           {activePage === 'dashboard' && (
@@ -742,6 +760,7 @@
 //               onFilterChange={updateFilters}
 //               stores={stores}
 //               loading={conversationsLoading || loadingStores}
+//               onMarkAsUnread={handleMarkAsUnread}
 //             />
 //           </div>
 
@@ -756,6 +775,7 @@
 //                 onMenuToggle={handleMobileMenuToggle}
 //                 stores={stores}
 //                 isAdmin={employee.role === 'admin'}
+//                 onMarkAsUnread={handleMarkAsUnread}
 //               />
 //             </ErrorBoundary>
 //           </div>
@@ -770,6 +790,17 @@
 //         </div>
 //       )}
 
+//       {activePage === 'stores' && (
+//         <div className="app-content full-width" style={{ height: 'calc(100vh - 60px)', overflow: 'hidden', display: 'block' }}>
+//           <ErrorBoundary>
+//             <StoreManagement
+//               onBack={handleBackToDashboard}
+//               onStoresUpdated={handleStoresUpdated}
+//             />
+//           </ErrorBoundary>
+//         </div>
+//       )}
+
 //       {activePage === 'employees' && (
 //         <div className="app-content full-width">
 //           <EmployeeManagement
@@ -778,19 +809,21 @@
 //           />
 //         </div>
 //       )}
-//             {activePage === 'training' && (
+
+//       {activePage === 'training' && (
 //         <div className="app-content full-width" style={{ height: 'calc(100vh - 60px)', overflow: 'hidden' }}>
 //           <ErrorBoundary>
 //             <AITraining onBrainUpdate={() => {}} />
 //           </ErrorBoundary>
 //         </div>
 //       )}
-      
+
 //     </div>
 //   );
 // }
 
 // export default App;
+
 
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
@@ -945,6 +978,40 @@ function DashboardContent({ employee, onLogout }) {
     );
   }, [updateConversation]);
 
+  // ── Mark as unread ────────────────────────────────────────────────────────
+  const handleMarkAsUnread = useCallback(async (conversationId) => {
+    console.log('🔵 [App] Marking conversation as unread:', conversationId);
+
+    // Optimistic update — badge reappears instantly
+    updateConversation(conversationId, {
+      unreadCount: 1,
+      unread_count: 1,
+      unread: 1,
+    });
+
+    // If this is the active conversation, deselect it so the user
+    // navigates back to the list (matching WhatsApp behaviour)
+    const currentActiveConv = activeConversationRef.current;
+    if (currentActiveConv && String(currentActiveConv.id) === String(conversationId)) {
+      setActiveConversation(null);
+      setActiveConversationId(null);
+    }
+
+    try {
+      await api.markConversationUnread(conversationId);
+      console.log('✅ [App] Server confirmed conversation unread:', conversationId);
+    } catch (error) {
+      console.error('❌ [App] Failed to mark conversation as unread:', error);
+      // Roll back optimistic update on failure
+      updateConversation(conversationId, {
+        unreadCount: 0,
+        unread_count: 0,
+        unread: 0,
+      });
+    }
+  }, [updateConversation, setActiveConversationId]);
+  // ─────────────────────────────────────────────────────────────────────────
+
   const handleSelectConversation = useCallback((conversation) => {
     setActiveConversation(conversation);
     setActiveConversationId(conversation.id);
@@ -967,117 +1034,130 @@ function DashboardContent({ employee, onLogout }) {
 
 
   useEffect(() => {
-  if (!ws) return;
+    if (!ws) return;
 
-  const unsubscribe1 = ws.on('new_message', (data) => {
-    const currentActiveConv = activeConversationRef.current;
-    const currentConversations = conversationsRef.current;
+    const unsubscribe1 = ws.on('new_message', (data) => {
+      const currentActiveConv = activeConversationRef.current;
+      const currentConversations = conversationsRef.current;
 
-    console.log('📨 [App] New message received:', {
-      conversationId: data.conversationId,
-      senderType: data.message?.senderType || data.message?.sender_type,
-      activeConversation: currentActiveConv?.id
+      console.log('📨 [App] New message received:', {
+        conversationId: data.conversationId,
+        senderType: data.message?.senderType || data.message?.sender_type,
+        activeConversation: currentActiveConv?.id
+      });
+
+      const message = data.message || {};
+      const senderType = message.senderType || message.sender_type;
+      const conversationId = data.conversationId || message.conversationId;
+
+      const isActiveConv = currentActiveConv?.id === conversationId;
+      const conversationUpdate = {
+        lastMessage: message.content || '',
+        lastMessageAt: message.createdAt || message.created_at || new Date().toISOString(),
+        lastSenderType: senderType,
+        lastMessageSenderType: senderType,
+      };
+
+      if (senderType === 'customer' && !isActiveConv) {
+        const existingConv = currentConversations.find(c => c.id === conversationId);
+        const currentUnread = existingConv?.unreadCount || existingConv?.unread_count || 0;
+        conversationUpdate.unreadCount = currentUnread + 1;
+        conversationUpdate.unread_count = currentUnread + 1;
+      }
+
+      updateConversation(conversationId, conversationUpdate);
+
+      if (senderType === 'agent') {
+        console.log('🔕 [App] Agent message - clearing notifications for conversation:', conversationId);
+        clearNotificationsForConversation(conversationId);
+        return;
+      }
+
+      if (senderType === 'customer' && !isActiveConv) {
+        const customerName =
+          currentConversations.find(c => c.id === conversationId)?.customerName ||
+          data.conversation?.customerName ||
+          data.conversation?.customer_name ||
+          'Guest';
+        const messagePreview = message.content?.substring(0, 50) || 'New message';
+
+        console.log('🔔 [App] Showing notification for customer message');
+        showNotification(conversationId, customerName, messagePreview);
+      } else if (senderType === 'customer' && isActiveConv) {
+        console.log('⏭️ [App] Customer message in active conversation - auto marking read');
+        handleMarkAsRead(conversationId);
+      }
     });
 
-    const message = data.message || {};
-    const senderType = message.senderType || message.sender_type;
-    const conversationId = data.conversationId || message.conversationId;
+    const unsubscribe2 = ws.on('connected', () => {
+      console.log('✅ [App] Connected to WebSocket');
+      setError(null);
+    });
 
-    const isActiveConv = currentActiveConv?.id === conversationId;
-    const conversationUpdate = {
-      lastMessage: message.content || '',
-      lastMessageAt: message.createdAt || message.created_at || new Date().toISOString(),
-      lastSenderType: senderType,
-      lastMessageSenderType: senderType,
+    const unsubscribe3 = ws.on('disconnected', () => {
+      console.log('❌ [App] Disconnected from WebSocket');
+    });
+
+    const unsubscribe4 = ws.on('error', (error) => {
+      console.error('[App] WebSocket error:', error);
+      setError('WebSocket connection error. Retrying...');
+    });
+
+    const unsubscribe5 = ws.on('max_reconnect_reached', () => {
+      setError('Unable to connect to server. Please refresh the page.');
+    });
+
+    // ── Legal threat detection ─────────────────────────────────────────
+    const unsubscribe6 = ws.on('legal_threat_detected', (data) => {
+      const alert = data.alert;
+      if (!alert?.conversationId) return;
+
+      const emoji = alert.severity === 'critical' ? '🚨'
+                  : alert.severity === 'high'     ? '⚠️'
+                  : '🔔';
+
+      console.warn(`${emoji} [App] Legal threat — conv #${alert.conversationId} | ${alert.severity?.toUpperCase()} | "${alert.matchedTerm}"`);
+
+      updateConversation(alert.conversationId, {
+        priority: 'urgent',
+        legalFlag: true,
+        legalFlagSeverity: alert.severity,
+        legalFlagTerm: alert.matchedTerm,
+      });
+
+      const currentActiveConv = activeConversationRef.current;
+      if (String(currentActiveConv?.id) !== String(alert.conversationId)) {
+        showNotification(
+          alert.conversationId,
+          `${emoji} Legal Threat — ${alert.severity?.toUpperCase()}`,
+          `"${alert.matchedTerm}" from ${alert.senderName || 'Customer'}`
+        );
+      }
+    });
+
+    // ── Mark as unread (broadcast from another agent tab) ──────────────
+    const unsubscribe7 = ws.on('conversation_unread', (data) => {
+      if (!data?.conversationId) return;
+      console.log('🔵 [App] WS conversation_unread received for:', data.conversationId);
+      updateConversation(data.conversationId, {
+        unreadCount: 1,
+        unread_count: 1,
+        unread: 1,
+        ...(data.conversation || {}),
+      });
+    });
+    // ──────────────────────────────────────────────────────────────────
+
+    return () => {
+      unsubscribe1();
+      unsubscribe2();
+      unsubscribe3();
+      unsubscribe4();
+      unsubscribe5();
+      unsubscribe6();
+      unsubscribe7();
     };
-
-    if (senderType === 'customer' && !isActiveConv) {
-      const existingConv = currentConversations.find(c => c.id === conversationId);
-      const currentUnread = existingConv?.unreadCount || existingConv?.unread_count || 0;
-      conversationUpdate.unreadCount = currentUnread + 1;
-      conversationUpdate.unread_count = currentUnread + 1;
-    }
-
-    updateConversation(conversationId, conversationUpdate);
-
-    if (senderType === 'agent') {
-      console.log('🔕 [App] Agent message - clearing notifications for conversation:', conversationId);
-      clearNotificationsForConversation(conversationId);
-      return;
-    }
-
-    if (senderType === 'customer' && !isActiveConv) {
-      const customerName =
-        currentConversations.find(c => c.id === conversationId)?.customerName ||
-        data.conversation?.customerName ||
-        data.conversation?.customer_name ||
-        'Guest';
-      const messagePreview = message.content?.substring(0, 50) || 'New message';
-
-      console.log('🔔 [App] Showing notification for customer message');
-      showNotification(conversationId, customerName, messagePreview);
-    } else if (senderType === 'customer' && isActiveConv) {
-      console.log('⏭️ [App] Customer message in active conversation - auto marking read');
-      handleMarkAsRead(conversationId);
-    }
-  });
-
-  const unsubscribe2 = ws.on('connected', () => {
-    console.log('✅ [App] Connected to WebSocket');
-    setError(null);
-  });
-
-  const unsubscribe3 = ws.on('disconnected', () => {
-    console.log('❌ [App] Disconnected from WebSocket');
-  });
-
-  const unsubscribe4 = ws.on('error', (error) => {
-    console.error('[App] WebSocket error:', error);
-    setError('WebSocket connection error. Retrying...');
-  });
-
-  const unsubscribe5 = ws.on('max_reconnect_reached', () => {
-    setError('Unable to connect to server. Please refresh the page.');
-  });
-
-  // ── Legal threat detection ─────────────────────────────────────────
-  const unsubscribe6 = ws.on('legal_threat_detected', (data) => {
-    const alert = data.alert;
-    if (!alert?.conversationId) return;
-
-    const emoji = alert.severity === 'critical' ? '🚨'
-                : alert.severity === 'high'     ? '⚠️'
-                : '🔔';
-
-    console.warn(`${emoji} [App] Legal threat — conv #${alert.conversationId} | ${alert.severity?.toUpperCase()} | "${alert.matchedTerm}"`);
-
-    updateConversation(alert.conversationId, {
-      priority: 'urgent',
-      legalFlag: true,
-      legalFlagSeverity: alert.severity,
-      legalFlagTerm: alert.matchedTerm,
-    });
-
-    const currentActiveConv = activeConversationRef.current;
-    if (String(currentActiveConv?.id) !== String(alert.conversationId)) {
-      showNotification(
-        alert.conversationId,
-        `${emoji} Legal Threat — ${alert.severity?.toUpperCase()}`,
-        `"${alert.matchedTerm}" from ${alert.senderName || 'Customer'}`
-      );
-    }
-  });
-  // ──────────────────────────────────────────────────────────────────
-
-  return () => {
-    unsubscribe1();
-    unsubscribe2();
-    unsubscribe3();
-    unsubscribe4();
-    unsubscribe5();
-    unsubscribe6();
-  };
-}, [ws, handleMarkAsRead, updateConversation]);
+  }, [ws, handleMarkAsRead, updateConversation]);
 
 
   useEffect(() => {
@@ -1549,6 +1629,7 @@ function DashboardContent({ employee, onLogout }) {
               activeConversation={activeConversation}
               onSelectConversation={handleSelectConversation}
               onMarkAsRead={handleMarkAsRead}
+              onMarkAsUnread={handleMarkAsUnread}
               filters={filters}
               onFilterChange={updateFilters}
               stores={stores}
@@ -1567,6 +1648,7 @@ function DashboardContent({ employee, onLogout }) {
                 onMenuToggle={handleMobileMenuToggle}
                 stores={stores}
                 isAdmin={employee.role === 'admin'}
+                onMarkAsUnread={handleMarkAsUnread}
               />
             </ErrorBoundary>
           </div>

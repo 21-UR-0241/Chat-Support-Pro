@@ -205,6 +205,59 @@
   border: 2px solid #f0f2f5;
 }
 
+/* ========================================
+   MARK AS UNREAD BUTTON
+   ======================================== */
+
+.mark-unread-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1.5px solid #e9edef;
+  background: #fff;
+  color: #54656f;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  flex-shrink: 0;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mark-unread-btn:hover {
+  background: #f0f2f5;
+  border-color: #d1d7db;
+  color: #111b21;
+  box-shadow: 0 1px 4px rgba(11, 20, 26, 0.08);
+}
+
+.mark-unread-btn:active {
+  background: #e9edef;
+  box-shadow: none;
+}
+
+.mark-unread-btn__icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  display: block;
+}
+
+.mark-unread-btn__label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* ========================================
+   ICON BUTTONS
+   ======================================== */
+
 .icon-btn {
   width: 36px;
   height: 36px;
@@ -1243,8 +1296,9 @@
     font-size: 13px;
   }
 
-  /* Send Email button full label on desktop */
-  .send-email-btn__label {
+  /* Send Email + Mark Unread: full label on desktop */
+  .send-email-btn__label,
+  .mark-unread-btn__label {
     display: inline;
   }
 }
@@ -1297,7 +1351,7 @@
     display: none;
   }
 
-  /* Send Email button: icon only on mobile, no label */
+  /* Send Email button: icon only on mobile */
   .send-email-btn {
     width: 32px;
     height: 32px;
@@ -1313,6 +1367,25 @@
   }
 
   .send-email-btn__icon {
+    width: 15px;
+    height: 15px;
+  }
+
+  /* Mark Unread button: icon only on mobile */
+  .mark-unread-btn {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 50%;
+    justify-content: center;
+    gap: 0;
+  }
+
+  .mark-unread-btn__label {
+    display: none;
+  }
+
+  .mark-unread-btn__icon {
     width: 15px;
     height: 15px;
   }
@@ -1818,6 +1891,24 @@
   }
 
   .send-email-btn__icon {
+    width: 15px;
+    height: 15px;
+  }
+
+  /* Mark Unread icon-only in landscape too */
+  .mark-unread-btn {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 50%;
+    gap: 0;
+  }
+
+  .mark-unread-btn__label {
+    display: none;
+  }
+
+  .mark-unread-btn__icon {
     width: 15px;
     height: 15px;
   }
