@@ -11594,7 +11594,8 @@ app.post('/api/ai/suggestions', authenticateToken, async (req, res) => {
 
     const detectedTopics   = analysis?.detectedTopics || [];
     const detectedIssue    = analysis?.detectedIssue || recentContext?.detectedIssue || '';
-    const brainSearchTerms = [clientMessage, ...detectedTopics, detectedIssue].filter(Boolean).join(' ');
+    // const brainSearchTerms = [clientMessage, ...detectedTopics, detectedIssue].filter(Boolean).join(' ');
+    const brainSearchTerms = clientMessage;
 
     let brainContext = '';
     try {

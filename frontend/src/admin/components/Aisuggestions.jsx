@@ -584,27 +584,23 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
     { color: '#8b5cf6' },
   ];
 
-useEffect(() => {
-  const handlePaste = (e) => {
-    // Let ChatWindow handle paste when user is typing in chat input
-    const tag = document.activeElement?.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    let imageItem = null;
-    for (const item of items) {
-      if (item.type.startsWith('image/')) { imageItem = item; break; }
-    }
-    if (!imageItem) return;
-    e.preventDefault();
-    e.stopPropagation(); // safe to restore now — only fires when no input is focused
-    const file = imageItem.getAsFile();
-    if (file) processImageFile(file);
-  };
-  window.addEventListener('paste', handlePaste, true);
-  return () => window.removeEventListener('paste', handlePaste, true);
-}, [conversation, messages]);
+  useEffect(() => {
+    const handlePaste = (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      let imageItem = null;
+      for (const item of items) {
+        if (item.type.startsWith('image/')) { imageItem = item; break; }
+      }
+      if (!imageItem) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const file = imageItem.getAsFile();
+      if (file) processImageFile(file);
+    };
+    window.addEventListener('paste', handlePaste, true);
+    return () => window.removeEventListener('paste', handlePaste, true);
+  }, [conversation, messages]);
 
   const getLastCustomerMessage = () => {
     if (!messages?.length) return null;
@@ -695,8 +691,20 @@ useEffect(() => {
       greeting:        ['hi', 'hello', 'hey', 'good morning', 'good afternoon', 'good evening'],
     };
 
+    // Detect topics from CURRENT message first — this prevents old order-related
+    // messages in the history from polluting topic detection for new unrelated
+    // questions (e.g. a discount question after a prior order inquiry).
+    const currentMsgLower = lastCustomerText.toLowerCase();
     const detectedTopics = Object.entries(topicKeywords)
-      .filter(([, kws]) => kws.some(kw => allCustomerText.includes(kw)))
+      .filter(([, kws]) => {
+        // Current message match takes full priority
+        if (kws.some(kw => currentMsgLower.includes(kw))) return true;
+        // Fall back to full history only for topics NOT already resolved by current msg
+        // and only for stateful context (order number, issue type) — not for action topics
+        const statefulTopics = ['order_status', 'shipping', 'refund_return', 'product_issue'];
+        return statefulTopics.includes(Object.keys(topicKeywords).find(k => topicKeywords[k] === kws))
+          && kws.some(kw => allCustomerText.includes(kw));
+      })
       .map(([topic]) => topic);
 
     const availableCustomerText = lastCustomerMessages.map(m => (m.content || '').toLowerCase()).join(' ');
@@ -1090,6 +1098,7 @@ useEffect(() => {
                   tabIndex={0}
                   onKeyDown={e => e.key === 'Enter' && imageInputRef.current?.click()}
                 >
+                  <span className="ai-upload-icon">🖼</span>
                   <span className="ai-upload-text">Drop a screenshot for better suggestions</span>
                   <span className="ai-upload-sub">Drag & drop · click · or <kbd className="ai-kbd">Ctrl+V</kbd></span>
                 </div>
