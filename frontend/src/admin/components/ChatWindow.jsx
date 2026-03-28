@@ -1,4 +1,6 @@
 
+
+
 // import React, { useState, useEffect, useRef } from 'react';
 // import { formatDistanceToNow } from 'date-fns';
 // import heic2any from 'heic2any';
@@ -173,7 +175,6 @@
 //         </div>
 
 //         {sent ? (
-//           /* Success state */
 //           <div style={{ padding: '40px 24px', textAlign: 'center' }}>
 //             <div style={{ fontSize: '48px', marginBottom: '12px' }}>✅</div>
 //             <div style={{ fontSize: '17px', fontWeight: 700, color: '#111b21', marginBottom: '6px' }}>Email Sent!</div>
@@ -189,7 +190,6 @@
 //             >Close</button>
 //           </div>
 //         ) : (
-//           /* Form */
 //           <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
 
 //             {/* To */}
@@ -303,11 +303,7 @@
 //                   boxShadow: '0 2px 6px rgba(0,168,132,0.3)',
 //                 }}
 //               >
-//                 {sending ? (
-//                   <>⏳ Sending…</>
-//                 ) : (
-//                   <>✉️ Send Email</>
-//                 )}
+//                 {sending ? <>⏳ Sending…</> : <>✉️ Send Email</>}
 //               </button>
 //             </div>
 //           </div>
@@ -339,6 +335,7 @@
 //   onMenuToggle,
 //   stores,
 //   isAdmin = false,
+//   onMarkAsUnread,
 // }) {
 //   const [messages, setMessages] = useState([]);
 //   const [loading, setLoading] = useState(true);
@@ -350,6 +347,10 @@
 //   const [showDeleteModal, setShowDeleteModal] = useState(false);
 //   const [deleting, setDeleting] = useState(false);
 //   const [showAISuggestions, setShowAISuggestions] = useState(true);
+
+//   // Mark as unread toast
+//   const [unreadToast, setUnreadToast] = useState(false);
+//   const unreadToastTimerRef = useRef(null);
 
 //   // Message delete state
 //   const [messageToDelete, setMessageToDelete] = useState(null);
@@ -369,10 +370,10 @@
 //   const [templateLoading, setTemplateLoading] = useState(false);
 //   const [showQuickReplies, setShowQuickReplies] = useState(false);
 
-//   // ============ SEND EMAIL STATE ============
+//   // Send email state
 //   const [showEmailModal, setShowEmailModal] = useState(false);
 
-//   // ============ LEGAL THREAT STATE ============
+//   // Legal threat state
 //   const [legalAlert, setLegalAlert] = useState(null);
 //   const legalDismissTimerRef = useRef(null);
 
@@ -398,10 +399,11 @@
 //   useEffect(() => { conversationRef.current = conversation; }, [conversation]);
 //   useEffect(() => { employeeNameRef.current = employeeName; }, [employeeName]);
 
-//   // Cleanup legal dismiss timer on unmount
+//   // Cleanup timers on unmount
 //   useEffect(() => {
 //     return () => {
 //       if (legalDismissTimerRef.current) clearTimeout(legalDismissTimerRef.current);
+//       if (unreadToastTimerRef.current) clearTimeout(unreadToastTimerRef.current);
 //     };
 //   }, []);
 
@@ -417,7 +419,6 @@
 
 //   // ============ SEND EMAIL HANDLER ============
 //   const handleSendEmail = async ({ to, subject, body }) => {
-//     // Calls your API — adjust endpoint name to match your api service
 //     await api.sendEmail({
 //       to,
 //       subject,
@@ -425,6 +426,16 @@
 //       conversationId: conversation?.id,
 //       customerName: conversation?.customerName,
 //     });
+//   };
+
+//   // ============ MARK AS UNREAD HANDLER ============
+//   const handleMarkAsUnread = () => {
+//     if (!onMarkAsUnread || !conversation?.id) return;
+//     onMarkAsUnread(conversation.id);
+//     // Show a brief toast confirmation
+//     setUnreadToast(true);
+//     if (unreadToastTimerRef.current) clearTimeout(unreadToastTimerRef.current);
+//     unreadToastTimerRef.current = setTimeout(() => setUnreadToast(false), 2500);
 //   };
 
 //   // ============ QUICK REPLY HANDLERS ============
@@ -489,128 +500,86 @@
 //   // ============ FILE HANDLING ============
 //   const handleAttachClick = () => { if (fileInputRef.current) fileInputRef.current.click(); };
 
-//   // const handleFileSelect = (e) => {
-//   //   const file = e.target.files[0];
-//   //   if (!file) return;
-//   //   const maxSize = 10 * 1024 * 1024;
-//   //   if (file.size > maxSize) { alert('File size must be less than 10MB'); return; }
-//   //   setSelectedFile(file);
-//   //   if (file.type.startsWith('image/')) {
-//   //     const reader = new FileReader();
-//   //     reader.onload = (e) => setFilePreview({ type: 'image', url: e.target.result, name: file.name });
-//   //     reader.readAsDataURL(file);
-//   //   } else {
-//   //     setFilePreview({ type: 'file', name: file.name, size: formatFileSize(file.size) });
-//   //   }
-//   // };
-
 //   const handleFileSelect = async (e) => {
-//   let file = e.target.files[0];
-//   if (!file) return;
-
-//   const maxSize = 10 * 1024 * 1024;
-
-//   // Convert HEIC → JPEG before anything else
-//   const isHeic = file.type === 'image/heic' || file.type === 'image/heif'
-//     || /\.(heic|heif)$/i.test(file.name);
-
-//   if (isHeic) {
-//     try {
-//       const blob = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.85 });
-//       file = new File(
-//         [blob],
-//         file.name.replace(/\.(heic|heif)$/i, '.jpg'),
-//         { type: 'image/jpeg' }
-//       );
-//     } catch (err) {
-//       console.error('HEIC conversion failed:', err);
-//       alert('Could not convert HEIC image. Please export it as JPEG first.');
-//       return;
-//     }
-//   }
-
-//   if (file.size > maxSize) { alert('File size must be less than 10MB'); return; }
-
-//   setSelectedFile(file);
-//   if (file.type.startsWith('image/')) {
-//     const reader = new FileReader();
-//     reader.onload = (e) => setFilePreview({ type: 'image', url: e.target.result, name: file.name });
-//     reader.readAsDataURL(file);
-//   } else {
-//     setFilePreview({ type: 'file', name: file.name, size: formatFileSize(file.size) });
-//   }
-// };
-
-
-// //   const handlePaste = (e) => {
-// //   const items = e.clipboardData?.items;
-// //   if (!items) return;
-// //   for (const item of items) {
-// //     if (item.type.startsWith('image/')) {
-// //       e.preventDefault();
-// //       const file = item.getAsFile();
-// //       if (!file) continue;
-// //       const maxSize = 10 * 1024 * 1024;
-// //       if (file.size > maxSize) { alert('Pasted image must be less than 10MB'); return; }
-// //       // Give it a filename with timestamp
-// //       const ext = item.type.split('/')[1] || 'png';
-// //       const namedFile = new File([file], `screenshot-${Date.now()}.${ext}`, { type: item.type });
-// //       setSelectedFile(namedFile);
-// //       const reader = new FileReader();
-// //       reader.onload = (ev) => setFilePreview({ type: 'image', url: ev.target.result, name: namedFile.name });
-// //       reader.readAsDataURL(namedFile);
-// //       break; // only handle first image
-// //     }
-// //   }
-// // };
-
-
-
-// const handlePaste = async (e) => {
-//   const items = Array.from(e.clipboardData?.items || []);
-//   if (!items.length) return;
-
-//   // Synchronous check — must happen before any await or the browser ignores preventDefault
-//   const plainText = e.clipboardData.getData('text/plain') || '';
-//   if (/file:\/\/[^\s]*\.hei[cf]/i.test(plainText.trim())) {
-//     e.preventDefault();
-//     alert('HEIC images cannot be pasted directly. Please share the photo as JPEG instead.');
-//     return;
-//   }
-
-//   for (const item of items) {
-//     if (!item.type.startsWith('image/')) continue;
-
-//     e.preventDefault();
-//     let file = item.getAsFile();
-//     if (!file) continue;
+//     let file = e.target.files[0];
+//     if (!file) return;
 
 //     const maxSize = 10 * 1024 * 1024;
-//     if (file.size > maxSize) { alert('Pasted image must be less than 10MB'); return; }
 
 //     const isHeic = file.type === 'image/heic' || file.type === 'image/heif'
-//       || /\.hei[cf]$/i.test(file.name);
+//       || /\.(heic|heif)$/i.test(file.name);
 
 //     if (isHeic) {
 //       try {
 //         const blob = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.85 });
-//         file = new File([blob], `screenshot-${Date.now()}.jpg`, { type: 'image/jpeg' });
+//         file = new File(
+//           [blob],
+//           file.name.replace(/\.(heic|heif)$/i, '.jpg'),
+//           { type: 'image/jpeg' }
+//         );
 //       } catch (err) {
 //         console.error('HEIC conversion failed:', err);
-//         alert('Could not convert HEIC image. Please share the photo as JPEG instead.');
+//         alert('Could not convert HEIC image. Please export it as JPEG first.');
 //         return;
 //       }
 //     }
 
-//     const ext = file.type.split('/')[1] || 'png';
-//     const namedFile = new File([file], `screenshot-${Date.now()}.${ext}`, { type: file.type });
-//     setSelectedFile(namedFile);
-//     const reader = new FileReader();
-//     reader.onload = (ev) => setFilePreview({ type: 'image', url: ev.target.result, name: namedFile.name });
-//     reader.readAsDataURL(namedFile);
-//     break;
-//   }
-// };
+//     if (file.size > maxSize) { alert('File size must be less than 10MB'); return; }
+
+//     setSelectedFile(file);
+//     if (file.type.startsWith('image/')) {
+//       const reader = new FileReader();
+//       reader.onload = (e) => setFilePreview({ type: 'image', url: e.target.result, name: file.name });
+//       reader.readAsDataURL(file);
+//     } else {
+//       setFilePreview({ type: 'file', name: file.name, size: formatFileSize(file.size) });
+//     }
+//   };
+
+//   const handlePaste = async (e) => {
+//     const items = Array.from(e.clipboardData?.items || []);
+//     if (!items.length) return;
+
+//     const plainText = e.clipboardData.getData('text/plain') || '';
+//     if (/file:\/\/[^\s]*\.hei[cf]/i.test(plainText.trim())) {
+//       e.preventDefault();
+//       alert('HEIC images cannot be pasted directly. Please share the photo as JPEG instead.');
+//       return;
+//     }
+
+//     for (const item of items) {
+//       if (!item.type.startsWith('image/')) continue;
+
+//       e.preventDefault();
+//       let file = item.getAsFile();
+//       if (!file) continue;
+
+//       const maxSize = 10 * 1024 * 1024;
+//       if (file.size > maxSize) { alert('Pasted image must be less than 10MB'); return; }
+
+//       const isHeic = file.type === 'image/heic' || file.type === 'image/heif'
+//         || /\.hei[cf]$/i.test(file.name);
+
+//       if (isHeic) {
+//         try {
+//           const blob = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.85 });
+//           file = new File([blob], `screenshot-${Date.now()}.jpg`, { type: 'image/jpeg' });
+//         } catch (err) {
+//           console.error('HEIC conversion failed:', err);
+//           alert('Could not convert HEIC image. Please share the photo as JPEG instead.');
+//           return;
+//         }
+//       }
+
+//       const ext = file.type.split('/')[1] || 'png';
+//       const namedFile = new File([file], `screenshot-${Date.now()}.${ext}`, { type: file.type });
+//       setSelectedFile(namedFile);
+//       const reader = new FileReader();
+//       reader.onload = (ev) => setFilePreview({ type: 'image', url: ev.target.result, name: namedFile.name });
+//       reader.readAsDataURL(namedFile);
+//       break;
+//     }
+//   };
 
 //   const handleRemoveFile = () => {
 //     setSelectedFile(null);
@@ -934,7 +903,8 @@
 //     if (conversation) { displayedMessageIds.current.clear(); loadMessages(); }
 //     else { setMessages([]); setLoading(false); }
 //     dismissLegalAlert();
-//     setShowEmailModal(false); // close email modal on conversation switch
+//     setShowEmailModal(false);
+//     setUnreadToast(false);
 //   }, [conversation?.id]);
 
 //   useEffect(() => { scrollToBottom(); }, [messages]);
@@ -986,16 +956,15 @@
 //     return () => { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current); };
 //   }, [conversation?.id]);
 
-// useEffect(() => {
-//   const handleGlobalPaste = (e) => {
-//     // Don't intercept if user is typing in an input/textarea other than ours
-//     const tag = document.activeElement?.tagName;
-//     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-//     handlePaste(e);
-//   };
-//   window.addEventListener('paste', handleGlobalPaste);
-//   return () => window.removeEventListener('paste', handleGlobalPaste);
-// }, [selectedFile]); // re-bind when selectedFile changes
+//   useEffect(() => {
+//     const handleGlobalPaste = (e) => {
+//       const tag = document.activeElement?.tagName;
+//       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+//       handlePaste(e);
+//     };
+//     window.addEventListener('paste', handleGlobalPaste);
+//     return () => window.removeEventListener('paste', handleGlobalPaste);
+//   }, [selectedFile]);
 
 //   const loadMessages = async () => {
 //     try {
@@ -1068,27 +1037,17 @@
 //     }
 //   };
 
-//   // const handleTyping = (e) => {
-//   //   setMessageText(e.target.value);
-//   //   sendTypingIndicator(true);
-//   //   if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-//   //   typingTimeoutRef.current = setTimeout(() => sendTypingIndicator(false), 2000);
-//   // };
-
-
-// const handleTyping = (e) => {
-//   const val = e.target.value;
-//   if (/file:\/\/[^\s]*\.hei[cf]/i.test(val)) {
-//     setMessageText(messageText); // revert to previous value
-//     return;
-//   }
-//   setMessageText(val);
-//   sendTypingIndicator(true);
-//   if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-//   typingTimeoutRef.current = setTimeout(() => sendTypingIndicator(false), 2000);
-// };
-
-
+//   const handleTyping = (e) => {
+//     const val = e.target.value;
+//     if (/file:\/\/[^\s]*\.hei[cf]/i.test(val)) {
+//       setMessageText(messageText);
+//       return;
+//     }
+//     setMessageText(val);
+//     sendTypingIndicator(true);
+//     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+//     typingTimeoutRef.current = setTimeout(() => sendTypingIndicator(false), 2000);
+//   };
 
 //   const handleKeyPress = (e) => {
 //     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); }
@@ -1232,6 +1191,29 @@
 //         </div>
 //       )}
 
+//       {/* ============ MARK AS UNREAD TOAST ============ */}
+//       {unreadToast && (
+//         <div style={{
+//           position: 'absolute',
+//           top: legalAlert ? '66px' : '10px',
+//           left: '50%',
+//           transform: 'translateX(-50%)',
+//           zIndex: 9998,
+//           background: '#111b21',
+//           color: '#fff',
+//           fontSize: '13px',
+//           fontWeight: 500,
+//           padding: '8px 16px',
+//           borderRadius: '20px',
+//           whiteSpace: 'nowrap',
+//           boxShadow: '0 2px 10px rgba(0,0,0,0.25)',
+//           animation: 'unreadToastIn 0.2s ease',
+//           pointerEvents: 'none',
+//         }}>
+//           🔵 Marked as unread
+//         </div>
+//       )}
+
 //       {/* Header */}
 //       <div className="chat-header" style={legalAlert ? { marginTop: '56px' } : {}}>
 //         <div className="chat-header-left">
@@ -1261,6 +1243,7 @@
 //             </div>
 //           </div>
 //         </div>
+
 //         <div className="chat-actions">
 //           {/* Send Email button */}
 //           <button
@@ -1278,6 +1261,21 @@
 //               <span className="send-email-btn__dot" />
 //             )}
 //           </button>
+
+//             {onMarkAsUnread && (
+//               <button
+//                 className="mark-unread-btn"
+//                 onClick={handleMarkAsUnread}
+//                 title="Mark as unread"
+//                 type="button"
+//               >
+//                 <svg className="mark-unread-btn__icon" width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+//                   <circle cx="9" cy="9" r="7.5" stroke="currentColor" strokeWidth="1.5"/>
+//                   <circle cx="9" cy="9" r="3.5" fill="currentColor"/>
+//                 </svg>
+//                 <span className="mark-unread-btn__label">Mark Unread</span>
+//               </button>
+//             )}
 
 //           <button
 //             className="icon-btn"
@@ -1566,13 +1564,16 @@
 //           from { transform: translateY(-100%); opacity: 0; }
 //           to   { transform: translateY(0);     opacity: 1; }
 //         }
+//         @keyframes unreadToastIn {
+//           from { opacity: 0; transform: translateX(-50%) translateY(-6px); }
+//           to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+//         }
 //       `}</style>
 //     </div>
 //   );
 // }
 
 // export default ChatWindow;
-
 
 
 
@@ -1588,6 +1589,7 @@ import CustomerInfo from './CustomerInfo';
 import AISuggestions from './Aisuggestions';
 import QuickReplies from './Quickreplies';
 import '../styles/ChatWindow.css';
+import { parseMarkdown } from '../../utils/parseMarkdown';
 
 // ============ EMOJI DATA ============
 const EMOJI_CATEGORIES = [
@@ -1673,7 +1675,6 @@ function EmojiPicker({ onSelect, onClose }) {
 }
 
 // ============ SEND EMAIL MODAL ============
-
 function SendEmailModal({ conversation, onClose, onSend }) {
   const customerEmail = conversation?.customerEmail || '';
   const customerName = conversation?.customerName || 'Customer';
@@ -1725,7 +1726,6 @@ function SendEmailModal({ conversation, onClose, onSend }) {
         }}
         onClick={e => e.stopPropagation()}
       >
-        {/* Modal Header */}
         <div style={{
           background: '#00a884',
           padding: '16px 20px',
@@ -1769,12 +1769,8 @@ function SendEmailModal({ conversation, onClose, onSend }) {
           </div>
         ) : (
           <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-
-            {/* To */}
             <div>
-              <label style={{ fontSize: '12px', fontWeight: 600, color: '#3b4a54', display: 'block', marginBottom: '5px' }}>
-                To
-              </label>
+              <label style={{ fontSize: '12px', fontWeight: 600, color: '#3b4a54', display: 'block', marginBottom: '5px' }}>To</label>
               <input
                 type="email"
                 value={to}
@@ -1791,12 +1787,8 @@ function SendEmailModal({ conversation, onClose, onSend }) {
                 onBlur={e => e.target.style.borderColor = '#e9edef'}
               />
             </div>
-
-            {/* Subject */}
             <div>
-              <label style={{ fontSize: '12px', fontWeight: 600, color: '#3b4a54', display: 'block', marginBottom: '5px' }}>
-                Subject
-              </label>
+              <label style={{ fontSize: '12px', fontWeight: 600, color: '#3b4a54', display: 'block', marginBottom: '5px' }}>Subject</label>
               <input
                 type="text"
                 value={subject}
@@ -1813,12 +1805,8 @@ function SendEmailModal({ conversation, onClose, onSend }) {
                 onBlur={e => e.target.style.borderColor = '#e9edef'}
               />
             </div>
-
-            {/* Body */}
             <div>
-              <label style={{ fontSize: '12px', fontWeight: 600, color: '#3b4a54', display: 'block', marginBottom: '5px' }}>
-                Message
-              </label>
+              <label style={{ fontSize: '12px', fontWeight: 600, color: '#3b4a54', display: 'block', marginBottom: '5px' }}>Message</label>
               <textarea
                 ref={bodyRef}
                 value={body}
@@ -1840,8 +1828,6 @@ function SendEmailModal({ conversation, onClose, onSend }) {
                 {body.length} chars
               </div>
             </div>
-
-            {/* Error */}
             {error && (
               <div style={{
                 background: '#fff5f5', border: '1px solid #fed7d7',
@@ -1851,8 +1837,6 @@ function SendEmailModal({ conversation, onClose, onSend }) {
                 ⚠️ {error}
               </div>
             )}
-
-            {/* Footer */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', paddingTop: '4px' }}>
               <button
                 type="button"
@@ -1864,9 +1848,7 @@ function SendEmailModal({ conversation, onClose, onSend }) {
                   fontSize: '14px', fontWeight: 500,
                   cursor: sending ? 'not-allowed' : 'pointer', color: '#3b4a54',
                 }}
-              >
-                Cancel
-              </button>
+              >Cancel</button>
               <button
                 type="button"
                 onClick={handleSend}
@@ -1904,6 +1886,18 @@ const normalizeMessage = (msg) => ({
   fileData: parseFileData(msg.fileData || msg.file_data),
 });
 
+// ============ SHARED INPUT STYLE ============
+const INPUT_STYLE = {
+  fontSize:     '14px',
+  lineHeight:   '1.5',
+  fontFamily:   'inherit',
+  padding:      '9px 12px',
+  whiteSpace:   'pre-wrap',
+  wordBreak:    'break-word',
+  overflowWrap: 'break-word',
+};
+
+// ============ MAIN COMPONENT ============
 function ChatWindow({
   conversation,
   onSendMessage,
@@ -1956,7 +1950,7 @@ function ChatWindow({
   const legalDismissTimerRef = useRef(null);
 
   const messagesEndRef = useRef(null);
-  const textareaRef = useRef(null);
+  const editableRef = useRef(null);   // contentEditable WYSIWYG
   const fileInputRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const wsRef = useRef(null);
@@ -1977,7 +1971,6 @@ function ChatWindow({
   useEffect(() => { conversationRef.current = conversation; }, [conversation]);
   useEffect(() => { employeeNameRef.current = employeeName; }, [employeeName]);
 
-  // Cleanup timers on unmount
   useEffect(() => {
     return () => {
       if (legalDismissTimerRef.current) clearTimeout(legalDismissTimerRef.current);
@@ -1985,6 +1978,48 @@ function ChatWindow({
     };
   }, []);
 
+  // ============ WYSIWYG HELPERS ============
+  const htmlToMarkdown = (html) => {
+    if (!html) return '';
+    return html
+      .replace(/<strong>(.*?)<\/strong>/gi, '**$1**')
+      .replace(/<b>(.*?)<\/b>/gi, '**$1**')
+      .replace(/<em>(.*?)<\/em>/gi, '*$1*')
+      .replace(/<i>(.*?)<\/i>/gi, '*$1*')
+      .replace(/<s>(.*?)<\/s>/gi, '~~$1~~')
+      .replace(/<strike>(.*?)<\/strike>/gi, '~~$1~~')
+      .replace(/<code>(.*?)<\/code>/gi, '`$1`')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/<[^>]+>/g, '')
+      .trim();
+  };
+
+  const getMessageContent = () => htmlToMarkdown(editableRef.current?.innerHTML || '');
+
+  const clearInput = () => {
+    if (editableRef.current) editableRef.current.innerHTML = '';
+    setMessageText('');
+  };
+
+  const setInputContent = (text) => {
+    if (editableRef.current) {
+      editableRef.current.innerHTML = parseMarkdown(text);
+      // Move cursor to end
+      const range = document.createRange();
+      const sel = window.getSelection();
+      range.selectNodeContents(editableRef.current);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      editableRef.current.focus();
+    }
+    setMessageText(text);
+  };
+
+  // ============ TEMPLATE / SUGGESTION HANDLERS ============
   const loadTemplates = async () => {
     try {
       const data = await api.getTemplates();
@@ -1995,7 +2030,6 @@ function ChatWindow({
     }
   };
 
-  // ============ SEND EMAIL HANDLER ============
   const handleSendEmail = async ({ to, subject, body }) => {
     await api.sendEmail({
       to,
@@ -2006,20 +2040,16 @@ function ChatWindow({
     });
   };
 
-  // ============ MARK AS UNREAD HANDLER ============
   const handleMarkAsUnread = () => {
     if (!onMarkAsUnread || !conversation?.id) return;
     onMarkAsUnread(conversation.id);
-    // Show a brief toast confirmation
     setUnreadToast(true);
     if (unreadToastTimerRef.current) clearTimeout(unreadToastTimerRef.current);
     unreadToastTimerRef.current = setTimeout(() => setUnreadToast(false), 2500);
   };
 
-  // ============ QUICK REPLY HANDLERS ============
   const handleUseTemplate = (content) => {
-    setMessageText(content);
-    if (textareaRef.current) textareaRef.current.focus();
+    setInputContent(content);
   };
 
   const handleAddQuickReply = async ({ name, content }) => {
@@ -2037,21 +2067,16 @@ function ChatWindow({
     setTemplates(prev => prev.filter(t => t.id !== templateId));
   };
 
+  const handleSelectSuggestion = (suggestion) => {
+    setInputContent(suggestion);
+  };
+
   // ============ EMOJI HANDLER ============
   const handleEmojiSelect = (emoji) => {
-    const textarea = textareaRef.current;
-    if (textarea) {
-      const start = textarea.selectionStart;
-      const end = textarea.selectionEnd;
-      const newText = messageText.slice(0, start) + emoji + messageText.slice(end);
-      setMessageText(newText);
-      setTimeout(() => {
-        textarea.focus();
-        textarea.selectionStart = start + emoji.length;
-        textarea.selectionEnd = start + emoji.length;
-      }, 0);
-    } else {
-      setMessageText(prev => prev + emoji);
+    if (editableRef.current) {
+      editableRef.current.focus();
+      document.execCommand('insertText', false, emoji);
+      setMessageText(editableRef.current.innerText);
     }
   };
 
@@ -2081,29 +2106,20 @@ function ChatWindow({
   const handleFileSelect = async (e) => {
     let file = e.target.files[0];
     if (!file) return;
-
     const maxSize = 10 * 1024 * 1024;
-
     const isHeic = file.type === 'image/heic' || file.type === 'image/heif'
       || /\.(heic|heif)$/i.test(file.name);
-
     if (isHeic) {
       try {
         const blob = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.85 });
-        file = new File(
-          [blob],
-          file.name.replace(/\.(heic|heif)$/i, '.jpg'),
-          { type: 'image/jpeg' }
-        );
+        file = new File([blob], file.name.replace(/\.(heic|heif)$/i, '.jpg'), { type: 'image/jpeg' });
       } catch (err) {
         console.error('HEIC conversion failed:', err);
         alert('Could not convert HEIC image. Please export it as JPEG first.');
         return;
       }
     }
-
     if (file.size > maxSize) { alert('File size must be less than 10MB'); return; }
-
     setSelectedFile(file);
     if (file.type.startsWith('image/')) {
       const reader = new FileReader();
@@ -2127,17 +2143,13 @@ function ChatWindow({
 
     for (const item of items) {
       if (!item.type.startsWith('image/')) continue;
-
       e.preventDefault();
       let file = item.getAsFile();
       if (!file) continue;
-
       const maxSize = 10 * 1024 * 1024;
       if (file.size > maxSize) { alert('Pasted image must be less than 10MB'); return; }
-
       const isHeic = file.type === 'image/heic' || file.type === 'image/heif'
         || /\.hei[cf]$/i.test(file.name);
-
       if (isHeic) {
         try {
           const blob = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.85 });
@@ -2148,7 +2160,6 @@ function ChatWindow({
           return;
         }
       }
-
       const ext = file.type.split('/')[1] || 'png';
       const namedFile = new File([file], `screenshot-${Date.now()}.${ext}`, { type: file.type });
       setSelectedFile(namedFile);
@@ -2192,20 +2203,7 @@ function ChatWindow({
     }
   };
 
-  const handleSelectSuggestion = (suggestion) => {
-    setMessageText(suggestion);
-    if (textareaRef.current) {
-      textareaRef.current.focus();
-      setTimeout(() => {
-        if (textareaRef.current) {
-          textareaRef.current.style.height = 'auto';
-          textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 120) + 'px';
-        }
-      }, 0);
-    }
-  };
-
-  // ============ WEBSOCKET IMPLEMENTATION ============
+  // ============ WEBSOCKET ============
   const getWsUrl = () => {
     let baseUrl = api.baseUrl || import.meta.env.VITE_API_URL || '';
     if (!baseUrl) baseUrl = window.location.origin;
@@ -2483,16 +2481,10 @@ function ChatWindow({
     dismissLegalAlert();
     setShowEmailModal(false);
     setUnreadToast(false);
+    clearInput();
   }, [conversation?.id]);
 
   useEffect(() => { scrollToBottom(); }, [messages]);
-
-  useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 120) + 'px';
-    }
-  }, [messageText]);
 
   useEffect(() => {
     const pingInterval = setInterval(() => {
@@ -2537,7 +2529,8 @@ function ChatWindow({
   useEffect(() => {
     const handleGlobalPaste = (e) => {
       const tag = document.activeElement?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      const isEditable = document.activeElement?.contentEditable === 'true';
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || isEditable) return;
       handlePaste(e);
     };
     window.addEventListener('paste', handleGlobalPaste);
@@ -2561,12 +2554,14 @@ function ChatWindow({
 
   const scrollToBottom = () => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); };
 
+  // ============ SEND ============
   const handleSend = async (e) => {
     if (e) { e.preventDefault(); e.stopPropagation(); }
-    const hasText = messageText.trim();
+    const text = getMessageContent();
+    const hasText = text.length > 0;
     const hasFile = selectedFile;
     if ((!hasText && !hasFile) || sending || uploading) return;
-    const text = messageText.trim();
+
     try {
       setSending(true);
       let fileUrl = null;
@@ -2576,11 +2571,12 @@ function ChatWindow({
         fileUrl = uploadResult.url;
         fileData = { url: uploadResult.url, name: selectedFile.name, type: selectedFile.type, size: selectedFile.size };
       }
-      setMessageText('');
+
+      clearInput();
       handleRemoveFile();
       setShowEmojiPicker(false);
-      if (textareaRef.current) textareaRef.current.style.height = 'auto';
       sendTypingIndicator(false);
+
       const optimisticMessage = {
         id: `temp-${Date.now()}`,
         conversationId: conversation.id,
@@ -2595,6 +2591,7 @@ function ChatWindow({
       };
       setMessages(prev => [...prev, optimisticMessage]);
       clearAllNotifications(conversation.id);
+
       const sentMessage = await onSendMessage(conversation, text, fileData);
       if (sentMessage.id) displayedMessageIds.current.add(String(sentMessage.id));
       const normalizedSent = normalizeMessage(sentMessage);
@@ -2608,27 +2605,12 @@ function ChatWindow({
     } catch (error) {
       console.error('❌ Failed to send message:', error);
       setMessages(prev => prev.filter(msg => !msg._optimistic));
-      setMessageText(text);
+      // Restore text on failure
+      setInputContent(text);
       alert(`Failed to send message: ${error.message}`);
     } finally {
       setSending(false);
     }
-  };
-
-  const handleTyping = (e) => {
-    const val = e.target.value;
-    if (/file:\/\/[^\s]*\.hei[cf]/i.test(val)) {
-      setMessageText(messageText);
-      return;
-    }
-    setMessageText(val);
-    sendTypingIndicator(true);
-    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    typingTimeoutRef.current = setTimeout(() => sendTypingIndicator(false), 2000);
-  };
-
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); }
   };
 
   const handleDeleteClick = () => setShowDeleteModal(true);
@@ -2705,7 +2687,7 @@ function ChatWindow({
   return (
     <div className="chat-window" style={{ position: 'relative' }}>
 
-      {/* ============ SEND EMAIL MODAL ============ */}
+      {/* SEND EMAIL MODAL */}
       {showEmailModal && (
         <SendEmailModal
           conversation={conversation}
@@ -2714,20 +2696,13 @@ function ChatWindow({
         />
       )}
 
-      {/* ============ LEGAL THREAT ALERT BANNER ============ */}
+      {/* LEGAL THREAT ALERT BANNER */}
       {legalAlert && (
         <div style={{
-          position: 'absolute',
-          top: 0, left: 0, right: 0,
-          zIndex: 9999,
-          background: legalBannerBg,
-          color: 'white',
-          padding: '10px 16px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px',
-          boxShadow: '0 2px 12px rgba(0,0,0,0.3)',
-          animation: 'legalSlideDown 0.3s ease',
+          position: 'absolute', top: 0, left: 0, right: 0, zIndex: 9999,
+          background: legalBannerBg, color: 'white', padding: '10px 16px',
+          display: 'flex', alignItems: 'center', gap: '10px',
+          boxShadow: '0 2px 12px rgba(0,0,0,0.3)', animation: 'legalSlideDown 0.3s ease',
         }}>
           <span style={{ fontSize: '22px', flexShrink: 0 }}>{legalBannerEmoji}</span>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -2753,9 +2728,7 @@ function ChatWindow({
               Priority → URGENT
             </span>
             <button
-              type="button"
-              onClick={dismissLegalAlert}
-              title="Dismiss"
+              type="button" onClick={dismissLegalAlert} title="Dismiss"
               style={{
                 background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: '50%',
                 width: '26px', height: '26px', cursor: 'pointer', color: 'white',
@@ -2769,24 +2742,14 @@ function ChatWindow({
         </div>
       )}
 
-      {/* ============ MARK AS UNREAD TOAST ============ */}
+      {/* MARK AS UNREAD TOAST */}
       {unreadToast && (
         <div style={{
-          position: 'absolute',
-          top: legalAlert ? '66px' : '10px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 9998,
-          background: '#111b21',
-          color: '#fff',
-          fontSize: '13px',
-          fontWeight: 500,
-          padding: '8px 16px',
-          borderRadius: '20px',
-          whiteSpace: 'nowrap',
-          boxShadow: '0 2px 10px rgba(0,0,0,0.25)',
-          animation: 'unreadToastIn 0.2s ease',
-          pointerEvents: 'none',
+          position: 'absolute', top: legalAlert ? '66px' : '10px', left: '50%',
+          transform: 'translateX(-50%)', zIndex: 9998, background: '#111b21',
+          color: '#fff', fontSize: '13px', fontWeight: 500, padding: '8px 16px',
+          borderRadius: '20px', whiteSpace: 'nowrap', boxShadow: '0 2px 10px rgba(0,0,0,0.25)',
+          animation: 'unreadToastIn 0.2s ease', pointerEvents: 'none',
         }}>
           🔵 Marked as unread
         </div>
@@ -2823,7 +2786,6 @@ function ChatWindow({
         </div>
 
         <div className="chat-actions">
-          {/* Send Email button */}
           <button
             className={`send-email-btn${!conversation.customerEmail ? ' send-email-btn--no-email' : ''}`}
             onClick={() => setShowEmailModal(true)}
@@ -2835,25 +2797,18 @@ function ChatWindow({
               <path d="M2 7l7.293 4.707a1 1 0 001.414 0L18 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
             </svg>
             <span className="send-email-btn__label">Send Email</span>
-            {!conversation.customerEmail && (
-              <span className="send-email-btn__dot" />
-            )}
+            {!conversation.customerEmail && <span className="send-email-btn__dot" />}
           </button>
 
-            {onMarkAsUnread && (
-              <button
-                className="mark-unread-btn"
-                onClick={handleMarkAsUnread}
-                title="Mark as unread"
-                type="button"
-              >
-                <svg className="mark-unread-btn__icon" width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <circle cx="9" cy="9" r="7.5" stroke="currentColor" strokeWidth="1.5"/>
-                  <circle cx="9" cy="9" r="3.5" fill="currentColor"/>
-                </svg>
-                <span className="mark-unread-btn__label">Mark Unread</span>
-              </button>
-            )}
+          {onMarkAsUnread && (
+            <button className="mark-unread-btn" onClick={handleMarkAsUnread} title="Mark as unread" type="button">
+              <svg className="mark-unread-btn__icon" width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="9" cy="9" r="7.5" stroke="currentColor" strokeWidth="1.5"/>
+                <circle cx="9" cy="9" r="3.5" fill="currentColor"/>
+              </svg>
+              <span className="mark-unread-btn__label">Mark Unread</span>
+            </button>
+          )}
 
           <button
             className="icon-btn"
@@ -2862,18 +2817,8 @@ function ChatWindow({
             type="button"
             style={{ color: showAISuggestions ? '#00a884' : undefined, fontStyle: 'normal' }}
           >✦</button>
-          <button
-            className="icon-btn"
-            onClick={() => setShowCustomerInfo(!showCustomerInfo)}
-            title="Customer info"
-            type="button"
-          >ℹ️</button>
-          <button
-            className="icon-btn delete-btn"
-            onClick={handleDeleteClick}
-            title="Delete conversation"
-            type="button"
-          >🗑️</button>
+          <button className="icon-btn" onClick={() => setShowCustomerInfo(!showCustomerInfo)} title="Customer info" type="button">ℹ️</button>
+          <button className="icon-btn delete-btn" onClick={handleDeleteClick} title="Delete conversation" type="button">🗑️</button>
         </div>
       </div>
 
@@ -2898,7 +2843,7 @@ function ChatWindow({
         </div>
       )}
 
-      {/* Message Delete Confirmation Modal */}
+      {/* Message Delete Modal */}
       {messageToDelete && (
         <div className="modal-overlay" onClick={handleCancelMessageDelete}>
           <div className="modal-content delete-modal" onClick={e => e.stopPropagation()}>
@@ -3001,12 +2946,8 @@ function ChatWindow({
       {/* File Preview */}
       {filePreview && (
         <div style={{
-          padding: '12px 16px',
-          backgroundColor: '#f5f6f6',
-          borderTop: '1px solid #e9edef',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px',
+          padding: '12px 16px', backgroundColor: '#f5f6f6',
+          borderTop: '1px solid #e9edef', display: 'flex', alignItems: 'center', gap: '12px',
         }}>
           {filePreview.type === 'image' ? (
             <img src={filePreview.url} alt="Preview" style={{ width: '60px', height: '60px', objectFit: 'cover', borderRadius: '8px' }} />
@@ -3019,9 +2960,7 @@ function ChatWindow({
           </div>
           {uploading && <div style={{ fontSize: '12px', color: '#00a884' }}>{uploadProgress}%</div>}
           <button
-            onClick={handleRemoveFile}
-            disabled={uploading}
-            type="button"
+            onClick={handleRemoveFile} disabled={uploading} type="button"
             style={{ background: 'none', border: 'none', fontSize: '20px', cursor: uploading ? 'not-allowed' : 'pointer', color: '#667781', padding: '4px 8px' }}
           >✕</button>
         </div>
@@ -3039,18 +2978,13 @@ function ChatWindow({
         onToggle={() => setShowQuickReplies(!showQuickReplies)}
       />
 
-      {/* Input */}
+      {/* Input Bar */}
       <div style={{
-        background: '#f0f2f5',
-        padding: '12px 16px',
-        borderTop: '1px solid #e9edef',
-        display: 'flex',
-        alignItems: 'flex-end',
-        gap: '8px',
-        flexShrink: 0,
-        boxShadow: '0 -1px 2px rgba(11,20,26,0.05)',
-        position: 'relative',
+        background: '#f0f2f5', padding: '12px 16px', borderTop: '1px solid #e9edef',
+        display: 'flex', alignItems: 'flex-end', gap: '8px',
+        flexShrink: 0, boxShadow: '0 -1px 2px rgba(11,20,26,0.05)', position: 'relative',
       }}>
+        {/* Quick Replies Toggle */}
         <button
           type="button"
           title="Quick replies"
@@ -3064,18 +2998,63 @@ function ChatWindow({
           }}
         >⚡</button>
 
+        {/* ============ WYSIWYG INPUT AREA ============ */}
         <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
-          <textarea
-            ref={textareaRef}
-            className="chat-input"
-            placeholder="Type a message... (Ctrl+V to paste screenshot)"
-            value={messageText}
-            onChange={handleTyping}
-            onKeyDown={handleKeyPress}
-            onPaste={handlePaste}
-            rows="1"
-            disabled={sending || uploading}
+
+          {/* Placeholder — shown when editor is empty */}
+          {!messageText && (
+            <div style={{
+              position: 'absolute', top: 0, left: 0, right: 0,
+              padding: '9px 12px', fontSize: '14px', lineHeight: '1.5',
+              color: '#667781', pointerEvents: 'none', userSelect: 'none', zIndex: 1,
+            }}>
+              Type a message... (Ctrl+V to paste screenshot)
+            </div>
+          )}
+
+          {/* contentEditable WYSIWYG div */}
+          <div
+            ref={editableRef}
+            contentEditable={!sending && !uploading}
+            suppressContentEditableWarning
+            onInput={() => {
+              const text = editableRef.current?.innerText || '';
+              setMessageText(text);
+              sendTypingIndicator(true);
+              if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+              typingTimeoutRef.current = setTimeout(() => sendTypingIndicator(false), 2000);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); }
+            }}
+            onPaste={(e) => {
+              // If clipboard has an image, let handlePaste handle it
+              const items = Array.from(e.clipboardData?.items || []);
+              const hasImage = items.some(i => i.type.startsWith('image/'));
+              if (hasImage) { e.preventDefault(); handlePaste(e); return; }
+              // Otherwise paste as plain text — strips incoming HTML formatting
+              e.preventDefault();
+              const text = e.clipboardData.getData('text/plain');
+              document.execCommand('insertText', false, text);
+            }}
+            style={{
+              ...INPUT_STYLE,
+              display: 'block',
+              minHeight: '38px',
+              maxHeight: '120px',
+              overflowY: 'auto',
+              outline: 'none',
+              color: '#111b21',
+              borderRadius: '8px',
+              border: '1px solid #e9edef',
+              background: '#fff',
+              boxSizing: 'border-box',
+              cursor: sending || uploading ? 'not-allowed' : 'text',
+              opacity: sending || uploading ? 0.6 : 1,
+            }}
           />
+
+          {/* Hidden file input */}
           <input
             ref={fileInputRef}
             type="file"
@@ -3083,11 +3062,14 @@ function ChatWindow({
             onChange={handleFileSelect}
             style={{ display: 'none' }}
           />
+
+          {/* Emoji Picker */}
           {showEmojiPicker && (
             <EmojiPicker onSelect={handleEmojiSelect} onClose={() => setShowEmojiPicker(false)} />
           )}
         </div>
 
+        {/* Emoji Button */}
         <button
           type="button"
           title="Emoji"
@@ -3101,6 +3083,7 @@ function ChatWindow({
           }}
         >😊</button>
 
+        {/* Attach Button */}
         <button
           type="button"
           title="Attach file"
@@ -3116,6 +3099,7 @@ function ChatWindow({
           }}
         >{uploading ? '⏳' : '📎'}</button>
 
+        {/* Send Button */}
         <button
           type="button"
           title="Send message (Enter)"
@@ -3125,11 +3109,9 @@ function ChatWindow({
             width: '44px', height: '44px', minWidth: '44px', flexShrink: 0,
             border: 'none', borderRadius: '50%',
             background: (!messageText.trim() && !selectedFile) || sending || uploading
-              ? 'rgba(0,168,132,0.4)'
-              : '#00a884',
+              ? 'rgba(0,168,132,0.4)' : '#00a884',
             cursor: (!messageText.trim() && !selectedFile) || sending || uploading
-              ? 'not-allowed'
-              : 'pointer',
+              ? 'not-allowed' : 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontSize: '20px', padding: 0, color: 'white',
             boxShadow: '0 2px 6px rgba(0,168,132,0.3)',
@@ -3145,6 +3127,19 @@ function ChatWindow({
         @keyframes unreadToastIn {
           from { opacity: 0; transform: translateX(-50%) translateY(-6px); }
           to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
+        [contenteditable]:empty:focus {
+          outline: none;
+        }
+        [contenteditable] strong { font-weight: 700; }
+        [contenteditable] em { font-style: italic; }
+        [contenteditable] s { text-decoration: line-through; }
+        [contenteditable] code {
+          background: rgba(0,0,0,0.08);
+          padding: 1px 5px;
+          border-radius: 4px;
+          font-size: 0.9em;
+          font-family: monospace;
         }
       `}</style>
     </div>
