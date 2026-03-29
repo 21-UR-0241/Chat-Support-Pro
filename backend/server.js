@@ -11625,14 +11625,14 @@ app.post('/api/ai/suggestions', authenticateToken, async (req, res) => {
       return res.json({ detailedAnswers });
     }
 
-    buildSystemPrompt(
+const systemPrompt = buildSystemPrompt(
     storeName, customerContext, analysisBlock, policyBlock,
     contextQuality, messageRichness, brainContext, brainSettings,
     adminStyleBlock, imageAnalysis,
     conversationState?.sentiment || analysis?.sentiment || 'neutral'
-    )
-    const userPrompt   = buildUserPrompt(chatHistory, clientMessage, messageEdited, adminNote, conversationState, recentContext, brainContext, imageAnalysis || '');
-    const requestBody  = JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1500, temperature: 0.3, system: systemPrompt, messages: [{ role: 'user', content: userPrompt }] });
+    );
+const userPrompt   = buildUserPrompt(chatHistory, clientMessage, messageEdited, adminNote, conversationState, recentContext, brainContext, imageAnalysis || '');
+const requestBody  = JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 2500, temperature: 0.3, system: systemPrompt, messages: [{ role: 'user', content: userPrompt }] });
 
     console.log(`✦ [AI] Calling Anthropic — brain: ${brainContext.length}c, style: ${adminStyleBlock.length}c, image: ${!!imageAnalysis}`);
     const anthropicData = await callAnthropicAPIWithRetry(requestBody, ANTHROPIC_API_KEY);
