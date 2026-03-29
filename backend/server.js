@@ -11625,7 +11625,12 @@ app.post('/api/ai/suggestions', authenticateToken, async (req, res) => {
       return res.json({ detailedAnswers });
     }
 
-    const systemPrompt = buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness, brainContext, brainSettings, adminStyleBlock, imageAnalysis || '');
+    buildSystemPrompt(
+    storeName, customerContext, analysisBlock, policyBlock,
+    contextQuality, messageRichness, brainContext, brainSettings,
+    adminStyleBlock, imageAnalysis,
+    conversationState?.sentiment || analysis?.sentiment || 'neutral'
+    )
     const userPrompt   = buildUserPrompt(chatHistory, clientMessage, messageEdited, adminNote, conversationState, recentContext, brainContext, imageAnalysis || '');
     const requestBody  = JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1500, temperature: 0.3, system: systemPrompt, messages: [{ role: 'user', content: userPrompt }] });
 
@@ -11679,7 +11684,7 @@ app.post('/api/ai/brain-cache/clear', authenticateToken, async (req, res) => {
 
 // ============ PROMPT BUILDER FUNCTIONS ============
 
-function buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness, brainContext = '', brainSettings = {}, adminStyleBlock = '', imageAnalysis = '') {
+function buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness, brainContext = '', brainSettings = {}, adminStyleBlock = '', imageAnalysis = '', sentiment = 'neutral') {
   const hasBrain = brainContext && brainContext.trim().length > 0;
   const brainBlock = hasBrain ? `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nBRAIN RULES — READ THIS BEFORE ANYTHING ELSE\nMandatory store-owner instructions. Override ALL other guidelines.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${brainContext}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCRITICAL BRAIN ENFORCEMENT:\n1. If the customer is asking about a product, protocol, dosing, or anything the brain rules cover — ANSWER IT NOW. Do NOT say "let me check".\n2. Only stall when the brain does NOT contain the answer AND you genuinely need external info (order status, tracking, account details).\n3. Do NOT cross-apply one product's rule to another.\n4. ALL 3 suggestions must use exact values from the matching brain rule.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` : '';
   const imageBlock = imageAnalysis && imageAnalysis.trim() ? `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nSCREENSHOT DATA — full analysis of the agent's uploaded image\nAll values below are CONFIRMED FACTS extracted from the screenshot.\nReference exact order numbers, statuses, amounts, dates, and names directly in replies.\nDo NOT ask for information that is already visible in this screenshot.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${imageAnalysis.trim()}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` : '';
@@ -11700,9 +11705,18 @@ function buildSystemPrompt(storeName, customerContext, analysisBlock, policyBloc
 
   // FIX: word limits tightened to prevent JSON truncation at max_tokens boundary
   // "long" was producing 150+ word suggestions that cut off mid-sentence
-  const lengthRule = len === 'long'  ? `4–5 sentences. Thorough but concise — cover issue, resolution, and reassurance. MAX 90 words per suggestion.`
-                   : len === 'short' ? `1–2 sentences. One clear action per reply. MAX 35 words per suggestion.`
-                   :                   `2–3 sentences. Specific and actionable. MAX 60 words per suggestion.`;
+// FIX: dynamic word limit — complex multi-issue complaints get 140 words
+  // to cover adverse reactions, missing items, and resolution in one reply
+  const isComplexComplaint = messageRichness === 'very_detailed' &&
+    (sentiment === 'very_negative' || sentiment === 'negative');
+  const lengthRule = len === 'long'
+    ? isComplexComplaint
+      ? `5–7 sentences. Multi-issue complaint — acknowledge adverse reactions or most critical issue first, then cover order issues and resolution. MAX 140 words per suggestion.`
+      : `4–5 sentences. Thorough but concise — cover issue, resolution, and reassurance. MAX 90 words per suggestion.`
+    : len === 'short' ? `1–2 sentences. One clear action per reply. MAX 35 words per suggestion.`
+    :                   `2–3 sentences. Specific and actionable. MAX 60 words per suggestion.`;
+
+
 
   const toneRule   = tone === 'formal' ? `Formal, professional. No contractions.`
                    : tone === 'casual' ? `Casual, conversational. Contractions encouraged.`
