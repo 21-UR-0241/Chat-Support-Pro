@@ -1105,3 +1105,31 @@
   .ai-modal-tab-label { display: none; }
   .ai-modal-tab       { padding: 14px; }
 }
+.ai-generate-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0;
+}
+
+.ai-generate-btn {
+  width: 100%;
+  padding: 10px;
+  background: #6366f1;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ai-generate-btn--secondary {
+  background: transparent;
+  color: #6366f1;
+  border: 1px solid #6366f1;
+  font-weight: 500;
+}
+
+.ai-generate-btn:hover { opacity: 0.9; }
+.ai-generate-btn:disabled { opacity: 0.5; cursor: not-allowed; }

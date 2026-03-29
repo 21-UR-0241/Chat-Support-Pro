@@ -11669,6 +11669,14 @@ app.get('/api/ai/brain-debug', authenticateToken, async (req, res) => {
   } catch (err) { return res.status(500).json({ error: err.message }); }
 });
 
+app.post('/api/ai/brain-cache/clear', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+    refreshBrainCache();
+    return res.json({ ok: true, message: 'Brain cache cleared — next request will reload from DB' });
+  } catch (err) { return res.status(500).json({ error: err.message }); }
+});
+
 // ============ PROMPT BUILDER FUNCTIONS ============
 
 function buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness, brainContext = '', brainSettings = {}, adminStyleBlock = '', imageAnalysis = '') {
@@ -11685,12 +11693,28 @@ function buildSystemPrompt(storeName, customerContext, analysisBlock, policyBloc
   } else {
     contextGuidance = contextQuality === 'minimal' ? `ℹ️ FIRST MESSAGE: Answer what you can from brain rules directly. Only ask follow-up questions for things the brain rules don't cover.` : `✓ Use conversation history + brain rules to give a complete, specific answer.`;
   }
-  const len = brainSettings.length || 'medium'; const tone = brainSettings.tone || 'friendly-professional'; const empathy = brainSettings.empathy || 'high';
-  const lengthRule = len === 'long' ? `4–6 sentences minimum. Thorough — cover the issue, resolution, and reassurance.` : len === 'short' ? `1–2 sentences. One clear action per reply.` : `2–4 sentences. Specific and actionable.`;
-  const toneRule = tone === 'formal' ? `Formal, professional. No contractions.` : tone === 'casual' ? `Casual, conversational. Contractions encouraged.` : `Friendly-professional — warm but not overly casual.`;
-  const empathyRule = empathy === 'high' ? `Lead with empathy before solutions.` : empathy === 'low' ? `Skip empathy preambles. Get straight to the solution.` : `Brief empathy acknowledgment, then solution.`;
+
+  const len = brainSettings.length || 'medium';
+  const tone = brainSettings.tone || 'friendly-professional';
+  const empathy = brainSettings.empathy || 'high';
+
+  // FIX: word limits tightened to prevent JSON truncation at max_tokens boundary
+  // "long" was producing 150+ word suggestions that cut off mid-sentence
+  const lengthRule = len === 'long'  ? `4–5 sentences. Thorough but concise — cover issue, resolution, and reassurance. MAX 90 words per suggestion.`
+                   : len === 'short' ? `1–2 sentences. One clear action per reply. MAX 35 words per suggestion.`
+                   :                   `2–3 sentences. Specific and actionable. MAX 60 words per suggestion.`;
+
+  const toneRule   = tone === 'formal' ? `Formal, professional. No contractions.`
+                   : tone === 'casual' ? `Casual, conversational. Contractions encouraged.`
+                   :                    `Friendly-professional — warm but not overly casual.`;
+
+  const empathyRule = empathy === 'high' ? `Lead with empathy before solutions.`
+                    : empathy === 'low'  ? `Skip empathy preambles. Get straight to the solution.`
+                    :                     `Brief empathy acknowledgment, then solution.`;
+
   const qualityBlock = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nREPLY QUALITY (admin-set — non-negotiable):\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nLENGTH:  ${lengthRule}\nTONE:    ${toneRule}\nEMPATHY: ${empathyRule}`;
-  return `${brainBlock}${imageBlock}${styleSection}You are ghostwriting replies for a specific human support agent at ${storeName || 'this store'}. The customer must feel like they are talking to the same knowledgeable person every time.\n\n${qualityBlock}\n\n${contextGuidance}\n\n${customerContext}\n\n${analysisBlock}\n\n${policyBlock}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCORE RULES:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n1. Every suggestion MUST reference specific details — product names, the customer's stated goal, issue described, or something they actually said. Generic replies are not acceptable.\n2. NEVER say "let me check", "let me find out", or "let me get back to you" when the brain rules already contain the answer.\n3. NEVER say "let me check" for general product/knowledge questions. Only use it for real-time lookups (order status, tracking, account balance).\n4. Never ask for information already provided. Never repeat what the agent already said.\n5. Vary the 3 suggestions — different angles, not the same reply reworded:\n   - Suggestion 1: Direct, complete answer using brain knowledge\n   - Suggestion 2: Same answer with different emphasis or additional context\n   - Suggestion 3: Answer + a natural follow-up or next step\n6. Match the customer's emotional state.\n7. Never use: "I understand your frustration", "I apologize for any inconvenience", "Please be advised", "Kindly", "As per our policy", "That's a great question".\n8. No promises on timeframes or amounts unless confirmed.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nRespond ONLY with valid JSON: {"suggestions": ["reply 1", "reply 2", "reply 3"]}`;
+
+  return `${brainBlock}${imageBlock}${styleSection}You are ghostwriting replies for a specific human support agent at ${storeName || 'this store'}. The customer must feel like they are talking to the same knowledgeable person every time.\n\n${qualityBlock}\n\n${contextGuidance}\n\n${customerContext}\n\n${analysisBlock}\n\n${policyBlock}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCORE RULES:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n1. Every suggestion MUST reference specific details — product names, the customer's stated goal, issue described, or something they actually said. Generic replies are not acceptable.\n2. NEVER say "let me check", "let me find out", or "let me get back to you" when the brain rules already contain the answer.\n3. NEVER say "let me check" for general product/knowledge questions. Only use it for real-time lookups (order status, tracking, account balance).\n4. Never ask for information already provided. Never repeat what the agent already said.\n5. Vary the 3 suggestions — different angles, not the same reply reworded:\n   - Suggestion 1: Direct, complete answer using brain knowledge\n   - Suggestion 2: Same answer with different emphasis or additional context\n   - Suggestion 3: Answer + a natural follow-up or next step\n6. Match the customer's emotional state.\n7. Never use: "I understand your frustration", "I apologize for any inconvenience", "Please be advised", "Kindly", "As per our policy", "That\'s a great question".\n8. No promises on timeframes or amounts unless confirmed.\n9. CRITICAL — JSON LIMIT: Each suggestion string must be short enough to fit inside a JSON value. Never write a suggestion that exceeds the word limit in rule LENGTH above. If you are tempted to write more, cut it — a truncated JSON response causes a complete failure.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nRespond ONLY with valid JSON: {"suggestions": ["reply 1", "reply 2", "reply 3"]}`;
 }
 
 function buildUserPrompt(chatHistory, clientMessage, messageEdited, adminNote, conversationState, recentContext, brainContext = '', imageAnalysis = '') {
@@ -11711,6 +11735,9 @@ function buildUserPrompt(chatHistory, clientMessage, messageEdited, adminNote, c
   if (conversationState?.sentiment && conversationState.sentiment !== 'neutral') signals.push(`Sentiment: ${conversationState.sentiment.replace(/_/g, ' ')}`);
   if (conversationState?.isUrgent) signals.push(`Urgent: yes`);
   if (conversationState?.isRepeat) signals.push(`REPEAT/FOLLOW-UP: already asked about this`);
+  if (conversationState?.isWrongItem) signals.push(`WRONG ITEM SENT — do not ask for photo, acknowledge and arrange correct shipment immediately`);
+  if (conversationState?.customerConfirmedAddress) signals.push(`Customer confirmed address is same as on order — do NOT ask for address again`);
+  if (conversationState?.customerAskingForEmail) signals.push(`Customer is asking for an email address to send documents to — provide support email`);
   const alreadyDone = [];
   if (conversationState?.agentAskedForOrder)      alreadyDone.push('asked for order number');
   if (conversationState?.agentAskedForEmail)      alreadyDone.push('asked for email');
@@ -11722,7 +11749,7 @@ function buildUserPrompt(chatHistory, clientMessage, messageEdited, adminNote, c
   const topics = conversationState?.detectedTopics || [];
   if (topics.length > 0) signals.push(`Topics: ${topics.join(', ')}`);
   if (messageEdited) signals.push(`Admin edited this message to guide suggestions`);
-  if (imageAnalysis?.trim()) signals.push(`Screenshot provided — reference visible details in replies`);
+  if (imageAnalysis?.trim()) signals.push(`Screenshot provided — treat the screenshot content as the PRIMARY customer message. Generate replies based on what the screenshot shows, not the chat history.`);
   const lastAgent    = recentContext?.lastAgentMessages?.filter(Boolean).at(-1);
   const prevCustomer = recentContext?.lastCustomerMessages?.filter(Boolean).at(-2);
   const recentLines  = [];
@@ -11732,8 +11759,9 @@ function buildUserPrompt(chatHistory, clientMessage, messageEdited, adminNote, c
   const recentBlock  = recentLines.length > 0 ? `\nRECENT:\n${recentLines.join('\n')}` : '';
   const historyBlock = chatHistory ? `\nCONVERSATION HISTORY:\n${chatHistory}` : '';
   const noteBlock    = adminNote ? `\nADMIN NOTE: ${adminNote}` : '';
-  return `${brainBlock}${imageBlock}${signalsBlock}${recentBlock}${historyBlock}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCUSTOMER MESSAGE:\n${clientMessage}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${noteBlock}\n\nUsing the brain data${imageAnalysis?.trim() ? ' and the screenshot context' : ''} above as your primary source, write 3 specific replies for this customer. If the brain contains the answer, use it now — do not stall. Return JSON only.`;
+  return `${brainBlock}${imageBlock}${signalsBlock}${recentBlock}${historyBlock}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCUSTOMER MESSAGE:\n${clientMessage}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${noteBlock}\n\nUsing the brain data${imageAnalysis?.trim() ? ' and the screenshot context' : ''} above as your primary source, write 3 specific replies for this customer. Keep each reply within the word limit. Return JSON only.`;
 }
+
 
 function buildEnhancedAnalysisBlock(analysis, conversationState, recentContext) {
   if (!analysis && !conversationState && !recentContext) return '';
@@ -11781,39 +11809,106 @@ function buildCustomerContext(customerName, customerEmail, conversationState) {
 }
 
 function buildPolicyBlock() {
-  return `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCOMPANY POLICIES & BRAND VOICE:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nPolicies:\n- Refund window: 30 days from delivery date\n- Always offer replacement before refund for damaged items\n- Free return shipping for defective/damaged products\n- Escalate to supervisor if customer has contacted 3+ times about same issue\n- Price match: Match competitors within 7 days of purchase\n\nBrand Voice:\n- Friendly but professional — never overly casual or use slang\n- Empathetic without being robotic\n- Action-oriented — always indicate next steps\n- Transparent — if you don't know, say you'll find out\n\nAuto-Escalation Triggers:\n- Customer uses words like "lawyer", "sue", "fraud", "scam"\n- Customer explicitly asks for manager/supervisor\n- 3+ messages about same unresolved issue\n- Very negative sentiment + repeat customer`;
+  // Policies are now fully handled by brain rules (ai_training_brain table).
+  // Returning only brand voice and escalation triggers — these are behavioral
+  // guidelines that complement brain rules rather than conflict with them.
+  return `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BRAND VOICE & ESCALATION:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Brand Voice:
+- Friendly but professional — never overly casual or use slang
+- Empathetic without being robotic
+- Action-oriented — always indicate next steps
+- Transparent — if you don't know, say you'll find out
+
+Auto-Escalation Triggers:
+- Customer uses words like "lawyer", "sue", "fraud", "scam"
+- Customer explicitly asks for manager/supervisor
+- 3+ messages about same unresolved issue
+- Very negative sentiment + repeat customer`;
 }
 
 function analyzeConversationState(chatHistory, clientMessage, analysis) {
   const fullText = `${chatHistory || ''} ${clientMessage || ''}`.toLowerCase();
   const messages = (chatHistory || '').split('\n').filter(m => m.trim());
+
   const orderMatch = fullText.match(/(?:order|#)\s*#?(\d{4,})/i);
   const orderNumber = orderMatch ? orderMatch[1] : null;
+
   const emailMatch = fullText.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
   const customerEmail = emailMatch ? emailMatch[0] : null;
-  const productMatch = clientMessage.match(/(blue|red|black|white|green|yellow|purple|pink|orange|brown|gray|grey)\s+(hoodie|shirt|pants|shoes|dress|jacket|sweater|hat|shorts|jeans|blouse|skirt|coat|boots|sneakers|sandals|watch|bag|backpack|wallet|belt|sunglasses|vase|mug|plate|bowl|pillow|blanket|towel|lamp|chair|table|desk|mirror)/i);
-  const productName = productMatch ? productMatch[0] : null;
+
+  const PEPTIDE_PRODUCTS = [
+    'retatrutide','semaglutide','tirzepatide','bpc-157','bpc157','tb-500','tb500',
+    'cjc-1295','ipamorelin','ghk-cu','tesamorelin','sermorelin','nad+','nad',
+    'wolverine','glow blend','klow','mots-c','pt-141','selank','semax','epithalon',
+    'survodutide','cagrilintide','kisspeptin','follistatin','adipotide','aicar',
+    'hexarelin','igf','triptorelin','thymalin','pinealon','oxytocin','ara-290',
+    'ss-31','gonadorelin','hcg','hmg','lipo-c','5-amino-1mq','peg-mgf','mgf',
+    'ghrp','dsip','vip','ghk','tb500','bpc','reta','tirz','sema',
+  ];
+  const msgLower = (clientMessage || '').toLowerCase();
+  const productName = PEPTIDE_PRODUCTS.find(p => msgLower.includes(p)) || null;
+
+  // FIX: detect wrong item even when customer doesn't use the word "wrong"
+  // catches: "ordered PEG MGF and received MGF", "sent X instead of Y"
+  const isWrongItem =
+    /ordered.{0,40}received|sent.{0,30}instead|received.{0,30}instead/i.test(fullText) ||
+    /wrong (item|product|vial|size|dose|peptide)/i.test(fullText);
+
+  // FIX: detect message richness from the client message itself
+  // used by fallback to decide whether to ask for more info or acknowledge directly
+  const wordCount = (clientMessage || '').split(/\s+/).filter(Boolean).length;
+  const messageRichness = wordCount >= 30 ? 'very_detailed'
+    : wordCount >= 15 ? 'detailed'
+    : wordCount >= 5  ? 'brief'
+    : 'very_brief';
+
+  // FIX: detect when customer confirms their address is the same as on the order
+  const customerConfirmedAddress =
+    /address.{0,30}(same|correct|on file|on the order|unchanged)/i.test(msgLower) ||
+    /contact.{0,30}(same|correct|on file|on the order)/i.test(msgLower) ||
+    /same as.{0,20}order/i.test(msgLower);
+
+  // FIX: detect when customer is asking for an email address to send something to
+  const customerAskingForEmail =
+    /email.{0,30}(address|send|reach|contact)/i.test(msgLower) ||
+    /where.{0,20}(send|email)/i.test(msgLower);
+
   const customerMessages = messages.filter(m => m.startsWith('Customer:') || m.startsWith('Client:'));
-  const agentMessages = messages.filter(m => m.startsWith('Agent:') || m.startsWith('Support:'));
+  const agentMessages    = messages.filter(m => m.startsWith('Agent:')    || m.startsWith('Support:'));
   const customerMessageCount = customerMessages.length;
   const lastAgentMessage = agentMessages[agentMessages.length - 1] || '';
+
   return {
-    orderNumber, customerEmail: customerEmail || 'unknown', productName, customerMessageCount, lastAgentMessage,
-    agentAskedForOrder: /order number|order #|order id/i.test(lastAgentMessage),
-    agentAskedForEmail: /email|e-mail address/i.test(lastAgentMessage),
-    agentAskedForPhoto: /photo|picture|image|screenshot/i.test(lastAgentMessage),
-    agentAlreadyApologized: /sorry|apologize|apologies/i.test(lastAgentMessage),
+    orderNumber,
+    customerEmail: customerEmail || 'unknown',
+    productName,
+    customerMessageCount,
+    lastAgentMessage,
+    messageRichness,
+    isWrongItem,
+    customerConfirmedAddress,
+    customerAskingForEmail,
+    agentAskedForOrder:      /order number|order #|order id/i.test(lastAgentMessage),
+    agentAskedForEmail:      /email|e-mail address/i.test(lastAgentMessage),
+    agentAskedForPhoto:      /photo|picture|image|screenshot/i.test(lastAgentMessage),
+    agentAlreadyApologized:  /sorry|apologize|apologies/i.test(lastAgentMessage),
+    agentOfferedRefund:      /refund|money back/i.test(lastAgentMessage),
+    agentOfferedReplacement: /replacement|replace|reship/i.test(lastAgentMessage),
     isEscalating: /manager|supervisor|escalate|unacceptable|ridiculous|lawsuit|lawyer|sue|fraud|scam|bbb|attorney general/i.test(clientMessage),
     hasAttachment: /attached|attachment|photo|image|screenshot|picture|file/i.test(clientMessage),
     isLongConversation: customerMessageCount >= 4,
     turnCount: Math.max(customerMessageCount, agentMessages.length),
     extractedEntities: {
-      ...(orderNumber && { order_number: orderNumber }),
-      ...(productName && { product: productName }),
+      ...(orderNumber  && { order_number: orderNumber }),
+      ...(productName  && { product: productName }),
       ...(customerEmail && customerEmail !== 'unknown' && { email: customerEmail }),
     },
   };
 }
+
 
 function validateSuggestions(suggestions, conversationState, chatHistory) {
   if (!Array.isArray(suggestions)) return [];
@@ -11876,6 +11971,29 @@ function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis, ad
   const agentAlreadyApologized = analysis?.agentAlreadyApologized || false;
   const isUrgent = analysis?.isUrgent || false;
   const isLongConversation = analysis?.isLongConversation || false;
+  const messageRichness = analysis?.messageRichness || recentContext?.messageRichness || 'brief';
+
+  // FIX: detect when customer already explained the issue in detail
+  // so we don't blindly ask for a photo when they've given a full breakdown
+  const customerAlreadyExplained = messageRichness === 'very_detailed' || messageRichness === 'detailed';
+
+  // FIX: detect wrong item even without the word "wrong"
+  // catches: "ordered X received Y", "sent X instead", "received wrong vial"
+  const isWrongItem =
+    /ordered.{0,40}received|sent.{0,30}instead|received.{0,30}instead|wrong (item|product|vial|size|dose|peptide)/i.test(customerMsg + chatHistory) ||
+    topics.includes('wrong_item');
+
+  // FIX: detect when customer explicitly provides their address/contact info
+  // so we don't ask for it again
+  const customerProvidedAddress =
+    /address.{0,30}(same|correct|on file|on the order|unchanged|hasn.t changed)/i.test(lower) ||
+    /contact.{0,30}(same|correct|on file|on the order)/i.test(lower) ||
+    /same as.{0,20}order/i.test(lower);
+
+  // FIX: detect when customer asks for an email address to send something to
+  const customerAskingForEmail =
+    /email.{0,30}(address|send|reach|contact)/i.test(lower) ||
+    /where.{0,20}(send|email)/i.test(lower);
 
   let empathyPrefix = '';
   if (sentiment === 'very_negative' && !agentAlreadyApologized) {
@@ -11898,8 +12016,33 @@ function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis, ad
   }
 
   if (topics.includes('product_issue')) {
+    // FIX: wrong item sent — don't ask for photo, acknowledge and fix immediately
+    if (isWrongItem) {
+      if (customerAskingForEmail) {
+        return [
+          `${empathyPrefix}${repeatPrefix}I'm so sorry about the mix-up — I can see your order and I'm going to get the correct items sent out to you right away. You can reach us at support@pepscustomercare.com to send over your order list, and I'll pull up the details on our end as well.${urgencySuffix}`,
+          `${empathyPrefix}That's entirely our error and I apologize. I'll arrange the correct shipment now — please send your order list to support@pepscustomercare.com and I'll cross-reference it against what we have on file.`,
+          `${empathyPrefix}${repeatPrefix}I've noted the wrong item issue and I'm on it. Send your order details to support@pepscustomercare.com and I'll make sure the correct products go out to you promptly.${urgencySuffix}`
+        ];
+      }
+      return [
+        `${empathyPrefix}${repeatPrefix}I can see your order and I'm sorry about the mix-up. I'll get the correct item sent out to you right away — no need to return anything.${urgencySuffix}`,
+        `${empathyPrefix}That's on us and I apologize. Let me pull up your order and arrange the correct shipment immediately. Could you confirm your shipping address is still the same as on the order?`,
+        `${empathyPrefix}${repeatPrefix}Wrong item is absolutely our mistake — I'm arranging the correct replacement now. I'll have tracking sent to you as soon as it ships.${urgencySuffix}`
+      ];
+    }
+
+    // FIX: customer already gave a detailed explanation — don't ask for photo
+    if (customerAlreadyExplained) {
+      return [
+        `${empathyPrefix}${repeatPrefix}Thank you for the detailed breakdown — I have everything I need to get this sorted. Let me pull up your order and arrange the correction right away.${urgencySuffix}`,
+        `${empathyPrefix}I can see exactly what's happened from your message. I'm looking at your order now and will get back to you with a resolution shortly.`,
+        `${empathyPrefix}${repeatPrefix}Got it — I have all the details I need. I'm going to escalate this now and make sure we get the right items out to you.${urgencySuffix}`
+      ];
+    }
+
     if (hasOrderNumber && hasAttachment) return [`${empathyPrefix}${repeatPrefix}Thank you for the photo and order details. I'm reviewing the issue and will get back to you with a solution right away.${urgencySuffix}`, `${empathyPrefix}I can see the issue clearly from the photo. Let me check the best resolution for you — would you prefer a replacement or a refund?`, `${empathyPrefix}${repeatPrefix}I've noted the issue with your order. Let me escalate this to get it resolved as quickly as possible.${urgencySuffix}`];
-    if (hasOrderNumber && !hasAttachment && !analysis?.agentAskedForPhoto) return [`${empathyPrefix}Thank you for your order details. Could you send a quick photo of the issue? That will help me process this faster.`, `${empathyPrefix}I've located your order. To help resolve this quickly, could you share a picture of the damage or defect?`, `${empathyPrefix}${repeatPrefix}A photo would help me determine the best solution for you. Could you send one when you get a chance?${urgencySuffix}`];
+    if (hasOrderNumber && !hasAttachment && !analysis?.agentAskedForPhoto) return [`${empathyPrefix}Thank you for your order details. Could you send a quick photo of what you received? That will help me process this faster.`, `${empathyPrefix}I've located your order. To help resolve this quickly, could you share a picture of what arrived?`, `${empathyPrefix}${repeatPrefix}A photo would help me determine the best solution for you. Could you send one when you get a chance?${urgencySuffix}`];
     if (!hasOrderNumber && !agentAskedForOrder) return [`${empathyPrefix}I'd like to help resolve this. Could you share your order number so I can pull up the details?`, `${empathyPrefix}That's not the experience we want for you. Could you provide your order number and a brief description of the issue?`, `${empathyPrefix}${repeatPrefix}Let me look into this for you. Can you share your order number and, if possible, a photo of the problem?${urgencySuffix}`];
     return [`${empathyPrefix}I'm looking into this for you now. I'll have an update shortly.${urgencySuffix}`, `${empathyPrefix}Thank you for your patience. I'm checking the available options to resolve this.`, `${empathyPrefix}${repeatPrefix}I want to make sure we get this right. Let me review your case and get back to you with a solution.${urgencySuffix}`];
   }
@@ -11927,6 +12070,7 @@ function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis, ad
   if (analysis?.isQuestion) return [`${empathyPrefix}${repeatPrefix}That's a great question. Let me find the answer for you — one moment.${urgencySuffix}`, `${empathyPrefix}I'd be happy to help with that. Let me check and get back to you with the details.`, `${empathyPrefix}${repeatPrefix}Let me look into that for you. Could you provide any additional details that might help me find the answer faster?${urgencySuffix}`];
   return [`${empathyPrefix}${repeatPrefix}Thank you for your message. Let me look into this and get back to you shortly.${urgencySuffix}`, `${empathyPrefix}I appreciate you reaching out. Could you provide a bit more detail so I can assist you better?`, `${empathyPrefix}${repeatPrefix}I want to make sure I help you with the right information. Could you tell me a bit more about what you need?${urgencySuffix}`];
 }
+
 
 // ============ EMPLOYEE ENDPOINTS ============
 
