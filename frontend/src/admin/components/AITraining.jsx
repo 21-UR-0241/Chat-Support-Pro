@@ -497,16 +497,28 @@ export default function AITraining({ onBrainUpdate }) {
 
   const addRules = useCallback((rules) => { rules.forEach(addRule); }, [addRule]);
 
-  const removeRule = useCallback((brainKey, index) => {
-    setBrain(prev => {
-      const list = [...(prev[brainKey] || [])];
-      list.splice(index, 1);
-      const next = { ...prev, [brainKey]: list };
-      brainRef.current = next;
-      return next;
-    });
-    setDirty(true);
-  }, []);
+const removeRule = useCallback(async (brainKey, index) => {
+  setBrain(prev => {
+    const list = [...(prev[brainKey] || [])];
+    list.splice(index, 1);
+    const next = { ...prev, [brainKey]: list };
+    brainRef.current = next;
+    return next;
+  });
+
+  // Small timeout to let state flush before reading brainRef
+  await new Promise(r => setTimeout(r, 50));
+
+  try {
+    await apiFetch('/ai/training/brain', { method: 'PUT', body: JSON.stringify({ brain: brainRef.current }) });
+    setDirty(false);
+    onBrainUpdate?.();
+    showToast('🗑️ Rule removed');
+  } catch (e) {
+    showToast(`❌ Failed to remove rule: ${e.message}`);
+  }
+}, [onBrainUpdate, showToast]);
+
 
   const saveBrain = useCallback(async () => {
     setSaving(true);
