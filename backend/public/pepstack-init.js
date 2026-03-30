@@ -1,4 +1,5 @@
 
+
 // (function () {
 //   'use strict';
 
@@ -236,13 +237,11 @@
 
 //   /* ── Mobile ── */
 //   @media (max-width:540px) {
-//     /* Floating button — keep it compact */
 //     #psk-btn {
 //       font-size:12px; padding:9px 13px 9px 11px;
 //       bottom:74px; left:12px;
 //     }
 
-//     /* Main modal — bottom sheet */
 //     #psk-overlay { align-items:flex-end; }
 //     #psk-modal {
 //       width:100%; max-width:100%; max-height:92vh;
@@ -255,7 +254,6 @@
 //       to   { transform:translateY(0);    opacity:1; }
 //     }
 
-//     /* Pull handle */
 //     #psk-modal::before {
 //       content:''; display:block; width:36px; height:4px;
 //       background:#e5e7eb; border-radius:99px;
@@ -266,13 +264,10 @@
 //     .psk-heading { font-size:19px; }
 //     .psk-sub { font-size:13px; margin-bottom:18px; }
 
-//     /* Stack 2-col rows */
 //     .psk-row { grid-template-columns:1fr; gap:0; }
 
-//     /* Bigger tap targets on chips */
 //     .psk-chip { padding:8px 14px; font-size:12.5px; }
 
-//     /* Inputs / selects — larger tap area */
 //     .psk-field input,
 //     .psk-field select,
 //     .psk-field textarea { padding:13px 14px; font-size:15px; }
@@ -280,10 +275,8 @@
 //     .psk-btn-primary { padding:15px; font-size:15px; }
 //     .psk-btn-scan    { padding:14px; font-size:13px; }
 
-//     /* Divider labels smaller */
 //     .psk-divider-label { font-size:10px; margin:16px 0 10px; }
 
-//     /* Scan modal — true full screen on mobile */
 //     #psk-scan-overlay {
 //       align-items:stretch;
 //       justify-content:stretch;
@@ -299,14 +292,12 @@
 //     }
 //     #psk-scan-header {
 //       padding:14px 16px;
-//       /* Extra top padding for iPhone notch / status bar */
 //       padding-top:max(14px, env(safe-area-inset-top));
 //     }
 //     #psk-scan-header-title strong { font-size:13px; }
 //     #psk-scan-iframe-wrap { height:0; flex:1; }
 //   }
 
-//   /* Very small screens */
 //   @media (max-width:360px) {
 //     #psk-modal { padding:18px 14px 28px; }
 //     .psk-heading { font-size:17px; }
@@ -426,37 +417,6 @@
 //             <input type="text" id="psk-meds" placeholder="e.g. TRT, Metformin, SSRIs, blood thinners, none">
 //           </div>
 
-//           <div class="psk-field">
-//             <label>Allergies</label>
-//             <input type="text" id="psk-allergies" placeholder="e.g. Penicillin, soy, none">
-//           </div>
-
-//           <!-- Experience -->
-//           <div class="psk-divider-label">Experience</div>
-
-//           <div class="psk-row">
-//             <div class="psk-field">
-//               <label>Peptide Experience</label>
-//               <select id="psk-experience">
-//                 <option value="">Select</option>
-//                 <option value="never">First time</option>
-//                 <option value="beginner">Beginner (1–2 tried)</option>
-//                 <option value="intermediate">Intermediate</option>
-//                 <option value="experienced">Experienced</option>
-//               </select>
-//             </div>
-//             <div class="psk-field">
-//               <label>Admin Preference</label>
-//               <select id="psk-admin">
-//                 <option value="">Select</option>
-//                 <option value="injectable">Injections OK</option>
-//                 <option value="no_inject">No injections</option>
-//                 <option value="oral">Oral / sublingual only</option>
-//                 <option value="nasal">Nasal spray only</option>
-//               </select>
-//             </div>
-//           </div>
-
 //           <button class="psk-btn-primary" id="psk-submit" disabled>
 //             Get My Stack Recommendations &#8594;
 //           </button>
@@ -509,52 +469,48 @@
 //   document.body.appendChild(container);
 
 //   /* ── refs ── */
-//   const btn            = document.getElementById('psk-btn');
-//   const overlay        = document.getElementById('psk-overlay');
-//   const closeBtn       = document.getElementById('psk-close');
-//   const step1          = document.getElementById('psk-step1');
-//   const loader         = document.getElementById('psk-loader');
-//   const results        = document.getElementById('psk-results');
-//   const inner          = document.getElementById('psk-results-inner');
-//   const errorEl        = document.getElementById('psk-error');
-//   const submitBtn      = document.getElementById('psk-submit');
-//   const resetBtn       = document.getElementById('psk-reset');
-//   const pill2          = document.getElementById('psk-pill-2');
-//   const ageEl          = document.getElementById('psk-age');
-//   const sexEl          = document.getElementById('psk-sex');
-//   const weightEl       = document.getElementById('psk-weight');
-//   const heightEl       = document.getElementById('psk-height');
-//   const medsEl         = document.getElementById('psk-meds');
-//   const allergiesEl    = document.getElementById('psk-allergies');
-//   const experienceEl   = document.getElementById('psk-experience');
-//   const adminEl        = document.getElementById('psk-admin');
-//   const chips          = document.querySelectorAll('#psk-chips .psk-chip');
-//   const condChips      = document.querySelectorAll('#psk-conditions .psk-chip');
-//   const condNoneBtn    = document.getElementById('psk-cond-none');
-//   const customToggle   = document.getElementById('psk-custom-toggle');
-//   const customBody     = document.getElementById('psk-custom-body');
-//   const customChevron  = document.getElementById('psk-custom-chevron');
-//   const customGoalEl   = document.getElementById('psk-custom-goal');
-//   const customBadge    = document.getElementById('psk-custom-badge');
+//   const btn           = document.getElementById('psk-btn');
+//   const overlay       = document.getElementById('psk-overlay');
+//   const closeBtn      = document.getElementById('psk-close');
+//   const step1         = document.getElementById('psk-step1');
+//   const loader        = document.getElementById('psk-loader');
+//   const results       = document.getElementById('psk-results');
+//   const inner         = document.getElementById('psk-results-inner');
+//   const errorEl       = document.getElementById('psk-error');
+//   const submitBtn     = document.getElementById('psk-submit');
+//   const resetBtn      = document.getElementById('psk-reset');
+//   const pill2         = document.getElementById('psk-pill-2');
+//   const ageEl         = document.getElementById('psk-age');
+//   const sexEl         = document.getElementById('psk-sex');
+//   const weightEl      = document.getElementById('psk-weight');
+//   const heightEl      = document.getElementById('psk-height');
+//   const medsEl        = document.getElementById('psk-meds');
+//   const chips         = document.querySelectorAll('#psk-chips .psk-chip');
+//   const condChips     = document.querySelectorAll('#psk-conditions .psk-chip');
+//   const condNoneBtn   = document.getElementById('psk-cond-none');
+//   const customToggle  = document.getElementById('psk-custom-toggle');
+//   const customBody    = document.getElementById('psk-custom-body');
+//   const customChevron = document.getElementById('psk-custom-chevron');
+//   const customGoalEl  = document.getElementById('psk-custom-goal');
+//   const customBadge   = document.getElementById('psk-custom-badge');
 
 //   let selectedGoal       = null;
 //   let selectedConditions = [];
 //   let condNone           = false;
 
 //   /* ── scan modal ── */
-//   const scanBtn      = document.getElementById('psk-scan-btn');
-//   const scanOverlay  = document.getElementById('psk-scan-overlay');
-//   const scanClose    = document.getElementById('psk-scan-close');
-//   const scanIframe   = document.getElementById('psk-scan-iframe');
-//   const scanLoading  = document.getElementById('psk-scan-loading');
+//   const scanBtn     = document.getElementById('psk-scan-btn');
+//   const scanOverlay = document.getElementById('psk-scan-overlay');
+//   const scanClose   = document.getElementById('psk-scan-close');
+//   const scanIframe  = document.getElementById('psk-scan-iframe');
+//   const scanLoading = document.getElementById('psk-scan-loading');
 
-//   var scanBlocked = false; // set true if pepscan blocks iframe embedding
+//   var scanBlocked = false;
 
 //   scanBtn.addEventListener('click', function (e) {
 //     e.preventDefault();
 //     e.stopPropagation();
 
-//     // If we already know iframe is blocked, go straight to popup
 //     if (scanBlocked) { openScanPopup(); return; }
 
 //     scanOverlay.classList.add('open');
@@ -564,16 +520,10 @@
 //       scanLoading.classList.remove('hidden');
 //       scanLoading.querySelector('p').textContent = 'Loading PepScan\u2026';
 
-//       // Detect X-Frame-Options / CSP block via error event
-//       scanIframe.onerror = function () {
-//         handleIframeBlocked();
-//       };
+//       scanIframe.onerror = function () { handleIframeBlocked(); };
 
-//       // Some browsers fire load even on blocked frames — check via postMessage or a timed fallback
 //       var blockTimer = setTimeout(function () {
-//         // If still loading after 6s and doc is inaccessible, assume blocked
 //         try {
-//           // Accessing contentDocument throws if cross-origin blocked
 //           var doc = scanIframe.contentDocument || scanIframe.contentWindow.document;
 //           if (!doc || doc.URL === 'about:blank') handleIframeBlocked();
 //           else scanLoading.classList.add('hidden');
@@ -586,17 +536,14 @@
 //         clearTimeout(blockTimer);
 //         try {
 //           var doc = scanIframe.contentDocument || scanIframe.contentWindow.document;
-//           // If the URL is still about:blank after load, it was blocked
 //           if (!doc || doc.URL === 'about:blank' || doc.body === null) {
 //             handleIframeBlocked();
 //           } else {
 //             scanLoading.classList.add('hidden');
 //           }
 //         } catch (err) {
-//           // Cross-origin block — this is expected when site loads normally (CORS)
-//           // If we get a SecurityError it actually loaded fine, just cross-origin
 //           if (err.name === 'SecurityError') {
-//             scanLoading.classList.add('hidden'); // loaded OK, just cross-origin
+//             scanLoading.classList.add('hidden');
 //           } else {
 //             handleIframeBlocked();
 //           }
@@ -610,7 +557,6 @@
 //   function handleIframeBlocked() {
 //     scanBlocked = true;
 //     closeScanModal();
-//     // Reset iframe so we don't retry the blocked URL
 //     scanIframe.src = 'about:blank';
 //     openScanPopup();
 //   }
@@ -619,7 +565,6 @@
 //     var isMobile = window.innerWidth <= 768;
 //     var w, h, left, top;
 //     if (isMobile) {
-//       // Fill the whole screen on mobile
 //       w    = window.screen.availWidth;
 //       h    = window.screen.availHeight;
 //       left = 0;
@@ -722,17 +667,14 @@
 //       method: 'POST',
 //       headers: { 'Content-Type': 'application/json' },
 //       body: JSON.stringify({
-//         age:              ageEl.value.trim(),
-//         sex:              sexEl.value,
-//         weight:           weightEl.value.trim(),
-//         height:           heightEl.value.trim(),
-//         goal:             getGoal(),
-//         conditions:       selectedConditions,
-//         conditions_none:  condNone,
-//         medications:      medsEl.value.trim(),
-//         allergies:        allergiesEl.value.trim(),
-//         experience:       experienceEl.value,
-//         admin_pref:       adminEl.value
+//         age:             ageEl.value.trim(),
+//         sex:             sexEl.value,
+//         weight:          weightEl.value.trim(),
+//         height:          heightEl.value.trim(),
+//         goal:            getGoal(),
+//         conditions:      selectedConditions,
+//         conditions_none: condNone,
+//         medications:     medsEl.value.trim()
 //       })
 //     })
 //     .then(function (r) { if (!r.ok) throw new Error('status ' + r.status); return r.json(); })
@@ -751,7 +693,7 @@
 //     customGoalEl.value = ''; customBadge.classList.remove('show');
 //     customBody.classList.remove('show'); customChevron.classList.remove('open');
 //     ageEl.value = ''; sexEl.value = ''; weightEl.value = ''; heightEl.value = '';
-//     medsEl.value = ''; allergiesEl.value = ''; experienceEl.value = ''; adminEl.value = '';
+//     medsEl.value = '';
 //     submitBtn.disabled = true; step1.style.display = '';
 //     document.getElementById('psk-pill-1').classList.add('active');
 //     pill2.classList.remove('active');
@@ -795,9 +737,8 @@
 //     btn.style.transform     = open ? 'translateY(8px)' : '';
 //   }
 
-//   // Watch class changes on the chat button (most reliable signal)
 //   function attachChatObserver() {
-//     var chatBtn = document.getElementById('chat-widget-button');
+//     var chatBtn    = document.getElementById('chat-widget-button');
 //     var chatIframe = document.getElementById('chat-widget-iframe');
 //     if (!chatBtn && !chatIframe) return false;
 
@@ -807,7 +748,6 @@
 //     return true;
 //   }
 
-//   // Chat widget may not be in DOM yet — poll until found then attach
 //   if (!attachChatObserver()) {
 //     var pollTimer = setInterval(function () {
 //       if (attachChatObserver()) {
@@ -815,7 +755,6 @@
 //         syncBtnVisibility();
 //       }
 //     }, 300);
-//     // Give up after 15s
 //     setTimeout(function () { clearInterval(pollTimer); }, 15000);
 //   }
 
@@ -823,7 +762,6 @@
 
 //   console.log('✅ PepStack widget loaded');
 // })();
-
 
 
 
@@ -867,11 +805,15 @@
 
   #psk-modal {
     background:#fff; border-radius:24px; width:96%; max-width:520px; max-height:92vh;
-    overflow-y:auto; padding:36px 32px 30px; position:relative;
+    overflow-y:auto;
+    /* ── Symmetric padding: equal horizontal edges, close-btn-safe top ── */
+    padding:48px 36px 36px;
+    position:relative;
     animation:psk-slideup .3s cubic-bezier(.22,1,.36,1);
     font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; color:#111827;
     box-shadow:0 24px 64px rgba(0,0,0,.16),0 4px 16px rgba(0,0,0,.08);
     scrollbar-width:thin; scrollbar-color:#e5e7eb transparent;
+    box-sizing:border-box;
   }
   @keyframes psk-slideup {
     from{opacity:0;transform:translateY(20px) scale(.97)}
@@ -879,9 +821,10 @@
   }
 
   .psk-close {
-    position:absolute; top:16px; right:16px; background:#f3f4f6; border:none; border-radius:50%;
+    position:absolute; top:14px; right:14px; background:#f3f4f6; border:none; border-radius:50%;
     width:32px; height:32px; display:flex; align-items:center; justify-content:center;
     cursor:pointer; color:#6b7280; font-size:15px; transition:background .14s,color .14s;
+    flex-shrink:0; z-index:1;
   }
   .psk-close:hover { background:#e5e7eb; color:#111827; }
 
@@ -890,6 +833,7 @@
     width:36px; height:36px; background:linear-gradient(135deg,#f0fdf4,#dcfce7);
     border:1.5px solid #bbf7d0; border-radius:10px;
     display:flex; align-items:center; justify-content:center; font-size:18px;
+    flex-shrink:0;
   }
   .psk-logo-text { font-size:14px; font-weight:800; color:#111827; letter-spacing:-.2px; }
   .psk-logo-sub  { font-size:10px; font-weight:500; color:#6b7280; letter-spacing:.3px; text-transform:uppercase; }
@@ -1020,7 +964,12 @@
   .psk-error { display:none; background:#fef2f2; border:1.5px solid #fecaca; border-radius:10px; padding:12px 15px; font-size:13px; color:#dc2626; margin-top:12px; line-height:1.5; }
   .psk-error.show { display:block; }
 
-  .psk-steps { display:flex; gap:5px; margin-bottom:26px; }
+  /* ── Step pills: full width, close-btn space reserved on the right ── */
+  .psk-steps {
+    display:flex; gap:5px; margin-bottom:24px;
+    /* Pull pills edge-to-edge within the padded container */
+    margin-left:0; margin-right:0;
+  }
   .psk-step-pill { height:3px; flex:1; border-radius:99px; background:#f3f4f6; transition:background .35s; }
   .psk-step-pill.active { background:#3bbe28; }
 
@@ -1073,18 +1022,21 @@
     #psk-modal {
       width:100%; max-width:100%; max-height:92vh;
       border-radius:20px 20px 0 0;
-      padding:20px 18px 32px;
+      /* Symmetric horizontal padding on mobile, extra top for close btn + drag handle */
+      padding:14px 20px 36px;
       animation:psk-sheet-up .32s cubic-bezier(.22,1,.36,1);
+      box-sizing:border-box;
     }
     @keyframes psk-sheet-up {
       from { transform:translateY(100%); opacity:.6; }
       to   { transform:translateY(0);    opacity:1; }
     }
 
+    /* Drag handle */
     #psk-modal::before {
       content:''; display:block; width:36px; height:4px;
       background:#e5e7eb; border-radius:99px;
-      margin:0 auto 16px; flex-shrink:0;
+      margin:0 auto 18px;
     }
 
     .psk-close { top:14px; right:14px; }
@@ -1126,7 +1078,7 @@
   }
 
   @media (max-width:360px) {
-    #psk-modal { padding:18px 14px 28px; }
+    #psk-modal { padding:14px 16px 28px; }
     .psk-heading { font-size:17px; }
     .psk-chip { padding:7px 11px; font-size:12px; }
   }
