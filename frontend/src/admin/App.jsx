@@ -1377,8 +1377,8 @@ import MobileMenu from './components/MobileMenu';
 import ConversationNotes from './components/ConversationNotes';
 import AITraining from './components/AITraining';
 import StoreManagement from './components/StoreManagement';
-import ArchivedConversations from './components/ArchivedConversations';
-import BlacklistManager from './components/BlacklistManager';
+import ArchivedConversations from './components/Archivedconversations';
+import BlacklistManager from './components/Blacklistmanager';
 
 function App() {
   const [employee, setEmployee] = useState(null);
