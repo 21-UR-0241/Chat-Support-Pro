@@ -3679,7 +3679,7 @@
     // =========================================================
     // SEND MESSAGE
     // =========================================================
-    async function sendMessage() {
+async function sendMessage() {
       const message = chatInput.value.trim();
       if (!message && !selectedFile) return;
       if (uploading) return;
@@ -3748,6 +3748,17 @@
             })
           }, 15000, 2);
 
+          // ── Blacklist: blocked from starting a conversation ──────────
+          if (response.status === 403) {
+            const failedMsg = document.querySelector('[data-message-id="' + tempId + '"]');
+            if (failedMsg) failedMsg.remove();
+            addMessage('system', 'We are unable to process your request at this time.', 'System');
+            chatInput.disabled = false; sendButton.disabled = false;
+            attachButton.disabled = false; removeFileBtn.disabled = false;
+            return;
+          }
+          // ─────────────────────────────────────────────────────────────
+
           if (!response.ok) throw new Error('Failed to create conversation');
           const conv = await response.json();
           conversationId = conv.id;
@@ -3784,6 +3795,18 @@
           if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
             updateMessageStatus(tempId, 'failed');
+
+            // ── Blacklist: blocked from sending a message ────────────────
+            if (response.status === 403) {
+              const failedMsg = document.querySelector('[data-message-id="' + tempId + '"]');
+              if (failedMsg) failedMsg.remove();
+              addMessage('system', 'We are unable to process your request at this time.', 'System');
+              chatInput.disabled = false; sendButton.disabled = false;
+              attachButton.disabled = false; removeFileBtn.disabled = false;
+              return;
+            }
+            // ─────────────────────────────────────────────────────────────
+
             if (errorData.error && (
               errorData.error.includes('conversation') ||
               errorData.error === 'conversation_not_found' ||

@@ -1,6 +1,4 @@
 
-
-
 // import React, { useState, useEffect, useRef } from 'react';
 // import { formatDistanceToNow } from 'date-fns';
 // import heic2any from 'heic2any';
@@ -10,6 +8,7 @@
 // import AISuggestions from './Aisuggestions';
 // import QuickReplies from './Quickreplies';
 // import '../styles/ChatWindow.css';
+// import { parseMarkdown } from '../../utils/parseMarkdown';
 
 // // ============ EMOJI DATA ============
 // const EMOJI_CATEGORIES = [
@@ -95,7 +94,6 @@
 // }
 
 // // ============ SEND EMAIL MODAL ============
-
 // function SendEmailModal({ conversation, onClose, onSend }) {
 //   const customerEmail = conversation?.customerEmail || '';
 //   const customerName = conversation?.customerName || 'Customer';
@@ -147,7 +145,6 @@
 //         }}
 //         onClick={e => e.stopPropagation()}
 //       >
-//         {/* Modal Header */}
 //         <div style={{
 //           background: '#00a884',
 //           padding: '16px 20px',
@@ -191,12 +188,8 @@
 //           </div>
 //         ) : (
 //           <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-
-//             {/* To */}
 //             <div>
-//               <label style={{ fontSize: '12px', fontWeight: 600, color: '#3b4a54', display: 'block', marginBottom: '5px' }}>
-//                 To
-//               </label>
+//               <label style={{ fontSize: '12px', fontWeight: 600, color: '#3b4a54', display: 'block', marginBottom: '5px' }}>To</label>
 //               <input
 //                 type="email"
 //                 value={to}
@@ -213,12 +206,8 @@
 //                 onBlur={e => e.target.style.borderColor = '#e9edef'}
 //               />
 //             </div>
-
-//             {/* Subject */}
 //             <div>
-//               <label style={{ fontSize: '12px', fontWeight: 600, color: '#3b4a54', display: 'block', marginBottom: '5px' }}>
-//                 Subject
-//               </label>
+//               <label style={{ fontSize: '12px', fontWeight: 600, color: '#3b4a54', display: 'block', marginBottom: '5px' }}>Subject</label>
 //               <input
 //                 type="text"
 //                 value={subject}
@@ -235,12 +224,8 @@
 //                 onBlur={e => e.target.style.borderColor = '#e9edef'}
 //               />
 //             </div>
-
-//             {/* Body */}
 //             <div>
-//               <label style={{ fontSize: '12px', fontWeight: 600, color: '#3b4a54', display: 'block', marginBottom: '5px' }}>
-//                 Message
-//               </label>
+//               <label style={{ fontSize: '12px', fontWeight: 600, color: '#3b4a54', display: 'block', marginBottom: '5px' }}>Message</label>
 //               <textarea
 //                 ref={bodyRef}
 //                 value={body}
@@ -262,8 +247,6 @@
 //                 {body.length} chars
 //               </div>
 //             </div>
-
-//             {/* Error */}
 //             {error && (
 //               <div style={{
 //                 background: '#fff5f5', border: '1px solid #fed7d7',
@@ -273,8 +256,6 @@
 //                 ⚠️ {error}
 //               </div>
 //             )}
-
-//             {/* Footer */}
 //             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', paddingTop: '4px' }}>
 //               <button
 //                 type="button"
@@ -286,9 +267,7 @@
 //                   fontSize: '14px', fontWeight: 500,
 //                   cursor: sending ? 'not-allowed' : 'pointer', color: '#3b4a54',
 //                 }}
-//               >
-//                 Cancel
-//               </button>
+//               >Cancel</button>
 //               <button
 //                 type="button"
 //                 onClick={handleSend}
@@ -326,6 +305,18 @@
 //   fileData: parseFileData(msg.fileData || msg.file_data),
 // });
 
+// // ============ SHARED INPUT STYLE ============
+// const INPUT_STYLE = {
+//   fontSize:     '14px',
+//   lineHeight:   '1.5',
+//   fontFamily:   'inherit',
+//   padding:      '9px 12px',
+//   whiteSpace:   'pre-wrap',
+//   wordBreak:    'break-word',
+//   overflowWrap: 'break-word',
+// };
+
+// // ============ MAIN COMPONENT ============
 // function ChatWindow({
 //   conversation,
 //   onSendMessage,
@@ -378,7 +369,7 @@
 //   const legalDismissTimerRef = useRef(null);
 
 //   const messagesEndRef = useRef(null);
-//   const textareaRef = useRef(null);
+//   const editableRef = useRef(null);   // contentEditable WYSIWYG
 //   const fileInputRef = useRef(null);
 //   const typingTimeoutRef = useRef(null);
 //   const wsRef = useRef(null);
@@ -399,7 +390,6 @@
 //   useEffect(() => { conversationRef.current = conversation; }, [conversation]);
 //   useEffect(() => { employeeNameRef.current = employeeName; }, [employeeName]);
 
-//   // Cleanup timers on unmount
 //   useEffect(() => {
 //     return () => {
 //       if (legalDismissTimerRef.current) clearTimeout(legalDismissTimerRef.current);
@@ -407,6 +397,48 @@
 //     };
 //   }, []);
 
+//   // ============ WYSIWYG HELPERS ============
+//   const htmlToMarkdown = (html) => {
+//     if (!html) return '';
+//     return html
+//       .replace(/<strong>(.*?)<\/strong>/gi, '**$1**')
+//       .replace(/<b>(.*?)<\/b>/gi, '**$1**')
+//       .replace(/<em>(.*?)<\/em>/gi, '*$1*')
+//       .replace(/<i>(.*?)<\/i>/gi, '*$1*')
+//       .replace(/<s>(.*?)<\/s>/gi, '~~$1~~')
+//       .replace(/<strike>(.*?)<\/strike>/gi, '~~$1~~')
+//       .replace(/<code>(.*?)<\/code>/gi, '`$1`')
+//       .replace(/<br\s*\/?>/gi, '\n')
+//       .replace(/&amp;/g, '&')
+//       .replace(/&lt;/g, '<')
+//       .replace(/&gt;/g, '>')
+//       .replace(/<[^>]+>/g, '')
+//       .trim();
+//   };
+
+//   const getMessageContent = () => htmlToMarkdown(editableRef.current?.innerHTML || '');
+
+//   const clearInput = () => {
+//     if (editableRef.current) editableRef.current.innerHTML = '';
+//     setMessageText('');
+//   };
+
+//   const setInputContent = (text) => {
+//     if (editableRef.current) {
+//       editableRef.current.innerHTML = parseMarkdown(text);
+//       // Move cursor to end
+//       const range = document.createRange();
+//       const sel = window.getSelection();
+//       range.selectNodeContents(editableRef.current);
+//       range.collapse(false);
+//       sel.removeAllRanges();
+//       sel.addRange(range);
+//       editableRef.current.focus();
+//     }
+//     setMessageText(text);
+//   };
+
+//   // ============ TEMPLATE / SUGGESTION HANDLERS ============
 //   const loadTemplates = async () => {
 //     try {
 //       const data = await api.getTemplates();
@@ -417,7 +449,6 @@
 //     }
 //   };
 
-//   // ============ SEND EMAIL HANDLER ============
 //   const handleSendEmail = async ({ to, subject, body }) => {
 //     await api.sendEmail({
 //       to,
@@ -428,20 +459,16 @@
 //     });
 //   };
 
-//   // ============ MARK AS UNREAD HANDLER ============
 //   const handleMarkAsUnread = () => {
 //     if (!onMarkAsUnread || !conversation?.id) return;
 //     onMarkAsUnread(conversation.id);
-//     // Show a brief toast confirmation
 //     setUnreadToast(true);
 //     if (unreadToastTimerRef.current) clearTimeout(unreadToastTimerRef.current);
 //     unreadToastTimerRef.current = setTimeout(() => setUnreadToast(false), 2500);
 //   };
 
-//   // ============ QUICK REPLY HANDLERS ============
 //   const handleUseTemplate = (content) => {
-//     setMessageText(content);
-//     if (textareaRef.current) textareaRef.current.focus();
+//     setInputContent(content);
 //   };
 
 //   const handleAddQuickReply = async ({ name, content }) => {
@@ -459,21 +486,16 @@
 //     setTemplates(prev => prev.filter(t => t.id !== templateId));
 //   };
 
+//   const handleSelectSuggestion = (suggestion) => {
+//     setInputContent(suggestion);
+//   };
+
 //   // ============ EMOJI HANDLER ============
 //   const handleEmojiSelect = (emoji) => {
-//     const textarea = textareaRef.current;
-//     if (textarea) {
-//       const start = textarea.selectionStart;
-//       const end = textarea.selectionEnd;
-//       const newText = messageText.slice(0, start) + emoji + messageText.slice(end);
-//       setMessageText(newText);
-//       setTimeout(() => {
-//         textarea.focus();
-//         textarea.selectionStart = start + emoji.length;
-//         textarea.selectionEnd = start + emoji.length;
-//       }, 0);
-//     } else {
-//       setMessageText(prev => prev + emoji);
+//     if (editableRef.current) {
+//       editableRef.current.focus();
+//       document.execCommand('insertText', false, emoji);
+//       setMessageText(editableRef.current.innerText);
 //     }
 //   };
 
@@ -503,29 +525,20 @@
 //   const handleFileSelect = async (e) => {
 //     let file = e.target.files[0];
 //     if (!file) return;
-
 //     const maxSize = 10 * 1024 * 1024;
-
 //     const isHeic = file.type === 'image/heic' || file.type === 'image/heif'
 //       || /\.(heic|heif)$/i.test(file.name);
-
 //     if (isHeic) {
 //       try {
 //         const blob = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.85 });
-//         file = new File(
-//           [blob],
-//           file.name.replace(/\.(heic|heif)$/i, '.jpg'),
-//           { type: 'image/jpeg' }
-//         );
+//         file = new File([blob], file.name.replace(/\.(heic|heif)$/i, '.jpg'), { type: 'image/jpeg' });
 //       } catch (err) {
 //         console.error('HEIC conversion failed:', err);
 //         alert('Could not convert HEIC image. Please export it as JPEG first.');
 //         return;
 //       }
 //     }
-
 //     if (file.size > maxSize) { alert('File size must be less than 10MB'); return; }
-
 //     setSelectedFile(file);
 //     if (file.type.startsWith('image/')) {
 //       const reader = new FileReader();
@@ -549,17 +562,13 @@
 
 //     for (const item of items) {
 //       if (!item.type.startsWith('image/')) continue;
-
 //       e.preventDefault();
 //       let file = item.getAsFile();
 //       if (!file) continue;
-
 //       const maxSize = 10 * 1024 * 1024;
 //       if (file.size > maxSize) { alert('Pasted image must be less than 10MB'); return; }
-
 //       const isHeic = file.type === 'image/heic' || file.type === 'image/heif'
 //         || /\.hei[cf]$/i.test(file.name);
-
 //       if (isHeic) {
 //         try {
 //           const blob = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.85 });
@@ -570,7 +579,6 @@
 //           return;
 //         }
 //       }
-
 //       const ext = file.type.split('/')[1] || 'png';
 //       const namedFile = new File([file], `screenshot-${Date.now()}.${ext}`, { type: file.type });
 //       setSelectedFile(namedFile);
@@ -614,20 +622,7 @@
 //     }
 //   };
 
-//   const handleSelectSuggestion = (suggestion) => {
-//     setMessageText(suggestion);
-//     if (textareaRef.current) {
-//       textareaRef.current.focus();
-//       setTimeout(() => {
-//         if (textareaRef.current) {
-//           textareaRef.current.style.height = 'auto';
-//           textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 120) + 'px';
-//         }
-//       }, 0);
-//     }
-//   };
-
-//   // ============ WEBSOCKET IMPLEMENTATION ============
+//   // ============ WEBSOCKET ============
 //   const getWsUrl = () => {
 //     let baseUrl = api.baseUrl || import.meta.env.VITE_API_URL || '';
 //     if (!baseUrl) baseUrl = window.location.origin;
@@ -905,16 +900,10 @@
 //     dismissLegalAlert();
 //     setShowEmailModal(false);
 //     setUnreadToast(false);
+//     clearInput();
 //   }, [conversation?.id]);
 
 //   useEffect(() => { scrollToBottom(); }, [messages]);
-
-//   useEffect(() => {
-//     if (textareaRef.current) {
-//       textareaRef.current.style.height = 'auto';
-//       textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 120) + 'px';
-//     }
-//   }, [messageText]);
 
 //   useEffect(() => {
 //     const pingInterval = setInterval(() => {
@@ -959,7 +948,8 @@
 //   useEffect(() => {
 //     const handleGlobalPaste = (e) => {
 //       const tag = document.activeElement?.tagName;
-//       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+//       const isEditable = document.activeElement?.contentEditable === 'true';
+//       if (tag === 'INPUT' || tag === 'TEXTAREA' || isEditable) return;
 //       handlePaste(e);
 //     };
 //     window.addEventListener('paste', handleGlobalPaste);
@@ -983,12 +973,14 @@
 
 //   const scrollToBottom = () => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); };
 
+//   // ============ SEND ============
 //   const handleSend = async (e) => {
 //     if (e) { e.preventDefault(); e.stopPropagation(); }
-//     const hasText = messageText.trim();
+//     const text = getMessageContent();
+//     const hasText = text.length > 0;
 //     const hasFile = selectedFile;
 //     if ((!hasText && !hasFile) || sending || uploading) return;
-//     const text = messageText.trim();
+
 //     try {
 //       setSending(true);
 //       let fileUrl = null;
@@ -998,11 +990,12 @@
 //         fileUrl = uploadResult.url;
 //         fileData = { url: uploadResult.url, name: selectedFile.name, type: selectedFile.type, size: selectedFile.size };
 //       }
-//       setMessageText('');
+
+//       clearInput();
 //       handleRemoveFile();
 //       setShowEmojiPicker(false);
-//       if (textareaRef.current) textareaRef.current.style.height = 'auto';
 //       sendTypingIndicator(false);
+
 //       const optimisticMessage = {
 //         id: `temp-${Date.now()}`,
 //         conversationId: conversation.id,
@@ -1017,6 +1010,7 @@
 //       };
 //       setMessages(prev => [...prev, optimisticMessage]);
 //       clearAllNotifications(conversation.id);
+
 //       const sentMessage = await onSendMessage(conversation, text, fileData);
 //       if (sentMessage.id) displayedMessageIds.current.add(String(sentMessage.id));
 //       const normalizedSent = normalizeMessage(sentMessage);
@@ -1030,27 +1024,12 @@
 //     } catch (error) {
 //       console.error('❌ Failed to send message:', error);
 //       setMessages(prev => prev.filter(msg => !msg._optimistic));
-//       setMessageText(text);
+//       // Restore text on failure
+//       setInputContent(text);
 //       alert(`Failed to send message: ${error.message}`);
 //     } finally {
 //       setSending(false);
 //     }
-//   };
-
-//   const handleTyping = (e) => {
-//     const val = e.target.value;
-//     if (/file:\/\/[^\s]*\.hei[cf]/i.test(val)) {
-//       setMessageText(messageText);
-//       return;
-//     }
-//     setMessageText(val);
-//     sendTypingIndicator(true);
-//     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-//     typingTimeoutRef.current = setTimeout(() => sendTypingIndicator(false), 2000);
-//   };
-
-//   const handleKeyPress = (e) => {
-//     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); }
 //   };
 
 //   const handleDeleteClick = () => setShowDeleteModal(true);
@@ -1127,7 +1106,7 @@
 //   return (
 //     <div className="chat-window" style={{ position: 'relative' }}>
 
-//       {/* ============ SEND EMAIL MODAL ============ */}
+//       {/* SEND EMAIL MODAL */}
 //       {showEmailModal && (
 //         <SendEmailModal
 //           conversation={conversation}
@@ -1136,20 +1115,13 @@
 //         />
 //       )}
 
-//       {/* ============ LEGAL THREAT ALERT BANNER ============ */}
+//       {/* LEGAL THREAT ALERT BANNER */}
 //       {legalAlert && (
 //         <div style={{
-//           position: 'absolute',
-//           top: 0, left: 0, right: 0,
-//           zIndex: 9999,
-//           background: legalBannerBg,
-//           color: 'white',
-//           padding: '10px 16px',
-//           display: 'flex',
-//           alignItems: 'center',
-//           gap: '10px',
-//           boxShadow: '0 2px 12px rgba(0,0,0,0.3)',
-//           animation: 'legalSlideDown 0.3s ease',
+//           position: 'absolute', top: 0, left: 0, right: 0, zIndex: 9999,
+//           background: legalBannerBg, color: 'white', padding: '10px 16px',
+//           display: 'flex', alignItems: 'center', gap: '10px',
+//           boxShadow: '0 2px 12px rgba(0,0,0,0.3)', animation: 'legalSlideDown 0.3s ease',
 //         }}>
 //           <span style={{ fontSize: '22px', flexShrink: 0 }}>{legalBannerEmoji}</span>
 //           <div style={{ flex: 1, minWidth: 0 }}>
@@ -1175,9 +1147,7 @@
 //               Priority → URGENT
 //             </span>
 //             <button
-//               type="button"
-//               onClick={dismissLegalAlert}
-//               title="Dismiss"
+//               type="button" onClick={dismissLegalAlert} title="Dismiss"
 //               style={{
 //                 background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: '50%',
 //                 width: '26px', height: '26px', cursor: 'pointer', color: 'white',
@@ -1191,24 +1161,14 @@
 //         </div>
 //       )}
 
-//       {/* ============ MARK AS UNREAD TOAST ============ */}
+//       {/* MARK AS UNREAD TOAST */}
 //       {unreadToast && (
 //         <div style={{
-//           position: 'absolute',
-//           top: legalAlert ? '66px' : '10px',
-//           left: '50%',
-//           transform: 'translateX(-50%)',
-//           zIndex: 9998,
-//           background: '#111b21',
-//           color: '#fff',
-//           fontSize: '13px',
-//           fontWeight: 500,
-//           padding: '8px 16px',
-//           borderRadius: '20px',
-//           whiteSpace: 'nowrap',
-//           boxShadow: '0 2px 10px rgba(0,0,0,0.25)',
-//           animation: 'unreadToastIn 0.2s ease',
-//           pointerEvents: 'none',
+//           position: 'absolute', top: legalAlert ? '66px' : '10px', left: '50%',
+//           transform: 'translateX(-50%)', zIndex: 9998, background: '#111b21',
+//           color: '#fff', fontSize: '13px', fontWeight: 500, padding: '8px 16px',
+//           borderRadius: '20px', whiteSpace: 'nowrap', boxShadow: '0 2px 10px rgba(0,0,0,0.25)',
+//           animation: 'unreadToastIn 0.2s ease', pointerEvents: 'none',
 //         }}>
 //           🔵 Marked as unread
 //         </div>
@@ -1245,7 +1205,6 @@
 //         </div>
 
 //         <div className="chat-actions">
-//           {/* Send Email button */}
 //           <button
 //             className={`send-email-btn${!conversation.customerEmail ? ' send-email-btn--no-email' : ''}`}
 //             onClick={() => setShowEmailModal(true)}
@@ -1257,25 +1216,18 @@
 //               <path d="M2 7l7.293 4.707a1 1 0 001.414 0L18 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
 //             </svg>
 //             <span className="send-email-btn__label">Send Email</span>
-//             {!conversation.customerEmail && (
-//               <span className="send-email-btn__dot" />
-//             )}
+//             {!conversation.customerEmail && <span className="send-email-btn__dot" />}
 //           </button>
 
-//             {onMarkAsUnread && (
-//               <button
-//                 className="mark-unread-btn"
-//                 onClick={handleMarkAsUnread}
-//                 title="Mark as unread"
-//                 type="button"
-//               >
-//                 <svg className="mark-unread-btn__icon" width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
-//                   <circle cx="9" cy="9" r="7.5" stroke="currentColor" strokeWidth="1.5"/>
-//                   <circle cx="9" cy="9" r="3.5" fill="currentColor"/>
-//                 </svg>
-//                 <span className="mark-unread-btn__label">Mark Unread</span>
-//               </button>
-//             )}
+//           {onMarkAsUnread && (
+//             <button className="mark-unread-btn" onClick={handleMarkAsUnread} title="Mark as unread" type="button">
+//               <svg className="mark-unread-btn__icon" width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+//                 <circle cx="9" cy="9" r="7.5" stroke="currentColor" strokeWidth="1.5"/>
+//                 <circle cx="9" cy="9" r="3.5" fill="currentColor"/>
+//               </svg>
+//               <span className="mark-unread-btn__label">Mark Unread</span>
+//             </button>
+//           )}
 
 //           <button
 //             className="icon-btn"
@@ -1284,18 +1236,8 @@
 //             type="button"
 //             style={{ color: showAISuggestions ? '#00a884' : undefined, fontStyle: 'normal' }}
 //           >✦</button>
-//           <button
-//             className="icon-btn"
-//             onClick={() => setShowCustomerInfo(!showCustomerInfo)}
-//             title="Customer info"
-//             type="button"
-//           >ℹ️</button>
-//           <button
-//             className="icon-btn delete-btn"
-//             onClick={handleDeleteClick}
-//             title="Delete conversation"
-//             type="button"
-//           >🗑️</button>
+//           <button className="icon-btn" onClick={() => setShowCustomerInfo(!showCustomerInfo)} title="Customer info" type="button">ℹ️</button>
+//           <button className="icon-btn delete-btn" onClick={handleDeleteClick} title="Delete conversation" type="button">🗑️</button>
 //         </div>
 //       </div>
 
@@ -1320,7 +1262,7 @@
 //         </div>
 //       )}
 
-//       {/* Message Delete Confirmation Modal */}
+//       {/* Message Delete Modal */}
 //       {messageToDelete && (
 //         <div className="modal-overlay" onClick={handleCancelMessageDelete}>
 //           <div className="modal-content delete-modal" onClick={e => e.stopPropagation()}>
@@ -1423,12 +1365,8 @@
 //       {/* File Preview */}
 //       {filePreview && (
 //         <div style={{
-//           padding: '12px 16px',
-//           backgroundColor: '#f5f6f6',
-//           borderTop: '1px solid #e9edef',
-//           display: 'flex',
-//           alignItems: 'center',
-//           gap: '12px',
+//           padding: '12px 16px', backgroundColor: '#f5f6f6',
+//           borderTop: '1px solid #e9edef', display: 'flex', alignItems: 'center', gap: '12px',
 //         }}>
 //           {filePreview.type === 'image' ? (
 //             <img src={filePreview.url} alt="Preview" style={{ width: '60px', height: '60px', objectFit: 'cover', borderRadius: '8px' }} />
@@ -1441,9 +1379,7 @@
 //           </div>
 //           {uploading && <div style={{ fontSize: '12px', color: '#00a884' }}>{uploadProgress}%</div>}
 //           <button
-//             onClick={handleRemoveFile}
-//             disabled={uploading}
-//             type="button"
+//             onClick={handleRemoveFile} disabled={uploading} type="button"
 //             style={{ background: 'none', border: 'none', fontSize: '20px', cursor: uploading ? 'not-allowed' : 'pointer', color: '#667781', padding: '4px 8px' }}
 //           >✕</button>
 //         </div>
@@ -1461,18 +1397,13 @@
 //         onToggle={() => setShowQuickReplies(!showQuickReplies)}
 //       />
 
-//       {/* Input */}
+//       {/* Input Bar */}
 //       <div style={{
-//         background: '#f0f2f5',
-//         padding: '12px 16px',
-//         borderTop: '1px solid #e9edef',
-//         display: 'flex',
-//         alignItems: 'flex-end',
-//         gap: '8px',
-//         flexShrink: 0,
-//         boxShadow: '0 -1px 2px rgba(11,20,26,0.05)',
-//         position: 'relative',
+//         background: '#f0f2f5', padding: '12px 16px', borderTop: '1px solid #e9edef',
+//         display: 'flex', alignItems: 'flex-end', gap: '8px',
+//         flexShrink: 0, boxShadow: '0 -1px 2px rgba(11,20,26,0.05)', position: 'relative',
 //       }}>
+//         {/* Quick Replies Toggle */}
 //         <button
 //           type="button"
 //           title="Quick replies"
@@ -1486,18 +1417,63 @@
 //           }}
 //         >⚡</button>
 
+//         {/* ============ WYSIWYG INPUT AREA ============ */}
 //         <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
-//           <textarea
-//             ref={textareaRef}
-//             className="chat-input"
-//             placeholder="Type a message... (Ctrl+V to paste screenshot)"
-//             value={messageText}
-//             onChange={handleTyping}
-//             onKeyDown={handleKeyPress}
-//             onPaste={handlePaste}
-//             rows="1"
-//             disabled={sending || uploading}
+
+//           {/* Placeholder — shown when editor is empty */}
+//           {!messageText && (
+//             <div style={{
+//               position: 'absolute', top: 0, left: 0, right: 0,
+//               padding: '9px 12px', fontSize: '14px', lineHeight: '1.5',
+//               color: '#667781', pointerEvents: 'none', userSelect: 'none', zIndex: 1,
+//             }}>
+//               Type a message... (Ctrl+V to paste screenshot)
+//             </div>
+//           )}
+
+//           {/* contentEditable WYSIWYG div */}
+//           <div
+//             ref={editableRef}
+//             contentEditable={!sending && !uploading}
+//             suppressContentEditableWarning
+//             onInput={() => {
+//               const text = editableRef.current?.innerText || '';
+//               setMessageText(text);
+//               sendTypingIndicator(true);
+//               if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+//               typingTimeoutRef.current = setTimeout(() => sendTypingIndicator(false), 2000);
+//             }}
+//             onKeyDown={(e) => {
+//               if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); }
+//             }}
+//             onPaste={(e) => {
+//               // If clipboard has an image, let handlePaste handle it
+//               const items = Array.from(e.clipboardData?.items || []);
+//               const hasImage = items.some(i => i.type.startsWith('image/'));
+//               if (hasImage) { e.preventDefault(); handlePaste(e); return; }
+//               // Otherwise paste as plain text — strips incoming HTML formatting
+//               e.preventDefault();
+//               const text = e.clipboardData.getData('text/plain');
+//               document.execCommand('insertText', false, text);
+//             }}
+//             style={{
+//               ...INPUT_STYLE,
+//               display: 'block',
+//               minHeight: '38px',
+//               maxHeight: '120px',
+//               overflowY: 'auto',
+//               outline: 'none',
+//               color: '#111b21',
+//               borderRadius: '8px',
+//               border: '1px solid #e9edef',
+//               background: '#fff',
+//               boxSizing: 'border-box',
+//               cursor: sending || uploading ? 'not-allowed' : 'text',
+//               opacity: sending || uploading ? 0.6 : 1,
+//             }}
 //           />
+
+//           {/* Hidden file input */}
 //           <input
 //             ref={fileInputRef}
 //             type="file"
@@ -1505,11 +1481,14 @@
 //             onChange={handleFileSelect}
 //             style={{ display: 'none' }}
 //           />
+
+//           {/* Emoji Picker */}
 //           {showEmojiPicker && (
 //             <EmojiPicker onSelect={handleEmojiSelect} onClose={() => setShowEmojiPicker(false)} />
 //           )}
 //         </div>
 
+//         {/* Emoji Button */}
 //         <button
 //           type="button"
 //           title="Emoji"
@@ -1523,6 +1502,7 @@
 //           }}
 //         >😊</button>
 
+//         {/* Attach Button */}
 //         <button
 //           type="button"
 //           title="Attach file"
@@ -1538,6 +1518,7 @@
 //           }}
 //         >{uploading ? '⏳' : '📎'}</button>
 
+//         {/* Send Button */}
 //         <button
 //           type="button"
 //           title="Send message (Enter)"
@@ -1547,11 +1528,9 @@
 //             width: '44px', height: '44px', minWidth: '44px', flexShrink: 0,
 //             border: 'none', borderRadius: '50%',
 //             background: (!messageText.trim() && !selectedFile) || sending || uploading
-//               ? 'rgba(0,168,132,0.4)'
-//               : '#00a884',
+//               ? 'rgba(0,168,132,0.4)' : '#00a884',
 //             cursor: (!messageText.trim() && !selectedFile) || sending || uploading
-//               ? 'not-allowed'
-//               : 'pointer',
+//               ? 'not-allowed' : 'pointer',
 //             display: 'flex', alignItems: 'center', justifyContent: 'center',
 //             fontSize: '20px', padding: 0, color: 'white',
 //             boxShadow: '0 2px 6px rgba(0,168,132,0.3)',
@@ -1568,16 +1547,25 @@
 //           from { opacity: 0; transform: translateX(-50%) translateY(-6px); }
 //           to   { opacity: 1; transform: translateX(-50%) translateY(0); }
 //         }
+//         [contenteditable]:empty:focus {
+//           outline: none;
+//         }
+//         [contenteditable] strong { font-weight: 700; }
+//         [contenteditable] em { font-style: italic; }
+//         [contenteditable] s { text-decoration: line-through; }
+//         [contenteditable] code {
+//           background: rgba(0,0,0,0.08);
+//           padding: 1px 5px;
+//           border-radius: 4px;
+//           font-size: 0.9em;
+//           font-family: monospace;
+//         }
 //       `}</style>
 //     </div>
 //   );
 // }
 
 // export default ChatWindow;
-
-
-
-
 
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -1873,6 +1861,391 @@ function SendEmailModal({ conversation, onClose, onSend }) {
   );
 }
 
+// ============ BLACKLIST MODAL ============
+function BlacklistModal({ conversation, storeName, onClose, onConfirm }) {
+  const customerEmail = conversation?.customerEmail || '';
+  const customerName = conversation?.customerName || 'Customer';
+
+  // 'store' = current store only | 'all' = all stores
+  const [scope, setScope] = useState('store');
+  const [reason, setReason] = useState('');
+  const [confirming, setConfirming] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleConfirm = async () => {
+    setError('');
+    try {
+      setConfirming(true);
+      await onConfirm({
+        email: customerEmail,
+        conversationId: conversation?.id,   // ← add this line
+        storeIdentifier: conversation?.storeIdentifier,
+        allStores: scope === 'all',
+        reason: reason.trim(),
+        customerName,
+      });
+      setDone(true);
+    } catch (err) {
+      setError(err.message || 'Failed to blacklist. Please try again.');
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  const scopeStore = scope === 'store';
+  const accentColor = '#e53e3e';
+
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, zIndex: 10001,
+        background: 'rgba(11,20,26,0.6)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '16px',
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          background: '#fff',
+          borderRadius: '14px',
+          width: '100%',
+          maxWidth: '480px',
+          boxShadow: '0 12px 40px rgba(0,0,0,0.28)',
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+          animation: 'modalSlideUp 0.22s ease',
+        }}
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div style={{
+          background: accentColor,
+          padding: '16px 20px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{ fontSize: '22px' }}>🚫</span>
+            <div>
+              <div style={{ color: '#fff', fontWeight: 700, fontSize: '15px' }}>Blacklist Customer</div>
+              <div style={{ color: 'rgba(255,255,255,0.82)', fontSize: '12px' }}>{customerName}</div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              background: 'rgba(255,255,255,0.2)', border: 'none',
+              borderRadius: '50%', width: '30px', height: '30px',
+              cursor: 'pointer', color: '#fff', fontSize: '15px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >✕</button>
+        </div>
+
+        {done ? (
+          <div style={{ padding: '40px 24px', textAlign: 'center' }}>
+            <div style={{ fontSize: '48px', marginBottom: '12px' }}>✅</div>
+            <div style={{ fontSize: '17px', fontWeight: 700, color: '#111b21', marginBottom: '6px' }}>
+              Customer Blacklisted
+            </div>
+            <div style={{ fontSize: '13px', color: '#667781', marginBottom: '6px' }}>
+              <strong>{customerEmail || customerName}</strong> has been blacklisted
+            </div>
+            <div style={{ fontSize: '13px', color: '#667781', marginBottom: '24px' }}>
+              {scope === 'all'
+                ? 'across all stores.'
+                : <>from <strong>{storeName || conversation?.storeIdentifier || 'this store'}</strong> only.</>}
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              style={{
+                background: accentColor, color: '#fff', border: 'none',
+                borderRadius: '8px', padding: '10px 28px',
+                fontSize: '14px', fontWeight: 600, cursor: 'pointer',
+              }}
+            >Close</button>
+          </div>
+        ) : (
+          <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+
+            {/* Customer info pill */}
+            <div style={{
+              background: '#fff5f5', border: '1px solid #fed7d7',
+              borderRadius: '10px', padding: '12px 14px',
+              display: 'flex', alignItems: 'center', gap: '10px',
+            }}>
+              <span style={{ fontSize: '20px' }}>👤</span>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: '14px', color: '#111b21', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {customerName}
+                </div>
+                <div style={{ fontSize: '12px', color: '#667781', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {customerEmail || 'No email on file'}
+                </div>
+              </div>
+            </div>
+
+            {/* Scope selector */}
+            <div>
+              <div style={{ fontSize: '12px', fontWeight: 600, color: '#3b4a54', marginBottom: '10px' }}>
+                Blacklist scope
+              </div>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                {/* Store only */}
+                <button
+                  type="button"
+                  onClick={() => setScope('store')}
+                  style={{
+                    flex: 1, padding: '12px 10px',
+                    border: `2px solid ${scopeStore ? accentColor : '#e9edef'}`,
+                    borderRadius: '10px',
+                    background: scopeStore ? '#fff5f5' : '#f9fafb',
+                    cursor: 'pointer', textAlign: 'left',
+                    transition: 'all 0.15s',
+                    outline: 'none',
+                  }}
+                >
+                  <div style={{ fontSize: '20px', marginBottom: '4px' }}>🏪</div>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: scopeStore ? accentColor : '#111b21' }}>
+                    This store only
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#667781', marginTop: '2px', lineHeight: '1.4' }}>
+                    {storeName || conversation?.storeIdentifier || 'Current store'}
+                  </div>
+                </button>
+
+                {/* All stores */}
+                <button
+                  type="button"
+                  onClick={() => setScope('all')}
+                  style={{
+                    flex: 1, padding: '12px 10px',
+                    border: `2px solid ${!scopeStore ? accentColor : '#e9edef'}`,
+                    borderRadius: '10px',
+                    background: !scopeStore ? '#fff5f5' : '#f9fafb',
+                    cursor: 'pointer', textAlign: 'left',
+                    transition: 'all 0.15s',
+                    outline: 'none',
+                  }}
+                >
+                  <div style={{ fontSize: '20px', marginBottom: '4px' }}>🌐</div>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: !scopeStore ? accentColor : '#111b21' }}>
+                    All stores
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#667781', marginTop: '2px', lineHeight: '1.4' }}>
+                    Block network-wide
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* Reason (optional) */}
+            <div>
+              <label style={{ fontSize: '12px', fontWeight: 600, color: '#3b4a54', display: 'block', marginBottom: '5px' }}>
+                Reason <span style={{ fontWeight: 400, color: '#aab8c2' }}>(optional)</span>
+              </label>
+              <textarea
+                value={reason}
+                onChange={e => setReason(e.target.value)}
+                placeholder="e.g. Repeated chargebacks, abusive behaviour…"
+                rows={3}
+                style={{
+                  width: '100%', padding: '9px 12px',
+                  border: '1.5px solid #e9edef', borderRadius: '8px',
+                  fontSize: '13px', color: '#111b21', outline: 'none',
+                  boxSizing: 'border-box', background: '#f9fafb',
+                  resize: 'vertical', fontFamily: 'inherit', lineHeight: '1.5',
+                  transition: 'border-color 0.15s',
+                }}
+                onFocus={e => e.target.style.borderColor = accentColor}
+                onBlur={e => e.target.style.borderColor = '#e9edef'}
+              />
+            </div>
+
+            {/* Warning */}
+            <div style={{
+              background: '#fffbeb', border: '1px solid #f6e05e',
+              borderRadius: '8px', padding: '10px 14px',
+              fontSize: '12px', color: '#744210',
+              display: 'flex', gap: '8px', alignItems: 'flex-start',
+            }}>
+              <span style={{ flexShrink: 0, marginTop: '1px' }}>⚠️</span>
+              <span>
+                {scope === 'all'
+                  ? 'This will block the customer from contacting support across every store in your network.'
+                  : `This will block the customer from contacting support on ${storeName || 'this store'} only.`}
+                {' '}This action can be undone from the Blacklist Manager.
+              </span>
+            </div>
+
+            {error && (
+              <div style={{
+                background: '#fff5f5', border: '1px solid #fed7d7',
+                borderRadius: '8px', padding: '10px 14px',
+                fontSize: '13px', color: '#c53030',
+              }}>
+                ⚠️ {error}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', paddingTop: '2px' }}>
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={confirming}
+                style={{
+                  background: '#f0f2f5', border: '1px solid #e9edef',
+                  borderRadius: '8px', padding: '10px 20px',
+                  fontSize: '14px', fontWeight: 500,
+                  cursor: confirming ? 'not-allowed' : 'pointer', color: '#3b4a54',
+                }}
+              >Cancel</button>
+              <button
+                type="button"
+                onClick={handleConfirm}
+                disabled={confirming}
+                style={{
+                  background: confirming ? 'rgba(229,62,62,0.45)' : accentColor,
+                  border: 'none', borderRadius: '8px',
+                  padding: '10px 24px', fontSize: '14px',
+                  fontWeight: 600, cursor: confirming ? 'not-allowed' : 'pointer',
+                  color: '#fff', display: 'flex', alignItems: 'center', gap: '8px',
+                  boxShadow: '0 2px 6px rgba(229,62,62,0.3)',
+                }}
+              >
+                {confirming ? <>⏳ Blacklisting…</> : <>🚫 Blacklist Customer</>}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============ ARCHIVE MODAL ============
+function ArchiveModal({ conversation, storeName, onClose, onConfirm }) {
+  const [archiving, setArchiving] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleConfirm = async () => {
+    setError('');
+    try {
+      setArchiving(true);
+      await onConfirm();
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Failed to archive. Please try again.');
+      setArchiving(false);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, zIndex: 10001,
+        background: 'rgba(11,20,26,0.55)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '16px',
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          background: '#fff', borderRadius: '14px',
+          width: '100%', maxWidth: '420px',
+          boxShadow: '0 12px 40px rgba(0,0,0,0.25)',
+          overflow: 'hidden',
+          animation: 'modalSlideUp 0.22s ease',
+        }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div style={{
+          background: '#6366f1', padding: '16px 20px',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{ fontSize: '22px' }}>📦</span>
+            <div>
+              <div style={{ color: '#fff', fontWeight: 700, fontSize: '15px' }}>Archive Conversation</div>
+              <div style={{ color: 'rgba(255,255,255,0.82)', fontSize: '12px' }}>
+                {conversation?.customerName || 'Customer'} · {storeName || conversation?.storeIdentifier}
+              </div>
+            </div>
+          </div>
+          <button
+            type="button" onClick={onClose}
+            style={{
+              background: 'rgba(255,255,255,0.2)', border: 'none',
+              borderRadius: '50%', width: '30px', height: '30px',
+              cursor: 'pointer', color: '#fff', fontSize: '15px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >✕</button>
+        </div>
+
+        <div style={{ padding: '24px 20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <p style={{ margin: 0, fontSize: '14px', color: '#3b4a54', lineHeight: '1.6' }}>
+            This conversation will be moved to the <strong>Archive</strong>. It won't appear in the
+            active inbox but remains fully searchable and can be restored at any time.
+          </p>
+
+          <div style={{
+            background: '#f0f0ff', border: '1px solid #c7d2fe',
+            borderRadius: '8px', padding: '10px 14px',
+            fontSize: '12px', color: '#3730a3',
+            display: 'flex', gap: '8px', alignItems: 'flex-start',
+          }}>
+            <span style={{ flexShrink: 0 }}>ℹ️</span>
+            <span>Unlike Delete, archived conversations are never permanently removed.</span>
+          </div>
+
+          {error && (
+            <div style={{
+              background: '#fff5f5', border: '1px solid #fed7d7',
+              borderRadius: '8px', padding: '10px 14px',
+              fontSize: '13px', color: '#c53030',
+            }}>
+              ⚠️ {error}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '4px' }}>
+            <button
+              type="button" onClick={onClose} disabled={archiving}
+              style={{
+                background: '#f0f2f5', border: '1px solid #e9edef',
+                borderRadius: '8px', padding: '10px 20px',
+                fontSize: '14px', fontWeight: 500,
+                cursor: archiving ? 'not-allowed' : 'pointer', color: '#3b4a54',
+              }}
+            >Cancel</button>
+            <button
+              type="button" onClick={handleConfirm} disabled={archiving}
+              style={{
+                background: archiving ? 'rgba(99,102,241,0.45)' : '#6366f1',
+                border: 'none', borderRadius: '8px',
+                padding: '10px 24px', fontSize: '14px',
+                fontWeight: 600, cursor: archiving ? 'not-allowed' : 'pointer',
+                color: '#fff', display: 'flex', alignItems: 'center', gap: '8px',
+                boxShadow: '0 2px 6px rgba(99,102,241,0.3)',
+              }}
+            >
+              {archiving ? <>⏳ Archiving…</> : <>📦 Archive</>}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ============ HELPER: parse fileData safely ============
 const parseFileData = (raw) => {
   if (!raw) return null;
@@ -1897,6 +2270,115 @@ const INPUT_STYLE = {
   overflowWrap: 'break-word',
 };
 
+
+function ActionsDropdown({
+  conversation, onSendEmail, onMarkAsUnread,
+  onArchive, onBlacklist, onCustomerInfo, onDelete,
+}) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef(null);
+ 
+  React.useEffect(() => {
+    const handler = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    if (open) document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+ 
+  const item = (icon, label, onClick, danger = false) => (
+    <button
+      type="button"
+      onClick={() => { onClick(); setOpen(false); }}
+      style={{
+        width: '100%', textAlign: 'left', padding: '9px 14px',
+        border: 'none', background: 'none', cursor: 'pointer',
+        display: 'flex', alignItems: 'center', gap: '10px',
+        fontSize: '13.5px', fontWeight: 500,
+        color: danger ? '#e53e3e' : '#111b21',
+        transition: 'background 0.1s',
+        fontFamily: 'inherit',
+      }}
+      onMouseEnter={e => e.currentTarget.style.background = danger ? '#fff5f5' : '#f0f2f5'}
+      onMouseLeave={e => e.currentTarget.style.background = 'none'}
+    >
+      <span style={{ fontSize: '16px', width: '20px', textAlign: 'center', flexShrink: 0 }}>{icon}</span>
+      {label}
+    </button>
+  );
+ 
+  const divider = () => (
+    <div style={{ height: '1px', background: '#e9edef', margin: '3px 0' }} />
+  );
+ 
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      {/* Trigger — styled for the WHITE chat header, not the green app header */}
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: '6px',
+          padding: '6px 12px', border: '1px solid #e9edef',
+          borderRadius: '8px', cursor: 'pointer',
+          background: open ? '#f0f2f5' : '#fff',
+          color: '#3b4a54',
+          fontSize: '13px', fontWeight: 600,
+          transition: 'background 0.15s, border-color 0.15s',
+          fontFamily: 'inherit',
+          boxShadow: open ? 'none' : '0 1px 2px rgba(11,20,26,0.06)',
+        }}
+        onMouseEnter={e => {
+          if (!open) {
+            e.currentTarget.style.background = '#f0f2f5';
+            e.currentTarget.style.borderColor = '#d1d7db';
+          }
+        }}
+        onMouseLeave={e => {
+          if (!open) {
+            e.currentTarget.style.background = '#fff';
+            e.currentTarget.style.borderColor = '#e9edef';
+          }
+        }}
+        title="Actions"
+      >
+        Actions
+        <span style={{
+          fontSize: '10px', color: '#8696a0',
+          transform: open ? 'rotate(180deg)' : 'none',
+          transition: 'transform 0.2s', display: 'inline-block',
+        }}>▾</span>
+      </button>
+ 
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 6px)', right: 0,
+          minWidth: '210px', background: '#fff',
+          border: '1px solid rgba(0,0,0,0.08)', borderRadius: '12px',
+          boxShadow: '0 4px 6px rgba(11,20,26,0.07), 0 12px 28px rgba(11,20,26,0.13)',
+          zIndex: 1000, overflow: 'hidden', padding: '5px 0',
+          animation: 'actionsDropIn 0.14s cubic-bezier(0.34,1.56,0.64,1)',
+        }}>
+          {item('✉️', conversation?.customerEmail ? `Email ${conversation.customerEmail.split('@')[0]}` : 'Send Email', onSendEmail)}
+          {onMarkAsUnread && item('🔵', 'Mark as Unread', onMarkAsUnread)}
+          {divider()}
+          {item('📦', 'Archive', onArchive)}
+          {divider()}
+          {item('🚫', 'Blacklist Customer', onBlacklist, true)}
+          {item('🗑️', 'Delete Conversation', onDelete, true)}
+        </div>
+      )}
+ 
+      <style>{`
+        @keyframes actionsDropIn {
+          from { opacity: 0; transform: scale(0.93) translateY(-4px); }
+          to   { opacity: 1; transform: scale(1) translateY(0); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 // ============ MAIN COMPONENT ============
 function ChatWindow({
   conversation,
@@ -1908,6 +2390,8 @@ function ChatWindow({
   stores,
   isAdmin = false,
   onMarkAsUnread,
+  onArchive,        // NEW: (conversationId) => Promise<void>
+  onBlacklist,      // NEW: ({ email, storeIdentifier, allStores, reason, customerName }) => Promise<void>
 }) {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1945,12 +2429,17 @@ function ChatWindow({
   // Send email state
   const [showEmailModal, setShowEmailModal] = useState(false);
 
+  // ── NEW: Blacklist + Archive state ──────────────────────────────
+  const [showBlacklistModal, setShowBlacklistModal] = useState(false);
+  const [showArchiveModal, setShowArchiveModal]     = useState(false);
+  // ────────────────────────────────────────────────────────────────
+
   // Legal threat state
   const [legalAlert, setLegalAlert] = useState(null);
   const legalDismissTimerRef = useRef(null);
 
   const messagesEndRef = useRef(null);
-  const editableRef = useRef(null);   // contentEditable WYSIWYG
+  const editableRef = useRef(null);
   const fileInputRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const wsRef = useRef(null);
@@ -2007,7 +2496,6 @@ function ChatWindow({
   const setInputContent = (text) => {
     if (editableRef.current) {
       editableRef.current.innerHTML = parseMarkdown(text);
-      // Move cursor to end
       const range = document.createRange();
       const sel = window.getSelection();
       range.selectNodeContents(editableRef.current);
@@ -2048,9 +2536,7 @@ function ChatWindow({
     unreadToastTimerRef.current = setTimeout(() => setUnreadToast(false), 2500);
   };
 
-  const handleUseTemplate = (content) => {
-    setInputContent(content);
-  };
+  const handleUseTemplate = (content) => { setInputContent(content); };
 
   const handleAddQuickReply = async ({ name, content }) => {
     const newTemplate = await api.createTemplate({ name, content });
@@ -2067,9 +2553,7 @@ function ChatWindow({
     setTemplates(prev => prev.filter(t => t.id !== templateId));
   };
 
-  const handleSelectSuggestion = (suggestion) => {
-    setInputContent(suggestion);
-  };
+  const handleSelectSuggestion = (suggestion) => { setInputContent(suggestion); };
 
   // ============ EMOJI HANDLER ============
   const handleEmojiSelect = (emoji) => {
@@ -2097,6 +2581,26 @@ function ChatWindow({
       alert(`Failed to delete message: ${error.message}`);
     } finally {
       setDeletingMessage(false);
+    }
+  };
+
+  // ============ ARCHIVE HANDLER ============
+  const handleConfirmArchive = async () => {
+    if (onArchive) {
+      await onArchive(conversation.id);
+    } else {
+      await api.archiveConversation(conversation.id);
+    }
+    setShowArchiveModal(false);
+    if (onClose) onClose();
+  };
+
+  // ============ BLACKLIST HANDLER ============
+  const handleConfirmBlacklist = async (payload) => {
+    if (onBlacklist) {
+      await onBlacklist(payload);
+    } else {
+      await api.blacklistCustomer(payload);
     }
   };
 
@@ -2480,6 +2984,8 @@ function ChatWindow({
     else { setMessages([]); setLoading(false); }
     dismissLegalAlert();
     setShowEmailModal(false);
+    setShowBlacklistModal(false);
+    setShowArchiveModal(false);
     setUnreadToast(false);
     clearInput();
   }, [conversation?.id]);
@@ -2605,7 +3111,6 @@ function ChatWindow({
     } catch (error) {
       console.error('❌ Failed to send message:', error);
       setMessages(prev => prev.filter(msg => !msg._optimistic));
-      // Restore text on failure
       setInputContent(text);
       alert(`Failed to send message: ${error.message}`);
     } finally {
@@ -2693,6 +3198,26 @@ function ChatWindow({
           conversation={conversation}
           onClose={() => setShowEmailModal(false)}
           onSend={handleSendEmail}
+        />
+      )}
+
+      {/* BLACKLIST MODAL */}
+      {showBlacklistModal && (
+        <BlacklistModal
+          conversation={conversation}
+          storeName={storeName}
+          onClose={() => setShowBlacklistModal(false)}
+          onConfirm={handleConfirmBlacklist}
+        />
+      )}
+
+      {/* ARCHIVE MODAL */}
+      {showArchiveModal && (
+        <ArchiveModal
+          conversation={conversation}
+          storeName={storeName}
+          onClose={() => setShowArchiveModal(false)}
+          onConfirm={handleConfirmArchive}
         />
       )}
 
@@ -2786,30 +3311,7 @@ function ChatWindow({
         </div>
 
         <div className="chat-actions">
-          <button
-            className={`send-email-btn${!conversation.customerEmail ? ' send-email-btn--no-email' : ''}`}
-            onClick={() => setShowEmailModal(true)}
-            title={conversation.customerEmail ? `Send email to ${conversation.customerEmail}` : 'Send email (no email on file)'}
-            type="button"
-          >
-            <svg className="send-email-btn__icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect x="2" y="4.5" width="16" height="11" rx="2" stroke="currentColor" strokeWidth="1.5"/>
-              <path d="M2 7l7.293 4.707a1 1 0 001.414 0L18 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-            </svg>
-            <span className="send-email-btn__label">Send Email</span>
-            {!conversation.customerEmail && <span className="send-email-btn__dot" />}
-          </button>
-
-          {onMarkAsUnread && (
-            <button className="mark-unread-btn" onClick={handleMarkAsUnread} title="Mark as unread" type="button">
-              <svg className="mark-unread-btn__icon" width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="9" cy="9" r="7.5" stroke="currentColor" strokeWidth="1.5"/>
-                <circle cx="9" cy="9" r="3.5" fill="currentColor"/>
-              </svg>
-              <span className="mark-unread-btn__label">Mark Unread</span>
-            </button>
-          )}
-
+          {/* AI Suggestions toggle — stays outside dropdown */}
           <button
             className="icon-btn"
             onClick={() => setShowAISuggestions(!showAISuggestions)}
@@ -2817,8 +3319,16 @@ function ChatWindow({
             type="button"
             style={{ color: showAISuggestions ? '#00a884' : undefined, fontStyle: 'normal' }}
           >✦</button>
-          <button className="icon-btn" onClick={() => setShowCustomerInfo(!showCustomerInfo)} title="Customer info" type="button">ℹ️</button>
-          <button className="icon-btn delete-btn" onClick={handleDeleteClick} title="Delete conversation" type="button">🗑️</button>
+ 
+          <ActionsDropdown
+            conversation={conversation}
+            onSendEmail={() => setShowEmailModal(true)}
+            onMarkAsUnread={onMarkAsUnread ? handleMarkAsUnread : null}
+            onArchive={() => setShowArchiveModal(true)}
+            onBlacklist={() => setShowBlacklistModal(true)}
+            onCustomerInfo={() => setShowCustomerInfo(v => !v)}
+            onDelete={handleDeleteClick}
+          />
         </div>
       </div>
 
@@ -2998,10 +3508,8 @@ function ChatWindow({
           }}
         >⚡</button>
 
-        {/* ============ WYSIWYG INPUT AREA ============ */}
+        {/* WYSIWYG INPUT AREA */}
         <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
-
-          {/* Placeholder — shown when editor is empty */}
           {!messageText && (
             <div style={{
               position: 'absolute', top: 0, left: 0, right: 0,
@@ -3012,7 +3520,6 @@ function ChatWindow({
             </div>
           )}
 
-          {/* contentEditable WYSIWYG div */}
           <div
             ref={editableRef}
             contentEditable={!sending && !uploading}
@@ -3028,11 +3535,9 @@ function ChatWindow({
               if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); }
             }}
             onPaste={(e) => {
-              // If clipboard has an image, let handlePaste handle it
               const items = Array.from(e.clipboardData?.items || []);
               const hasImage = items.some(i => i.type.startsWith('image/'));
               if (hasImage) { e.preventDefault(); handlePaste(e); return; }
-              // Otherwise paste as plain text — strips incoming HTML formatting
               e.preventDefault();
               const text = e.clipboardData.getData('text/plain');
               document.execCommand('insertText', false, text);
@@ -3054,7 +3559,6 @@ function ChatWindow({
             }}
           />
 
-          {/* Hidden file input */}
           <input
             ref={fileInputRef}
             type="file"
@@ -3063,7 +3567,6 @@ function ChatWindow({
             style={{ display: 'none' }}
           />
 
-          {/* Emoji Picker */}
           {showEmojiPicker && (
             <EmojiPicker onSelect={handleEmojiSelect} onClose={() => setShowEmojiPicker(false)} />
           )}
@@ -3071,8 +3574,7 @@ function ChatWindow({
 
         {/* Emoji Button */}
         <button
-          type="button"
-          title="Emoji"
+          type="button" title="Emoji"
           onClick={e => { e.preventDefault(); e.stopPropagation(); setShowEmojiPicker(v => !v); }}
           style={{
             width: '40px', height: '40px', minWidth: '40px', flexShrink: 0,
@@ -3085,10 +3587,8 @@ function ChatWindow({
 
         {/* Attach Button */}
         <button
-          type="button"
-          title="Attach file"
-          onClick={handleAttachClick}
-          disabled={uploading}
+          type="button" title="Attach file"
+          onClick={handleAttachClick} disabled={uploading}
           style={{
             width: '40px', height: '40px', minWidth: '40px', flexShrink: 0,
             border: 'none', borderRadius: '50%', background: 'transparent',
@@ -3101,8 +3601,7 @@ function ChatWindow({
 
         {/* Send Button */}
         <button
-          type="button"
-          title="Send message (Enter)"
+          type="button" title="Send message (Enter)"
           onClick={handleSend}
           disabled={(!messageText.trim() && !selectedFile) || sending || uploading}
           style={{
@@ -3128,9 +3627,11 @@ function ChatWindow({
           from { opacity: 0; transform: translateX(-50%) translateY(-6px); }
           to   { opacity: 1; transform: translateX(-50%) translateY(0); }
         }
-        [contenteditable]:empty:focus {
-          outline: none;
+        @keyframes modalSlideUp {
+          from { opacity: 0; transform: translateY(16px); }
+          to   { opacity: 1; transform: translateY(0); }
         }
+        [contenteditable]:empty:focus { outline: none; }
         [contenteditable] strong { font-weight: 700; }
         [contenteditable] em { font-style: italic; }
         [contenteditable] s { text-decoration: line-through; }

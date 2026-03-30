@@ -1,11 +1,4 @@
 
-
-// /**
-//  * API Service
-//  * Handles all API calls to the backend with authentication
-//  */
-
-// // Use Vite proxy in development, full URL in production
 // const API_URL = import.meta.env.PROD 
 //   ? import.meta.env.VITE_API_URL || 'https://chat-support-pro.onrender.com'
 //   : '';
@@ -15,41 +8,26 @@
 //     this.baseUrl = API_URL;
 //   }
 
-//   /**
-//    * Get auth token from localStorage
-//    */
 //   getToken() {
 //     return localStorage.getItem('token');
 //   }
 
-//   /**
-//    * Clear auth data and redirect to login
-//    */
 //   handleUnauthorized() {
 //     console.log('🚨 UNAUTHORIZED - Clearing session');
 //     localStorage.removeItem('token');
 //     localStorage.removeItem('employee');
-    
-//     // Store error message for display after reload
 //     sessionStorage.setItem('auth_error', 'Session expired. Please login again.');
-    
-//     // Reload to reset app state
 //     window.location.reload();
 //   }
 
-//   /**
-//    * Generic fetch wrapper with error handling and auth
-//    */
 //   async fetch(endpoint, options = {}) {
 //     const url = `${this.baseUrl}${endpoint}`;
-    
-//     // Get token from localStorage
 //     const token = this.getToken();
     
 //     const defaultOptions = {
 //       headers: {
 //         'Content-Type': 'application/json',
-//         ...(token && { 'Authorization': `Bearer ${token}` }), // Add auth header if token exists
+//         ...(token && { 'Authorization': `Bearer ${token}` }),
 //         ...options.headers,
 //       },
 //     };
@@ -57,13 +35,11 @@
 //     try {
 //       const response = await fetch(url, { ...defaultOptions, ...options });
       
-//       // Handle 401 Unauthorized - token expired or invalid
 //       if (response.status === 401) {
 //         this.handleUnauthorized();
 //         throw new Error('Session expired. Please login again.');
 //       }
 
-//       // Handle 403 Forbidden
 //       if (response.status === 403) {
 //         throw new Error('Access denied. You do not have permission.');
 //       }
@@ -80,33 +56,24 @@
 //     }
 //   }
 
-//   /**
-//    * Upload file with XMLHttpRequest (for progress tracking)
-//    */
 //   async uploadFile(formData, onUploadProgress) {
 //     return new Promise((resolve, reject) => {
 //       const xhr = new XMLHttpRequest();
 //       const url = `${this.baseUrl}/api/files/upload`;
 //       const token = this.getToken();
 
-//       // Track upload progress
 //       if (onUploadProgress) {
 //         xhr.upload.addEventListener('progress', (e) => {
 //           if (e.lengthComputable) {
-//             onUploadProgress({
-//               loaded: e.loaded,
-//               total: e.total,
-//             });
+//             onUploadProgress({ loaded: e.loaded, total: e.total });
 //           }
 //         });
 //       }
 
-//       // Handle completion
 //       xhr.addEventListener('load', () => {
 //         if (xhr.status === 200 || xhr.status === 201) {
 //           try {
-//             const response = JSON.parse(xhr.responseText);
-//             resolve(response);
+//             resolve(JSON.parse(xhr.responseText));
 //           } catch (error) {
 //             reject(new Error('Failed to parse upload response'));
 //           }
@@ -123,34 +90,17 @@
 //         }
 //       });
 
-//       // Handle errors
-//       xhr.addEventListener('error', () => {
-//         reject(new Error('Network error during file upload'));
-//       });
+//       xhr.addEventListener('error', () => reject(new Error('Network error during file upload')));
+//       xhr.addEventListener('abort', () => reject(new Error('File upload was cancelled')));
 
-//       xhr.addEventListener('abort', () => {
-//         reject(new Error('File upload was cancelled'));
-//       });
-
-//       // Open connection and set headers
 //       xhr.open('POST', url);
-      
-//       if (token) {
-//         xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-//       }
-
-//       // Send the file
+//       if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
 //       xhr.send(formData);
 //     });
 //   }
 
-//   /**
-//    * Delete a file from storage
-//    */
 //   async deleteFile(fileName) {
-//     return this.fetch(`/api/files/${fileName}`, {
-//       method: 'DELETE',
-//     });
+//     return this.fetch(`/api/files/${fileName}`, { method: 'DELETE' });
 //   }
 
 //   // ============ Authentication ============
@@ -164,13 +114,10 @@
 
 //   async logout() {
 //     try {
-//       await this.fetch('/api/employees/logout', {
-//         method: 'POST',
-//       });
+//       await this.fetch('/api/employees/logout', { method: 'POST' });
 //     } catch (error) {
 //       console.error('Logout error:', error);
 //     } finally {
-//       // Always clear local data even if API call fails
 //       localStorage.removeItem('token');
 //       localStorage.removeItem('employee');
 //     }
@@ -206,9 +153,26 @@
 //   }
 
 //   async closeConversation(id) {
-//     return this.fetch(`/api/conversations/${id}/close`, {
-//       method: 'PUT',
-//     });
+//     return this.fetch(`/api/conversations/${id}/close`, { method: 'PUT' });
+//   }
+
+//   async markConversationRead(id) {
+//     return this.fetch(`/api/conversations/${id}/read`, { method: 'PUT' });
+//   }
+
+//   async markConversationUnread(id) {
+//     return this.fetch(`/api/conversations/${id}/unread`, { method: 'PUT' });
+//   }
+
+//   // ============ Cross-Store History ============
+
+//   async getLinkedConversations(email, excludeConversationId = null) {
+//     const params = excludeConversationId
+//       ? `?excludeConversationId=${excludeConversationId}`
+//       : '';
+//     return this.fetch(
+//       `/api/conversations/linked/${encodeURIComponent(email)}${params}`
+//     );
 //   }
 
 //   // ============ Messages ============
@@ -222,6 +186,10 @@
 //       method: 'POST',
 //       body: JSON.stringify(data),
 //     });
+//   }
+
+//   async deleteMessage(messageId) {
+//     return this.fetch(`/api/messages/${messageId}`, { method: 'DELETE' });
 //   }
 
 //   // ============ Stores ============
@@ -255,7 +223,18 @@
 //     return this.fetch('/api/stats/websocket');
 //   }
 
-//   // ============ Employees (CRUD) ============
+//   // ============ Analytics ============
+
+//   async getCommonQuestions(params = {}) {
+//     const queryParams = new URLSearchParams(params).toString();
+//     return this.fetch(`/api/analytics/common-questions${queryParams ? '?' + queryParams : ''}`);
+//   }
+
+//   async clearAnalyticsCache() {
+//     return this.fetch('/api/analytics/clear-cache', { method: 'POST' });
+//   }
+
+//   // ============ Employees ============
 
 //   async getEmployees() {
 //     return this.fetch('/api/employees');
@@ -280,9 +259,7 @@
 //   }
 
 //   async deleteEmployee(id) {
-//     return this.fetch(`/api/employees/${id}`, {
-//       method: 'DELETE',
-//     });
+//     return this.fetch(`/api/employees/${id}`, { method: 'DELETE' });
 //   }
 
 //   async updateEmployeeStatus(id, status) {
@@ -290,10 +267,6 @@
 //       method: 'PUT',
 //       body: JSON.stringify({ status }),
 //     });
-//   }
-  
-//   async markConversationRead(id) {
-//     return this.fetch(`/api/conversations/${id}/read`, { method: 'PUT' });
 //   }
 
 //   // ============ Message Templates ============
@@ -317,11 +290,8 @@
 //   }
 
 //   async deleteTemplate(id) {
-//     return this.fetch(`/api/templates/${id}`, {
-//       method: 'DELETE',
-//     });
+//     return this.fetch(`/api/templates/${id}`, { method: 'DELETE' });
 //   }
-
 
 //   // ============ Conversation Notes ============
 
@@ -341,11 +311,18 @@
 //   }
 
 //   async deleteNote(noteId) {
-//     return this.fetch(`/api/conversation-notes/${noteId}`, {
-//       method: 'DELETE',
+//     return this.fetch(`/api/conversation-notes/${noteId}`, { method: 'DELETE' });
+//   }
+
+//   // ============ Email ============
+
+//   async sendEmail({ to, subject, body, conversationId, customerName }) {
+//     return this.fetch('/api/email/send', {
+//       method: 'POST',
+//       body: JSON.stringify({ to, subject, body, conversationId, customerName }),
 //     });
 //   }
-  
+
 //   // ============ Health Check ============
 
 //   async healthCheck() {
@@ -355,7 +332,8 @@
 
 // export default new ApiService();
 
-// Use Vite proxy in development, full URL in production
+
+
 const API_URL = import.meta.env.PROD 
   ? import.meta.env.VITE_API_URL || 'https://chat-support-pro.onrender.com'
   : '';
@@ -519,6 +497,48 @@ class ApiService {
 
   async markConversationUnread(id) {
     return this.fetch(`/api/conversations/${id}/unread`, { method: 'PUT' });
+  }
+
+  // ============ Archive ============
+
+  async archiveConversation(id) {
+    return this.fetch(`/api/conversations/${id}/archive`, { method: 'PATCH' });
+  }
+
+  async unarchiveConversation(id) {
+    return this.fetch(`/api/conversations/${id}/unarchive`, { method: 'PATCH' });
+  }
+
+  async getArchivedConversations({ page = 1, limit = 30, storeIdentifier } = {}) {
+    const params = new URLSearchParams({ page, limit });
+    if (storeIdentifier) params.set('storeIdentifier', storeIdentifier);
+    return this.fetch(`/api/conversations/archived?${params}`);
+  }
+
+  // ============ Blacklist ============
+
+  async blacklistCustomer({ email, storeIdentifier, allStores = false, reason, customerName }) {
+    return this.fetch('/api/blacklist', {
+      method: 'POST',
+      body: JSON.stringify({ email, storeIdentifier, allStores, reason, customerName }),
+    });
+  }
+
+  async getBlacklist({ page = 1, limit = 50, storeIdentifier, email } = {}) {
+    const params = new URLSearchParams({ page, limit });
+    if (storeIdentifier) params.set('storeIdentifier', storeIdentifier);
+    if (email)           params.set('email', email);
+    return this.fetch(`/api/blacklist?${params}`);
+  }
+
+  async removeBlacklistEntry(blacklistId) {
+    return this.fetch(`/api/blacklist/${blacklistId}`, { method: 'DELETE' });
+  }
+
+  async checkBlacklist(email, storeIdentifier) {
+    const params = new URLSearchParams({ email });
+    if (storeIdentifier) params.set('storeIdentifier', storeIdentifier);
+    return this.fetch(`/api/blacklist/check?${params}`);
   }
 
   // ============ Cross-Store History ============

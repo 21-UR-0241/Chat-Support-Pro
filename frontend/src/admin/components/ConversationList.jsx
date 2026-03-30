@@ -1,4 +1,6 @@
 
+
+
 // import React, { useMemo, useEffect, useRef, useState, useCallback } from 'react';
 // import '../styles/ConversationList.css';
 
@@ -7,6 +9,7 @@
 //   activeConversation,
 //   onSelectConversation,
 //   onMarkAsRead,
+//   onMarkAsUnread,
 //   filters,
 //   onFilterChange,
 //   stores,
@@ -22,11 +25,33 @@
 
 //   const previousConversationsRef = useRef(null);
 
+//   // Context menu state
+//   const [contextMenu, setContextMenu] = useState(null); // { x, y, group }
+//   const contextMenuRef = useRef(null);
+
 //   useEffect(() => {
 //     if ('Notification' in window) {
 //       setNotificationPermission(Notification.permission);
 //     }
 //   }, []);
+
+//   // Close context menu on outside click
+//   useEffect(() => {
+//     const handleClickOutside = (e) => {
+//       if (contextMenuRef.current && !contextMenuRef.current.contains(e.target)) {
+//         setContextMenu(null);
+//       }
+//     };
+//     if (contextMenu) document.addEventListener('mousedown', handleClickOutside);
+//     return () => document.removeEventListener('mousedown', handleClickOutside);
+//   }, [contextMenu]);
+
+//   // Close context menu on scroll
+//   useEffect(() => {
+//     const handleScroll = () => setContextMenu(null);
+//     if (contextMenu) document.addEventListener('scroll', handleScroll, true);
+//     return () => document.removeEventListener('scroll', handleScroll, true);
+//   }, [contextMenu]);
 
 //   const requestNotificationPermission = async () => {
 //     if ('Notification' in window && Notification.permission === 'default') {
@@ -161,7 +186,6 @@
 //   }, [conversations]);
 
 //   // ── Single source of truth for "admin already replied" ──────────────────
-//   // Checks all field name variants the backend might send
 //   const adminHasReplied = useCallback((group) => {
 //     return group.conversations.some(conv => {
 //       const senderType =
@@ -306,6 +330,17 @@
 //         if (unread > 0) onMarkAsRead(conv.id);
 //       });
 //     }
+//   };
+
+//   const handleContextMenu = (e, group) => {
+//     e.preventDefault();
+//     e.stopPropagation();
+//     // Clamp to viewport so menu never goes off-screen
+//     const menuWidth = 200;
+//     const menuHeight = 120;
+//     const x = Math.min(e.clientX, window.innerWidth - menuWidth - 8);
+//     const y = Math.min(e.clientY, window.innerHeight - menuHeight - 8);
+//     setContextMenu({ x, y, group });
 //   };
 
 //   const hasActiveFilters = filters.status || filters.priority || filters.storeId || filters.readStatus;
@@ -478,6 +513,49 @@
 //           overflow: hidden;
 //           text-overflow: ellipsis;
 //         }
+
+//         /* ── Context menu ── */
+//         .conv-context-menu {
+//           position: fixed;
+//           z-index: 9999;
+//           background: #fff;
+//           border: 1px solid #e9edef;
+//           border-radius: 8px;
+//           box-shadow: 0 4px 20px rgba(11,20,26,0.15);
+//           min-width: 190px;
+//           overflow: hidden;
+//           animation: ctxFadeIn 0.12s ease;
+//         }
+//         @keyframes ctxFadeIn {
+//           from { opacity: 0; transform: scale(0.96); }
+//           to   { opacity: 1; transform: scale(1); }
+//         }
+//         .conv-context-menu button {
+//           width: 100%;
+//           text-align: left;
+//           padding: 10px 16px;
+//           border: none;
+//           background: none;
+//           cursor: pointer;
+//           color: #111b21;
+//           font-size: 13.5px;
+//           display: flex;
+//           align-items: center;
+//           gap: 10px;
+//           transition: background 0.1s;
+//         }
+//         .conv-context-menu button:hover {
+//           background: #f0f2f5;
+//         }
+//         .conv-context-menu button.danger:hover {
+//           background: #fff5f5;
+//           color: #dc2626;
+//         }
+//         .conv-context-menu .ctx-divider {
+//           height: 1px;
+//           background: #e9edef;
+//           margin: 3px 0;
+//         }
 //       `}</style>
 
 //       <div className="conversation-list-header">
@@ -593,7 +671,6 @@
 //           </div>
 //         ) : (
 //           (() => {
-//             // ── Use adminHasReplied() as the single source of truth ──
 //             const urgentGroups = filteredGroupedConversations.filter(g =>
 //               !adminHasReplied(g) &&
 //               g.conversations.some(c => c.legalFlag || c.priority === 'urgent')
@@ -609,7 +686,6 @@
 //               const totalGroupUnread = getGroupUnread(group);
 //               const hasUnread = totalGroupUnread > 0;
 
-//               // ── Use the same helper — no duplicate logic ──
 //               const replied = adminHasReplied(group);
 
 //               const legalSeverity = getGroupLegalSeverity(group);
@@ -638,6 +714,7 @@
 //                   key={group.groupKey}
 //                   className={itemClass}
 //                   onClick={() => handleGroupClick(group)}
+//                   onContextMenu={(e) => handleContextMenu(e, group)}
 //                 >
 //                   <div className="conversation-avatar" style={{ position: 'relative' }}>
 //                     <UserIcon />
@@ -761,11 +838,71 @@
 //           })()
 //         )}
 //       </div>
+
+//       {/* ── Context Menu ── */}
+//       {contextMenu && (
+//         <div
+//           ref={contextMenuRef}
+//           className="conv-context-menu"
+//           style={{ top: contextMenu.y, left: contextMenu.x }}
+//         >
+//           {(() => {
+//             const group = contextMenu.group;
+//             const totalUnreadInGroup = getGroupUnread(group);
+//             const isRead = totalUnreadInGroup === 0;
+
+//             return (
+//               <>
+//                 <button
+//                   type="button"
+//                   onClick={() => {
+//                     handleGroupClick(group);
+//                     setContextMenu(null);
+//                   }}
+//                 >
+//                   <span style={{ fontSize: '15px' }}>💬</span> Open chat
+//                 </button>
+
+//                 <div className="ctx-divider" />
+
+//                 {isRead ? (
+//                   // Currently read → offer mark as unread
+//                   onMarkAsUnread && (
+//                     <button
+//                       type="button"
+//                       onClick={() => {
+//                         group.conversations.forEach(c => onMarkAsUnread(c.id));
+//                         setContextMenu(null);
+//                       }}
+//                     >
+//                       <span style={{ fontSize: '15px' }}>🔵</span> Mark as unread
+//                     </button>
+//                   )
+//                 ) : (
+//                   // Currently unread → offer mark as read
+//                   onMarkAsRead && (
+//                     <button
+//                       type="button"
+//                       onClick={() => {
+//                         group.conversations.forEach(c => onMarkAsRead(c.id));
+//                         setContextMenu(null);
+//                       }}
+//                     >
+//                       <span style={{ fontSize: '15px' }}>✓</span> Mark as read
+//                     </button>
+//                   )
+//                 )}
+//               </>
+//             );
+//           })()}
+//         </div>
+//       )}
 //     </div>
 //   );
 // }
 
 // export default ConversationList;
+
 
 
 
@@ -799,6 +936,9 @@ function ConversationList({
   // Context menu state
   const [contextMenu, setContextMenu] = useState(null); // { x, y, group }
   const contextMenuRef = useRef(null);
+  // Once an agent replies to a group, it stays acknowledged — even if the
+  // customer sends another message afterward (which would flip lastSenderType back).
+  const acknowledgedGroupsRef = useRef(new Set());
 
   useEffect(() => {
     if ('Notification' in window) {
@@ -921,6 +1061,13 @@ function ConversationList({
     if (!conversations) return [];
     const grouped = new Map();
     conversations.forEach((conv) => {
+      // Skip archived and blacklisted at the grouping stage too
+      if (
+        conv.status === 'archived' ||
+        conv.status === 'blacklisted' ||
+        conv.status === 'blacklist'
+      ) return;
+
       const email = (conv.customerEmail || '').toLowerCase().trim();
       const storeId = conv.storeIdentifier || conv.shopId || '';
       if (!email) {
@@ -957,8 +1104,13 @@ function ConversationList({
   }, [conversations]);
 
   // ── Single source of truth for "admin already replied" ──────────────────
+  // Uses a persistent ref so a group stays acknowledged even after the customer
+  // sends another message (which would flip lastSenderType back to 'customer').
   const adminHasReplied = useCallback((group) => {
-    return group.conversations.some(conv => {
+    // Already acknowledged this session — stays acknowledged
+    if (acknowledgedGroupsRef.current.has(group.groupKey)) return true;
+
+    const replied = group.conversations.some(conv => {
       const senderType =
         conv.lastSenderType ||
         conv.lastMessageSenderType ||
@@ -967,6 +1119,9 @@ function ConversationList({
         '';
       return senderType === 'agent';
     });
+
+    if (replied) acknowledgedGroupsRef.current.add(group.groupKey);
+    return replied;
   }, []);
 
   // Build a set of ALL conversation IDs in the same group as the active conversation
@@ -1009,7 +1164,7 @@ function ConversationList({
       if (search) {
         const storeName = stores?.find(s =>
           s.storeIdentifier === conv.storeIdentifier || s.id === conv.shopId
-        )?.brandName || conv.storeName || '';
+        )?.name || conv.storeName || '';
         const matchesSearch =
           group.conversations.some(c => c.customerName?.toLowerCase().includes(search)) ||
           conv.customerEmail?.toLowerCase().includes(search) ||
@@ -1124,6 +1279,26 @@ function ConversationList({
     }
     if (group.conversations.some(c => c.legalFlag)) return 'high';
     return null;
+  };
+
+  // Helper: resolve store name from stores list
+  const resolveStoreName = (conv) => {
+    if (!stores || !stores.length) return conv.storeName || '';
+    const match = stores.find(s =>
+      s.storeIdentifier === conv.storeIdentifier ||
+      s.id === conv.shopId ||
+      s.shop_id === conv.shopId ||
+      String(s.id) === String(conv.shopId)
+    );
+    return (
+      match?.name ||
+      match?.storeName ||
+      match?.store_name ||
+      match?.brandName ||
+      match?.shopName ||
+      conv.storeName ||
+      ''
+    );
   };
 
   return (
@@ -1421,7 +1596,9 @@ function ConversationList({
           <select className="filter-select" value={filters.storeId || ''} onChange={(e) => onFilterChange({ ...filters, storeId: e.target.value })}>
             <option value="">All Stores</option>
             {stores.map((store) => (
-              <option key={store.id} value={store.storeIdentifier}>{store.brandName}</option>
+              <option key={store.id} value={store.storeIdentifier}>
+                {store.name || store.storeName || store.brandName || store.shopName || store.storeIdentifier || store.id}
+              </option>
             ))}
           </select>
         )}
@@ -1463,9 +1640,7 @@ function ConversationList({
               const isLegal   = !!legalSeverity && !replied;
               const isUrgent  = !isLegal && !replied && group.conversations.some(c => c.priority === 'urgent');
 
-              const storeName = stores?.find(s =>
-                s.storeIdentifier === conversation.storeIdentifier || s.id === conversation.shopId
-              )?.brandName || conversation.storeName || 'Unknown Store';
+              const storeName = resolveStoreName(conversation);
 
               const displayName = group.conversations
                 .map(c => (c.customerName || '').trim())
@@ -1536,10 +1711,10 @@ function ConversationList({
                     )}
 
                     <div className="conversation-meta">
-                      <span className="store-badge">🏪 {storeName}</span>
+                      {storeName && <span className="store-badge">🏪 {storeName}</span>}
                       {conversation.customerEmail && (
                         <>
-                          <span className="meta-separator">•</span>
+                          {storeName && <span className="meta-separator">•</span>}
                           <span className="customer-email">{conversation.customerEmail}</span>
                         </>
                       )}
@@ -1637,7 +1812,6 @@ function ConversationList({
                 <div className="ctx-divider" />
 
                 {isRead ? (
-                  // Currently read → offer mark as unread
                   onMarkAsUnread && (
                     <button
                       type="button"
@@ -1650,7 +1824,6 @@ function ConversationList({
                     </button>
                   )
                 ) : (
-                  // Currently unread → offer mark as read
                   onMarkAsRead && (
                     <button
                       type="button"
@@ -1673,14 +1846,6 @@ function ConversationList({
 }
 
 export default ConversationList;
-
-
-
-
-
-
-
-
 
 
 
