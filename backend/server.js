@@ -8026,12 +8026,6 @@ app.post('/api/widget/presence', async (req, res) => {
 
 // ============ BLACKLIST ============
 
-/**
- * POST /api/blacklist
- * Body: { email, storeIdentifier?, allStores?, reason?, customerName? }
- * allStores=true  → store_identifier stored as NULL (network-wide block)
- * allStores=false → store_identifier = storeIdentifier (store-only block)
- */
 app.post('/api/blacklist', authenticateToken, async (req, res) => {
   const { email, storeIdentifier, allStores = false, reason = null, customerName = null } = req.body;
 
@@ -8040,7 +8034,7 @@ app.post('/api/blacklist', authenticateToken, async (req, res) => {
 
   const normalizedEmail = email.toLowerCase().trim();
   const normalizedStore = allStores ? null : (storeIdentifier || null);
-  const blockedBy = req.user?.name || req.user?.email || null;
+  const blockedBy       = req.user?.name || req.user?.email || null;
 
   try {
     const result = await db.pool.query(
@@ -8058,7 +8052,42 @@ app.post('/api/blacklist', authenticateToken, async (req, res) => {
       [normalizedEmail, normalizedStore, reason, customerName, blockedBy]
     );
 
-    console.log(`🚫 [Blacklist] ${normalizedEmail} blacklisted ${allStores ? 'network-wide' : `on ${normalizedStore}`} by ${blockedBy}`);
+    // Mark matching conversations as 'blacklisted' in the DB.
+    // conversations table uses shop_domain (NOT store_identifier).
+    let convUpdate;
+    if (allStores) {
+      convUpdate = await db.pool.query(
+        `UPDATE conversations
+            SET status     = 'blacklisted',
+                updated_at = NOW()
+          WHERE customer_email = $1
+            AND status NOT IN ('archived', 'blacklisted')
+          RETURNING id`,
+        [normalizedEmail]
+      );
+    } else {
+      convUpdate = await db.pool.query(
+        `UPDATE conversations
+            SET status     = 'blacklisted',
+                updated_at = NOW()
+          WHERE customer_email = $1
+            AND status NOT IN ('archived', 'blacklisted')
+            AND shop_domain = $2
+          RETURNING id`,
+        [normalizedEmail, normalizedStore]
+      );
+    }
+
+    // Broadcast so every connected agent's inbox hides the conversation live
+    convUpdate.rows.forEach(row => {
+      broadcastToAgents({
+        type:           'conversation_blacklisted',
+        conversationId: row.id,
+        email:          normalizedEmail,
+      });
+    });
+
+    console.log(`🚫 [Blacklist] ${normalizedEmail} blacklisted ${allStores ? 'network-wide' : `on ${normalizedStore}`} by ${blockedBy} — ${convUpdate.rowCount} conv(s) marked`);
     return res.status(201).json(snakeToCamel(result.rows[0]));
   } catch (err) {
     console.error('❌ [blacklist create] Error:', err);
@@ -8068,7 +8097,8 @@ app.post('/api/blacklist', authenticateToken, async (req, res) => {
 
 /**
  * GET /api/blacklist
- * Query: page, limit, storeIdentifier (returns store-specific + global entries), email (partial search)
+ * Query: page, limit, storeIdentifier, email (partial search)
+ * UNCHANGED
  */
 app.get('/api/blacklist', authenticateToken, async (req, res) => {
   const page            = Math.max(1, parseInt(req.query.page)  || 1);
@@ -8083,7 +8113,6 @@ app.get('/api/blacklist', authenticateToken, async (req, res) => {
 
     if (storeIdentifier) {
       params.push(storeIdentifier);
-      // Return entries for this store OR all-store blocks (NULL)
       filters.push(`(b.store_identifier = $${params.length} OR b.store_identifier IS NULL)`);
     }
     if (emailSearch) {
@@ -8115,9 +8144,24 @@ app.get('/api/blacklist', authenticateToken, async (req, res) => {
 /**
  * DELETE /api/blacklist/:id
  * Soft-delete (un-blacklist) by row ID.
+ *
+ * UPDATED: also restores conversations.status → 'open' and broadcasts
+ * 'conversation_unblacklisted' WS event so the inbox re-shows them live.
  */
 app.delete('/api/blacklist/:id', authenticateToken, async (req, res) => {
   try {
+    // 1. Fetch entry first so we have the email + store scope
+    const lookup = await db.pool.query(
+      `SELECT email, store_identifier FROM blacklist
+        WHERE id = $1 AND removed_at IS NULL`,
+      [parseInt(req.params.id)]
+    );
+    if (lookup.rowCount === 0)
+      return res.status(404).json({ error: 'Blacklist entry not found or already removed' });
+
+    const { email, store_identifier } = lookup.rows[0];
+
+    // 2. Soft-delete the blacklist entry
     const result = await db.pool.query(
       `UPDATE blacklist
           SET removed_at = NOW()
@@ -8127,11 +8171,49 @@ app.delete('/api/blacklist/:id', authenticateToken, async (req, res) => {
       [parseInt(req.params.id)]
     );
 
-    if (result.rowCount === 0)
-      return res.status(404).json({ error: 'Blacklist entry not found or already removed' });
+    // 3. Restore conversations back to 'open'.
+    //    store_identifier = NULL  → was a network-wide block, restore all stores.
+    //    conversations table uses shop_domain (NOT store_identifier).
+    let restored;
+    if (store_identifier) {
+      restored = await db.pool.query(
+        `UPDATE conversations
+            SET status     = 'open',
+                updated_at = NOW()
+          WHERE customer_email = $1
+            AND status = 'blacklisted'
+            AND shop_domain = $2
+          RETURNING id`,
+        [email, store_identifier]
+      );
+    } else {
+      restored = await db.pool.query(
+        `UPDATE conversations
+            SET status     = 'open',
+                updated_at = NOW()
+          WHERE customer_email = $1
+            AND status = 'blacklisted'
+          RETURNING id`,
+        [email]
+      );
+    }
 
-    console.log(`✅ [Blacklist] Entry #${req.params.id} removed by ${req.user.email}`);
-    return res.json({ success: true, entry: snakeToCamel(result.rows[0]) });
+    // 4. Broadcast so every agent's inbox re-shows the conversations live.
+    //    This fires regardless of which UI path triggered the removal.
+    restored.rows.forEach(row => {
+      broadcastToAgents({
+        type:           'conversation_unblacklisted',
+        conversationId: row.id,
+        email,
+      });
+    });
+
+    console.log(`✅ [Blacklist] Entry #${req.params.id} removed by ${req.user.email} — ${restored.rowCount} conversation(s) restored`);
+    return res.json({
+      success:               true,
+      entry:                 snakeToCamel(result.rows[0]),
+      restoredConversations: restored.rowCount,
+    });
   } catch (err) {
     console.error('❌ [blacklist delete] Error:', err);
     return res.status(500).json({ error: 'Failed to remove blacklist entry' });
@@ -8141,10 +8223,7 @@ app.delete('/api/blacklist/:id', authenticateToken, async (req, res) => {
 /**
  * GET /api/blacklist/check
  * Query: email (required), storeIdentifier (optional)
- * Returns: { blocked: bool, entry: object|null }
- *
- * Used by inbound message handlers and optionally by the widget
- * to surface a friendly "we can't help you here" message.
+ * UNCHANGED
  */
 app.get('/api/blacklist/check', authenticateToken, async (req, res) => {
   const { email, storeIdentifier } = req.query;

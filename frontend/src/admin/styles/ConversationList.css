@@ -43,6 +43,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
 }
 
 .total-unread-badge {
@@ -102,6 +103,24 @@
 }
 
 /* ========================================
+   URGENT HEADER BADGE
+   ======================================== */
+.urgent-header-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 10px;
+  margin-left: 2px;
+  letter-spacing: 0.3px;
+  animation: urgentPulse 1.4s ease-in-out infinite;
+}
+
+/* ========================================
    TOAST
    ======================================== */
 .toast-notice {
@@ -110,8 +129,6 @@
   z-index: 20;
   margin: 8px;
   padding: 8px 12px;
-  background: #00a884;
-  color: #fff;
   border-radius: 6px;
   font-size: 11px;
   font-weight: 500;
@@ -119,6 +136,24 @@
   align-items: center;
   gap: 6px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  animation: toastSlide 0.3s ease;
+}
+
+.toast-notice.default {
+  background: #f0f2f5;
+  color: #111b21;
+  border-bottom: 1px solid #e9edef;
+}
+
+.toast-notice.legal {
+  background: #dc2626;
+  color: #fff;
+  font-weight: 600;
+}
+
+@keyframes toastSlide {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 .toast-icon {
@@ -473,6 +508,43 @@
 }
 
 /* ========================================
+   URGENT SECTION HEADER
+   ======================================== */
+.urgent-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: #dc2626;
+  background: #fff5f5;
+  border-bottom: 1px solid #fecaca;
+  border-top: 1px solid #fecaca;
+}
+
+.urgent-section-header .pulse-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #dc2626;
+  animation: urgentPulse 1.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.all-conversations-header {
+  padding: 5px 16px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: #8696a0;
+  border-bottom: 1px solid #e9edef;
+}
+
+/* ========================================
    CONVERSATION ITEMS
    ======================================== */
 .conversation-items {
@@ -524,6 +596,67 @@
   background: #e8f5f1;
 }
 
+/* ── Legal flag items ── */
+.conversation-item.legal-flag {
+  border-left: 3px solid #dc2626 !important;
+  background: linear-gradient(90deg, #fff5f5 0%, #ffffff 60%) !important;
+  position: relative;
+}
+
+.conversation-item.legal-flag::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: #dc2626;
+  animation: legalBorderPulse 2s ease-in-out infinite;
+}
+
+.conversation-item.legal-flag.active {
+  background: linear-gradient(90deg, #fee2e2 0%, #fef2f2 60%) !important;
+}
+
+/* ── Urgent flag items ── */
+.conversation-item.urgent-flag {
+  border-left: 3px solid #f59e0b !important;
+  background: linear-gradient(90deg, #fffbeb 0%, #ffffff 60%) !important;
+}
+
+.conversation-item.urgent-flag.active {
+  background: linear-gradient(90deg, #fef3c7 0%, #fffbeb 60%) !important;
+}
+
+/* ========================================
+   URGENT DISMISS BUTTON
+   ======================================== */
+.urgent-dismiss-btn {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  background: none;
+  border: none;
+  color: #9ca3af;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 3px 6px;
+  border-radius: 4px;
+  z-index: 2;
+  transition: background 0.15s, color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.urgent-dismiss-btn:hover {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.urgent-dismiss-btn:active {
+  transform: scale(0.92);
+}
+
 /* ========================================
    AVATAR
    ======================================== */
@@ -569,6 +702,17 @@
   z-index: 2;
 }
 
+.legal-avatar-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  font-size: 13px;
+  line-height: 1;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+  animation: legalBadgePop 2s ease-in-out infinite;
+  z-index: 3;
+}
+
 .group-count-badge {
   position: absolute;
   bottom: -3px;
@@ -600,20 +744,6 @@
   pointer-events: none;
 }
 
-@keyframes pulseRing {
-  0% {
-    transform: scale(0.95);
-    opacity: 0.7;
-  }
-  70% {
-    transform: scale(1.1);
-    opacity: 0;
-  }
-  100% {
-    opacity: 0;
-  }
-}
-
 /* ========================================
    CONVERSATION DETAILS
    ======================================== */
@@ -625,11 +755,36 @@
   gap: 2px;
 }
 
+/* Top row: name + badges + time */
 .conversation-top {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 6px;
+}
+
+.conversation-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
+.conversation-name-badges {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.conversation-name-badges h3 {
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .conversation-name-wrapper {
@@ -669,6 +824,41 @@
 .conversation-item.unread .conversation-time {
   color: #00a884;
   font-weight: 600;
+}
+
+/* ========================================
+   PRIORITY / LEGAL PILLS
+   ======================================== */
+.legal-tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.legal-tag-pill.critical { background: #dc2626; color: #fff; }
+.legal-tag-pill.high     { background: #f59e0b; color: #fff; }
+.legal-tag-pill.medium   { background: #2563eb; color: #fff; }
+
+.urgent-tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  background: #f59e0b;
+  color: #fff;
+  flex-shrink: 0;
 }
 
 /* ========================================
@@ -779,6 +969,52 @@
 }
 
 /* ========================================
+   CONTEXT MENU
+   ======================================== */
+.conv-context-menu {
+  position: fixed;
+  z-index: 9999;
+  background: #fff;
+  border: 1px solid #e9edef;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(11, 20, 26, 0.15);
+  min-width: 190px;
+  overflow: hidden;
+  animation: ctxFadeIn 0.12s ease;
+}
+
+.conv-context-menu button {
+  width: 100%;
+  text-align: left;
+  padding: 10px 16px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: #111b21;
+  font-size: 13.5px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: background 0.1s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.conv-context-menu button:hover {
+  background: #f0f2f5;
+}
+
+.conv-context-menu button.danger:hover {
+  background: #fff5f5;
+  color: #dc2626;
+}
+
+.conv-context-menu .ctx-divider {
+  height: 1px;
+  background: #e9edef;
+  margin: 3px 0;
+}
+
+/* ========================================
    EMPTY & LOADING STATES
    ======================================== */
 .empty-conversations {
@@ -837,10 +1073,37 @@
   animation: spin 0.8s linear infinite;
 }
 
+/* ========================================
+   ANIMATIONS
+   ======================================== */
 @keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pulseRing {
+  0%   { transform: scale(0.95); opacity: 0.7; }
+  70%  { transform: scale(1.1);  opacity: 0; }
+  100% { opacity: 0; }
+}
+
+@keyframes urgentPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.4; transform: scale(0.7); }
+}
+
+@keyframes legalBorderPulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+
+@keyframes legalBadgePop {
+  0%, 100% { transform: scale(1); }
+  50%       { transform: scale(1.18); }
+}
+
+@keyframes ctxFadeIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
 }
 
 /* ========================================
@@ -1083,6 +1346,24 @@
   .toast-icon {
     font-size: 14px;
   }
+
+  .urgent-dismiss-btn {
+    top: 8px;
+    right: 10px;
+    font-size: 14px;
+    padding: 4px 7px;
+  }
+
+  .legal-tag-pill,
+  .urgent-tag-pill {
+    font-size: 9px;
+    padding: 2px 6px;
+  }
+
+  .urgent-section-header {
+    padding: 7px 12px 5px;
+    font-size: 10px;
+  }
 }
 
 /* Mobile landscape */
@@ -1134,6 +1415,12 @@
     padding: 8px 14px;
     font-size: 12px;
   }
+
+  .legal-tag-pill,
+  .urgent-tag-pill {
+    font-size: 8px;
+    padding: 1px 5px;
+  }
 }
 
 /* ========================================
@@ -1148,7 +1435,8 @@
 .search-clear:focus-visible,
 .filter-clear:focus-visible,
 .permission-request-btn:focus-visible,
-.read-status-tab:focus-visible {
+.read-status-tab:focus-visible,
+.urgent-dismiss-btn:focus-visible {
   outline: 2px solid #00a884;
   outline-offset: 2px;
 }
@@ -1188,4 +1476,122 @@
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ========================================
+   CONFIRM MODAL (archive / block)
+   ======================================== */
+.ctx-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(11, 20, 26, 0.45);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: overlayFade 0.18s ease;
+}
+
+@keyframes overlayFade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.ctx-modal {
+  background: #fff;
+  border-radius: 12px;
+  padding: 24px 20px 20px;
+  max-width: 320px;
+  width: 100%;
+  box-shadow: 0 8px 32px rgba(11, 20, 26, 0.22);
+  animation: modalPop 0.18s ease;
+  text-align: center;
+}
+
+@keyframes modalPop {
+  from { opacity: 0; transform: scale(0.93) translateY(8px); }
+  to   { opacity: 1; transform: scale(1)    translateY(0); }
+}
+
+.ctx-modal-icon {
+  font-size: 36px;
+  margin-bottom: 10px;
+  line-height: 1;
+}
+
+.ctx-modal-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #111b21;
+  margin: 0 0 8px 0;
+}
+
+.ctx-modal-body {
+  font-size: 13px;
+  color: #667781;
+  margin: 0 0 20px 0;
+  line-height: 1.5;
+}
+
+.ctx-modal-body strong {
+  color: #111b21;
+  font-weight: 600;
+}
+
+.ctx-modal-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.ctx-modal-cancel {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid #e9edef;
+  border-radius: 8px;
+  background: #f0f2f5;
+  color: #111b21;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ctx-modal-cancel:hover {
+  background: #e9edef;
+}
+
+.ctx-modal-confirm {
+  flex: 1;
+  padding: 10px;
+  border: none;
+  border-radius: 8px;
+  background: #00a884;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ctx-modal-confirm:hover {
+  background: #008f6c;
+}
+
+.ctx-modal-confirm.danger {
+  background: #dc2626;
+}
+
+.ctx-modal-confirm.danger:hover {
+  background: #b91c1c;
+}
+
+/* ctx-icon spacing inside context menu */
+.ctx-icon {
+  font-size: 15px;
+  flex-shrink: 0;
+  width: 18px;
+  text-align: center;
 }
