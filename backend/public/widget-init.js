@@ -378,9 +378,6 @@
 
 
 
-
-
-
 (function() {
   'use strict';
 
@@ -389,8 +386,8 @@
     return;
   }
 
-  var config  = window.ChatSupportConfig;
-  var API_URL = config.apiUrl || 'http://localhost:3000';
+  var config   = window.ChatSupportConfig;
+  var API_URL  = config.apiUrl || 'http://localhost:3000';
   var STORE_ID = config.storeId;
 
   if (!STORE_ID) {
@@ -412,7 +409,7 @@
     for (var i = 0; i < s.length; i++) { h = ((h<<5)+h)+s.charCodeAt(i); h|=0; }
     return Math.abs(h);
   }
-  // Store 1→0, 2→1 ... 10→9, 11→0, 12→1 ...
+  // Store 1→style0, 2→style1 ... 10→style9, 11→style0 ...
   function getIdx(id) {
     if (!id) return 0;
     var n = parseInt(id, 10);
@@ -422,12 +419,12 @@
 
   // ── Color system ──────────────────────────────────────────
   var T = {
-    primary:    '#3bbe28',
-    dark:       '#2fa01e',
-    light:      '#4cd938',
-    shadow:     'rgba(59,190,40,0.4)',
-    shadowHov:  'rgba(59,190,40,0.55)',
-    grad:       'linear-gradient(135deg,#3bbe28,#2fa01e)'
+    primary:   '#3bbe28',
+    dark:      '#2fa01e',
+    light:     '#4cd938',
+    shadow:    'rgba(59,190,40,0.35)',
+    shadowHov: 'rgba(59,190,40,0.55)',
+    grad:      'linear-gradient(135deg,#2fa01e,#4cd938)'
   };
 
   if (config.themeColors && config.themeColors.primary) {
@@ -437,10 +434,10 @@
     T.primary   = cp;
     T.dark      = cd;
     T.light     = cl;
-    T.shadow    = hexToRgba(cp, 0.4);
+    T.shadow    = hexToRgba(cp, 0.35);
     T.shadowHov = hexToRgba(cp, 0.55);
-    T.grad      = 'linear-gradient(135deg,'+cd+','+cp+')';
-    console.log('[ChatWidget] Shopify theme color: '+cp+' | Store: '+STORE_ID);
+    T.grad      = 'linear-gradient(135deg,'+cd+','+cl+')';
+    console.log('[ChatWidget] Shopify color: '+cp+' | Store: '+STORE_ID);
   } else {
     console.log('[ChatWidget] Green fallback | Store: '+STORE_ID);
   }
@@ -448,290 +445,327 @@
   // ── iframe src ────────────────────────────────────────────
   var iframeSrc = API_URL+'/widget.html?store='+encodeURIComponent(STORE_ID);
   if (config.themeColors && config.themeColors.primary) {
-    iframeSrc += '&primary='+encodeURIComponent(T.primary);
-    iframeSrc += '&dark='+encodeURIComponent(T.dark);
-    iframeSrc += '&light='+encodeURIComponent(T.light);
+    iframeSrc += '&primary='+encodeURIComponent(T.primary)
+               + '&dark='+encodeURIComponent(T.dark)
+               + '&light='+encodeURIComponent(T.light);
   }
 
-  // ── Shared SVGs ───────────────────────────────────────────
+  // ── Icons ─────────────────────────────────────────────────
   var ic = {
-    chat: '<svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M2 6C2 4.9 2.9 4 4 4H20C21.1 4 22 4.9 22 6V16C22 17.1 21.1 18 20 18H6L2 22V6Z"/>'
-        + '<circle cx="8" cy="11.5" r="1.3" fill="'+T.primary+'"/>'
-        + '<circle cx="12" cy="11.5" r="1.3" fill="'+T.primary+'"/>'
-        + '<circle cx="16" cy="11.5" r="1.3" fill="'+T.primary+'"/></svg>',
-    bubble: '<svg width="22" height="22" viewBox="0 0 24 24" fill="white"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+    // chat bubbles with colored dots
+    chat: '<svg width="22" height="22" viewBox="0 0 24 24" fill="white"><path d="M2 6C2 4.9 2.9 4 4 4H20C21.1 4 22 4.9 22 6V16C22 17.1 21.1 18 20 18H6L2 22V6Z"/>'
+        + '<circle cx="8" cy="11.5" r="1.25" fill="'+T.primary+'"/>'
+        + '<circle cx="12" cy="11.5" r="1.25" fill="'+T.primary+'"/>'
+        + '<circle cx="16" cy="11.5" r="1.25" fill="'+T.primary+'"/></svg>',
+    // chat bubbles with white dots
+    chatW: '<svg width="22" height="22" viewBox="0 0 24 24" fill="white"><path d="M2 6C2 4.9 2.9 4 4 4H20C21.1 4 22 4.9 22 6V16C22 17.1 21.1 18 20 18H6L2 22V6Z"/>'
+         + '<circle cx="8" cy="11.5" r="1.25" fill="rgba(255,255,255,0.5)"/>'
+         + '<circle cx="12" cy="11.5" r="1.25" fill="rgba(255,255,255,0.5)"/>'
+         + '<circle cx="16" cy="11.5" r="1.25" fill="rgba(255,255,255,0.5)"/></svg>',
+    // speech bubble outline
     msg: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
        + '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>',
-    chatO: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round">'
-         + '<path d="M2 6C2 4.9 2.9 4 4 4H20C21.1 4 22 4.9 22 6V16C22 17.1 21.1 18 20 18H6L2 22V6Z"/></svg>',
-    close: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round">'
-         + '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
+    // close X
+    close: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round">'
+         + '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+    // close X dark (for light background buttons)
+    closeDark: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#333" stroke-width="2.5" stroke-linecap="round">'
+             + '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
   };
 
-  // Shared toggle CSS — open/close icon switching
-  var TCSS = [
-    '#cwb .cw-cl{display:none;}',
-    '#cwb.active .cw-op{display:none;}',
-    '#cwb.active .cw-cl{display:flex;}'
-  ].join('');
+  // Shared toggle CSS
+  var TCSS = '#cwb .cw-cl{display:none;}#cwb.active .cw-op{display:none;}#cwb.active .cw-cl{display:flex;}';
+  // Font family
+  var FF = 'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
 
-  function closeBtn() { return '<span class="cw-cl">'+ic.close+'</span>'; }
+  function closeBtn(dark) {
+    return '<span class="cw-cl" style="display:flex;align-items:center;justify-content:center;">'
+         + (dark ? ic.closeDark : ic.close)
+         + '</span>';
+  }
 
-  // ── 10 Button Styles ──────────────────────────────────────
+  // ── 10 Button Styles — all at bottom:24px left:24px ───────
   var STYLES = [
 
-    // 0 — Pill with "Chat" label
+    // 0 — Elevated pill with shimmer top edge
     {
       css: [
-        '#cwb{position:fixed;bottom:20px;left:20px;height:52px;border-radius:26px;background:'+T.grad+';',
-        'border:none;cursor:pointer;box-shadow:0 4px 14px '+T.shadow+';',
-        'display:flex;align-items:center;gap:8px;padding:0 20px 0 14px;z-index:9999;',
-        'transition:transform .2s,box-shadow .2s,width .2s,border-radius .2s,padding .2s;',
-        'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}',
-        '#cwb:hover{transform:scale(1.03);box-shadow:0 6px 20px '+T.shadowHov+';}',
-        '#cwb .cw-lbl{color:#fff;font-size:15px;font-weight:700;letter-spacing:.01em;}',
+        '#cwb{position:fixed;bottom:24px;left:24px;height:54px;border-radius:27px;',
+        'background:'+T.grad+';border:none;cursor:pointer;',
+        'box-shadow:0 6px 20px '+T.shadow+',0 1px 0 rgba(255,255,255,.28) inset;',
+        'display:flex;align-items:center;gap:9px;padding:0 22px 0 14px;z-index:9999;',
+        'transition:transform .2s,box-shadow .2s,width .2s,border-radius .2s,padding .2s;'+FF+'}',
+        '#cwb:hover{transform:translateY(-2px);box-shadow:0 10px 28px '+T.shadowHov+',0 1px 0 rgba(255,255,255,.28) inset;}',
+        '#cwb:active{transform:translateY(0);}',
+        '#cwb .cw-lbl{color:#fff;font-size:15px;font-weight:700;letter-spacing:.01em;line-height:1;}',
         TCSS,
         '#cwb.active .cw-lbl{display:none;}',
-        '#cwb.active{width:52px;padding:0;justify-content:center;border-radius:50%;}'
+        '#cwb.active{width:54px;padding:0;justify-content:center;border-radius:50%;}'
       ].join(''),
       html: '<button id="cwb" aria-label="Chat with us">'
-          + '<span class="cw-op">'+ic.chat+'</span>'
-          + '<span class="cw-lbl">Chat</span>'
-          + closeBtn()+'</button>',
-      ir:'16px', ib:'84px', il:'20px'
+          + '<span class="cw-op" style="display:flex;align-items:center;gap:9px;">'
+          + ic.chat+'<span class="cw-lbl">Chat</span></span>'
+          + closeBtn()+'</button>'
     },
 
-    // 1 — Minimal clean circle
+    // 1 — Clean circle with layered shadows
     {
       css: [
-        '#cwb{position:fixed;bottom:24px;left:24px;width:56px;height:56px;border-radius:50%;',
-        'background:'+T.grad+';border:none;cursor:pointer;box-shadow:0 2px 12px '+T.shadow+';',
+        '#cwb{position:fixed;bottom:24px;left:24px;width:58px;height:58px;border-radius:50%;',
+        'background:'+T.grad+';border:none;cursor:pointer;',
+        'box-shadow:0 4px 6px '+hexToRgba(T.dark,0.25)+',0 8px 24px '+T.shadow+',0 1px 0 rgba(255,255,255,.2) inset;',
         'display:flex;align-items:center;justify-content:center;z-index:9999;',
-        'transition:transform .18s,box-shadow .18s;}',
-        '#cwb:hover{transform:translateY(-3px);box-shadow:0 8px 22px '+T.shadowHov+';}',
+        'transition:transform .18s cubic-bezier(.34,1.56,.64,1),box-shadow .18s;}',
+        '#cwb:hover{transform:scale(1.1);',
+        'box-shadow:0 6px 10px '+hexToRgba(T.dark,0.3)+',0 12px 32px '+T.shadowHov+',0 1px 0 rgba(255,255,255,.2) inset;}',
+        '#cwb:active{transform:scale(.96);}',
         TCSS
       ].join(''),
       html: '<button id="cwb" aria-label="Chat with us">'
           + '<span class="cw-op">'+ic.msg+'</span>'
-          + closeBtn()+'</button>',
-      ir:'20px', ib:'94px', il:'24px'
+          + closeBtn()+'</button>'
     },
 
-    // 2 — Rounded square with live green dot
+    // 2 — Floating pill with red unread badge
     {
       css: [
-        '#cwb{position:fixed;bottom:20px;left:20px;width:58px;height:58px;border-radius:18px;',
-        'background:'+T.grad+';border:none;cursor:pointer;box-shadow:0 4px 16px '+T.shadow+';',
-        'display:flex;align-items:center;justify-content:center;z-index:9999;',
-        'transition:transform .2s,box-shadow .2s;position:relative;}',
-        '#cwb:hover{transform:scale(1.08);box-shadow:0 8px 24px '+T.shadowHov+';}',
-        '#cwb .cw-dot{position:absolute;top:9px;right:9px;width:11px;height:11px;',
-        'border-radius:50%;background:#a8f09a;border:2.5px solid #fff;}',
+        '@keyframes cw-pop{0%{transform:scale(0)}60%{transform:scale(1.2)}100%{transform:scale(1)}}',
+        '#cwb{position:fixed;bottom:24px;left:24px;height:52px;border-radius:26px;',
+        'background:'+T.grad+';border:none;cursor:pointer;',
+        'box-shadow:0 6px 18px '+T.shadow+',0 1px 0 rgba(255,255,255,.25) inset;',
+        'display:flex;align-items:center;gap:9px;padding:0 20px 0 14px;z-index:9999;',
+        'transition:transform .2s,box-shadow .2s,width .2s,border-radius .2s,padding .2s;'+FF+'}',
+        '#cwb:hover{transform:translateY(-2px);box-shadow:0 10px 26px '+T.shadowHov+';}',
+        '#cwb:active{transform:translateY(0);}',
+        '#cwb .cw-badge{position:absolute;top:-6px;right:-4px;min-width:20px;height:20px;',
+        'border-radius:10px;background:#ef4444;border:2.5px solid #fff;',
+        'display:flex;align-items:center;justify-content:center;padding:0 4px;',
+        'font-size:10px;font-weight:800;color:#fff;line-height:1;',
+        'animation:cw-pop .4s cubic-bezier(.34,1.56,.64,1);}',
+        '#cwb .cw-lbl{color:#fff;font-size:15px;font-weight:700;letter-spacing:.01em;}',
         TCSS,
-        '#cwb.active .cw-dot{display:none;}'
+        '#cwb.active .cw-badge{display:none;}',
+        '#cwb.active .cw-lbl{display:none;}',
+        '#cwb.active{width:52px;padding:0;justify-content:center;border-radius:50%;}'
       ].join(''),
       html: '<button id="cwb" aria-label="Chat with us" style="position:relative;">'
-          + '<span class="cw-dot"></span>'
-          + '<span class="cw-op">'+ic.chat+'</span>'
-          + closeBtn()+'</button>',
-      ir:'16px', ib:'92px', il:'20px'
+          + '<span class="cw-badge">1</span>'
+          + '<span class="cw-op" style="display:flex;align-items:center;gap:9px;">'
+          + ic.chat+'<span class="cw-lbl">Chat</span></span>'
+          + closeBtn()+'</button>'
     },
 
-    // 3 — Sharp rectangle, UPPERCASE label
+    // 3 — White pill with colored left icon block
     {
       css: [
-        '#cwb{position:fixed;bottom:20px;left:20px;height:46px;border-radius:3px;',
-        'background:'+T.grad+';border:none;cursor:pointer;box-shadow:0 3px 10px '+T.shadow+';',
-        'display:flex;align-items:center;gap:9px;padding:0 18px;z-index:9999;',
-        'transition:transform .15s,box-shadow .15s;',
-        'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}',
-        '#cwb:hover{transform:translateY(-1px);box-shadow:0 6px 18px '+T.shadowHov+';}',
-        '#cwb .cw-lbl{color:#fff;font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;}',
+        '#cwb{position:fixed;bottom:24px;left:24px;height:54px;border-radius:27px;',
+        'background:#fff;border:none;cursor:pointer;overflow:hidden;',
+        'box-shadow:0 6px 22px rgba(0,0,0,.12),0 2px 6px rgba(0,0,0,.08);',
+        'display:flex;align-items:center;padding:0 20px 0 0;z-index:9999;',
+        'transition:transform .2s,box-shadow .2s,width .2s,padding .2s,border-radius .2s;'+FF+'}',
+        '#cwb:hover{transform:translateY(-2px);box-shadow:0 10px 30px rgba(0,0,0,.15);}',
+        '#cwb:active{transform:translateY(0);}',
+        '#cwb .cw-bar{width:54px;height:54px;background:'+T.grad+';flex-shrink:0;',
+        'display:flex;align-items:center;justify-content:center;}',
+        '#cwb .cw-lbl{color:#111827;font-size:14px;font-weight:700;padding-left:14px;white-space:nowrap;letter-spacing:.01em;}',
         TCSS,
-        '#cwb.active .cw-lbl{display:none;}',
-        '#cwb.active{width:46px;padding:0;justify-content:center;}'
-      ].join(''),
-      html: '<button id="cwb" aria-label="Chat with us">'
-          + '<span class="cw-op">'+ic.bubble+'</span>'
-          + '<span class="cw-lbl">Support</span>'
-          + closeBtn()+'</button>',
-      ir:'3px', ib:'80px', il:'20px'
-    },
-
-    // 4 — Circle with animated pulse ring
-    {
-      css: [
-        '@keyframes cw-pulse{0%{transform:scale(1);opacity:.55}100%{transform:scale(1.75);opacity:0}}',
-        '#cwb{position:fixed;bottom:24px;left:24px;width:54px;height:54px;border-radius:50%;',
-        'background:'+T.grad+';border:none;cursor:pointer;box-shadow:0 4px 14px '+T.shadow+';',
-        'display:flex;align-items:center;justify-content:center;z-index:9999;',
-        'transition:transform .2s,box-shadow .2s;}',
-        '#cwb::before{content:"";position:absolute;inset:0;border-radius:50%;background:'+T.primary+';',
-        'animation:cw-pulse 2s ease-out infinite;pointer-events:none;}',
-        '#cwb:hover{transform:scale(1.08);box-shadow:0 6px 20px '+T.shadowHov+';}',
-        TCSS,
-        '#cwb.active::before{display:none;}'
-      ].join(''),
-      html: '<button id="cwb" aria-label="Chat with us">'
-          + '<span class="cw-op">'+ic.chat+'</span>'
-          + closeBtn()+'</button>',
-      ir:'20px', ib:'94px', il:'24px'
-    },
-
-    // 5 — Side tab attached to left edge
-    {
-      css: [
-        '#cwb{position:fixed;bottom:140px;left:0;height:44px;border-radius:0 10px 10px 0;',
-        'background:'+T.grad+';border:none;cursor:pointer;box-shadow:3px 2px 14px '+T.shadow+';',
-        'display:flex;align-items:center;gap:7px;padding:0 16px 0 12px;z-index:9999;',
-        'transition:transform .2s,box-shadow .2s;',
-        'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}',
-        '#cwb:hover{transform:translateX(4px);box-shadow:5px 4px 18px '+T.shadowHov+';}',
-        '#cwb .cw-lbl{color:#fff;font-size:13px;font-weight:700;letter-spacing:.04em;}',
-        TCSS,
+        '#cwb.active{width:54px;padding:0;border-radius:50%;background:'+T.grad+';overflow:visible;}',
+        '#cwb.active .cw-bar{display:none;}',
         '#cwb.active .cw-lbl{display:none;}'
       ].join(''),
       html: '<button id="cwb" aria-label="Chat with us">'
-          + '<span class="cw-op">'+ic.bubble+'</span>'
-          + '<span class="cw-lbl">Help</span>'
-          + closeBtn()+'</button>',
-      ir:'12px', ib:'50px', il:'10px'
+          + '<span class="cw-op" style="display:flex;align-items:center;width:100%;">'
+          + '<span class="cw-bar">'+ic.chatW+'</span>'
+          + '<span class="cw-lbl">Chat with us</span>'
+          + '</span>'
+          + closeBtn()+'</button>'
     },
 
-    // 6 — Card: "Need help?" + "We're online" subtitle
+    // 4 — Double pulse ring circle
     {
       css: [
-        '#cwb{position:fixed;bottom:20px;left:20px;height:54px;border-radius:14px;',
-        'background:'+T.grad+';border:none;cursor:pointer;box-shadow:0 4px 20px '+T.shadow+';',
-        'display:flex;align-items:center;gap:10px;padding:0 18px 0 14px;z-index:9999;',
-        'transition:transform .2s,box-shadow .2s;',
-        'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}',
-        '#cwb:hover{transform:translateY(-2px);box-shadow:0 10px 28px '+T.shadowHov+';}',
-        '#cwb .cw-txt{display:flex;flex-direction:column;align-items:flex-start;}',
-        '#cwb .cw-lbl{color:#fff;font-size:14px;font-weight:700;line-height:1.2;}',
-        '#cwb .cw-sub{color:rgba(255,255,255,.78);font-size:11px;display:flex;align-items:center;gap:4px;}',
-        '#cwb .cw-sub::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:#a8f09a;}',
+        '@keyframes cw-ring{0%{transform:scale(1);opacity:.6}100%{transform:scale(1.9);opacity:0}}',
+        '#cwb{position:fixed;bottom:24px;left:24px;width:56px;height:56px;border-radius:50%;',
+        'background:'+T.grad+';border:none;cursor:pointer;',
+        'box-shadow:0 4px 16px '+T.shadow+';',
+        'display:flex;align-items:center;justify-content:center;z-index:9999;',
+        'transition:transform .2s,box-shadow .2s;}',
+        '#cwb::before,#cwb::after{content:"";position:absolute;inset:0;border-radius:50%;',
+        'background:'+T.primary+';pointer-events:none;}',
+        '#cwb::before{animation:cw-ring 2.2s ease-out infinite;}',
+        '#cwb::after{animation:cw-ring 2.2s ease-out infinite .8s;}',
+        '#cwb:hover{transform:scale(1.1);box-shadow:0 6px 22px '+T.shadowHov+';}',
+        '#cwb:active{transform:scale(.96);}',
         TCSS,
-        '#cwb.active .cw-txt{display:none;}',
-        '#cwb.active{width:54px;height:54px;padding:0;justify-content:center;border-radius:50%;}'
+        '#cwb.active::before,#cwb.active::after{display:none;}'
       ].join(''),
       html: '<button id="cwb" aria-label="Chat with us">'
-          + '<span class="cw-op">'+ic.msg+'</span>'
-          + '<span class="cw-txt">'
-          + '<span class="cw-lbl">Need help?</span>'
-          + '</span>'
-          + closeBtn()+'</button>',
-      ir:'14px', ib:'88px', il:'20px'
+          + '<span class="cw-op">'+ic.chat+'</span>'
+          + closeBtn()+'</button>'
     },
 
-    // 7 — Avatar initials + "Chat with us"
+    // 5 — Outlined ghost pill
     {
       css: [
-        '#cwb{position:fixed;bottom:20px;left:20px;height:54px;border-radius:27px;',
-        'background:'+T.grad+';border:none;cursor:pointer;box-shadow:0 4px 16px '+T.shadow+';',
-        'display:flex;align-items:center;padding:0 20px 0 5px;z-index:9999;',
-        'transition:transform .2s,box-shadow .2s,width .2s,padding .2s;',
-        'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}',
-        '#cwb:hover{transform:scale(1.03);box-shadow:0 6px 22px '+T.shadowHov+';}',
+        '#cwb{position:fixed;bottom:24px;left:24px;height:52px;border-radius:26px;',
+        'background:rgba(255,255,255,.08);',
+        'border:2px solid '+T.primary+';cursor:pointer;',
+        'box-shadow:0 4px 16px '+T.shadow+';',
+        'display:flex;align-items:center;gap:10px;padding:0 20px 0 10px;z-index:9999;',
+        'transition:transform .2s,box-shadow .2s,background .2s,width .2s,border-radius .2s,padding .2s;'+FF+'}',
+        '#cwb:hover{transform:scale(1.03);background:'+hexToRgba(T.primary,.1)+';',
+        'box-shadow:0 6px 20px '+T.shadowHov+',0 0 0 4px '+hexToRgba(T.primary,.15)+';}',
+        '#cwb:active{transform:scale(.98);}',
+        '#cwb .cw-ic{width:34px;height:34px;border-radius:50%;background:'+T.grad+';',
+        'display:flex;align-items:center;justify-content:center;flex-shrink:0;',
+        'box-shadow:0 2px 6px '+T.shadow+';}',
+        '#cwb .cw-lbl{color:'+T.primary+';font-size:14px;font-weight:700;letter-spacing:.01em;}',
+        TCSS,
+        '#cwb.active .cw-ic{display:none;}',
+        '#cwb.active .cw-lbl{display:none;}',
+        '#cwb.active{width:52px;padding:0;justify-content:center;',
+        'background:'+T.grad+';border-color:transparent;}'
+      ].join(''),
+      html: '<button id="cwb" aria-label="Chat with us">'
+          + '<span class="cw-op" style="display:flex;align-items:center;gap:10px;">'
+          + '<span class="cw-ic">'+ic.chatW+'</span>'
+          + '<span class="cw-lbl">Chat</span>'
+          + '</span>'
+          + closeBtn()+'</button>'
+    },
+
+    // 6 — Card with icon box + label
+    {
+      css: [
+        '#cwb{position:fixed;bottom:24px;left:24px;height:56px;border-radius:16px;',
+        'background:'+T.grad+';border:none;cursor:pointer;',
+        'box-shadow:0 6px 22px '+T.shadow+',0 1px 0 rgba(255,255,255,.25) inset;',
+        'display:flex;align-items:center;gap:12px;padding:0 20px 0 12px;z-index:9999;',
+        'transition:transform .2s,box-shadow .2s,width .2s,padding .2s,border-radius .2s;'+FF+'}',
+        '#cwb:hover{transform:translateY(-3px);box-shadow:0 12px 30px '+T.shadowHov+';}',
+        '#cwb:active{transform:translateY(0);}',
+        '#cwb .cw-ic{width:36px;height:36px;border-radius:10px;',
+        'background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.3);',
+        'display:flex;align-items:center;justify-content:center;flex-shrink:0;}',
+        '#cwb .cw-lbl{color:#fff;font-size:15px;font-weight:700;letter-spacing:.01em;}',
+        TCSS,
+        '#cwb.active .cw-ic{display:none;}',
+        '#cwb.active .cw-lbl{display:none;}',
+        '#cwb.active{width:56px;height:56px;padding:0;justify-content:center;border-radius:50%;}'
+      ].join(''),
+      html: '<button id="cwb" aria-label="Chat with us">'
+          + '<span class="cw-op" style="display:flex;align-items:center;gap:12px;">'
+          + '<span class="cw-ic">'+ic.msg+'</span>'
+          + '<span class="cw-lbl">Need help?</span>'
+          + '</span>'
+          + closeBtn()+'</button>'
+    },
+
+    // 7 — Avatar initials + name pill
+    {
+      css: [
+        '#cwb{position:fixed;bottom:24px;left:24px;height:56px;border-radius:28px;',
+        'background:'+T.grad+';border:none;cursor:pointer;',
+        'box-shadow:0 6px 20px '+T.shadow+',0 1px 0 rgba(255,255,255,.22) inset;',
+        'display:flex;align-items:center;padding:0 22px 0 6px;z-index:9999;',
+        'transition:transform .2s,box-shadow .2s,width .2s,padding .2s;'+FF+'}',
+        '#cwb:hover{transform:translateY(-2px);box-shadow:0 10px 28px '+T.shadowHov+';}',
+        '#cwb:active{transform:translateY(0);}',
         '#cwb .cw-av{width:44px;height:44px;border-radius:50%;',
-        'background:rgba(255,255,255,.22);border:2px solid rgba(255,255,255,.38);',
+        'background:rgba(255,255,255,.25);border:2px solid rgba(255,255,255,.45);',
         'display:flex;align-items:center;justify-content:center;',
-        'font-size:14px;font-weight:800;color:#fff;margin-right:10px;flex-shrink:0;}',
-        '#cwb .cw-lbl{color:#fff;font-size:14px;font-weight:700;white-space:nowrap;}',
+        'font-size:15px;font-weight:800;color:#fff;margin-right:11px;flex-shrink:0;',
+        'text-shadow:0 1px 3px rgba(0,0,0,.2);}',
+        '#cwb .cw-lbl{color:#fff;font-size:14px;font-weight:700;white-space:nowrap;letter-spacing:.01em;}',
         TCSS,
         '#cwb.active .cw-av{display:none;}',
         '#cwb.active .cw-lbl{display:none;}',
-        '#cwb.active{width:54px;padding:0;justify-content:center;border-radius:50%;}'
+        '#cwb.active{width:56px;padding:0;justify-content:center;border-radius:50%;}'
       ].join(''),
       html: '<button id="cwb" aria-label="Chat with us">'
           + '<span class="cw-op" style="display:flex;align-items:center;">'
           + '<span class="cw-av">CS</span>'
           + '<span class="cw-lbl">Chat with us</span>'
           + '</span>'
-          + closeBtn()+'</button>',
-      ir:'16px', ib:'88px', il:'20px'
+          + closeBtn()+'</button>'
     },
 
-    // 8 — Vertical stacked (icon top, label bottom)
+    // 8 — Vertical stacked FAB
     {
       css: [
-        '#cwb{position:fixed;bottom:20px;left:20px;width:60px;height:62px;border-radius:14px;',
-        'background:'+T.grad+';border:none;cursor:pointer;box-shadow:0 4px 16px '+T.shadow+';',
-        'display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;',
-        'padding:0;z-index:9999;transition:transform .2s,box-shadow .2s;',
-        'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}',
-        '#cwb:hover{transform:translateY(-3px);box-shadow:0 8px 22px '+T.shadowHov+';}',
-        '#cwb .cw-lbl{color:#fff;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;line-height:1;}',
+        '#cwb{position:fixed;bottom:24px;left:24px;width:62px;height:64px;border-radius:18px;',
+        'background:'+T.grad+';border:none;cursor:pointer;',
+        'box-shadow:0 6px 20px '+T.shadow+',0 1px 0 rgba(255,255,255,.22) inset;',
+        'display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;',
+        'padding:0;z-index:9999;transition:transform .2s,box-shadow .2s,border-radius .2s,width .2s,height .2s;'+FF+'}',
+        '#cwb:hover{transform:translateY(-3px);box-shadow:0 10px 26px '+T.shadowHov+';border-radius:22px;}',
+        '#cwb:active{transform:translateY(0);}',
+        '#cwb .cw-lbl{color:#fff;font-size:9px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;line-height:1;}',
         TCSS,
         '#cwb.active .cw-lbl{display:none;}',
-        '#cwb.active{width:54px;height:54px;border-radius:50%;}'
+        '#cwb.active{border-radius:50%;width:56px;height:56px;}'
       ].join(''),
       html: '<button id="cwb" aria-label="Chat with us">'
-          + '<span class="cw-op">'+ic.chatO+'</span>'
-          + '<span class="cw-lbl">Chat</span>'
-          + closeBtn()+'</button>',
-      ir:'14px', ib:'96px', il:'20px'
+          + '<span class="cw-op" style="display:flex;flex-direction:column;align-items:center;gap:5px;">'
+          + ic.chatW+'<span class="cw-lbl">Chat</span></span>'
+          + closeBtn()+'</button>'
     },
 
-    // 9 — Glassmorphism frosted pill
+    // 9 — Split pill: frosted icon circle + divider + label
     {
       css: [
-        '#cwb{position:fixed;bottom:20px;left:20px;height:52px;border-radius:26px;',
-        'background:'+T.grad+';border:none;cursor:pointer;box-shadow:0 4px 16px '+T.shadow+';',
-        'display:flex;align-items:center;padding:0 18px 0 6px;z-index:9999;',
-        'transition:transform .2s,box-shadow .2s,width .2s,padding .2s,border-radius .2s;',
-        'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}',
-        '#cwb:hover{transform:scale(1.03);box-shadow:0 6px 22px '+T.shadowHov+';}',
-        '#cwb .cw-ic{width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.18);',
+        '#cwb{position:fixed;bottom:24px;left:24px;height:54px;border-radius:27px;',
+        'background:'+T.grad+';border:none;cursor:pointer;',
+        'box-shadow:0 6px 20px '+T.shadow+',0 1px 0 rgba(255,255,255,.25) inset;',
+        'display:flex;align-items:center;padding:0 20px 0 6px;z-index:9999;',
+        'transition:transform .2s,box-shadow .2s,width .2s,padding .2s,border-radius .2s;'+FF+'}',
+        '#cwb:hover{transform:translateY(-2px);box-shadow:0 10px 28px '+T.shadowHov+';}',
+        '#cwb:active{transform:translateY(0);}',
+        '#cwb .cw-ic{width:42px;height:42px;border-radius:50%;',
+        'background:rgba(255,255,255,.2);border:1.5px solid rgba(255,255,255,.35);',
         'display:flex;align-items:center;justify-content:center;flex-shrink:0;}',
-        '#cwb .cw-div{width:1px;height:22px;background:rgba(255,255,255,.35);margin:0 12px;flex-shrink:0;}',
+        '#cwb .cw-div{width:1px;height:24px;background:rgba(255,255,255,.3);margin:0 14px;flex-shrink:0;}',
         '#cwb .cw-lbl{color:#fff;font-size:14px;font-weight:700;letter-spacing:.01em;white-space:nowrap;}',
         TCSS,
         '#cwb.active .cw-ic{display:none;}',
         '#cwb.active .cw-div{display:none;}',
         '#cwb.active .cw-lbl{display:none;}',
-        '#cwb.active{width:52px;padding:0;justify-content:center;border-radius:50%;}'
+        '#cwb.active{width:54px;padding:0;justify-content:center;border-radius:50%;}'
       ].join(''),
       html: '<button id="cwb" aria-label="Chat with us">'
           + '<span class="cw-op" style="display:flex;align-items:center;">'
-          + '<span class="cw-ic">'+ic.chat+'</span>'
+          + '<span class="cw-ic">'+ic.chatW+'</span>'
           + '<span class="cw-div"></span>'
           + '<span class="cw-lbl">Chat</span>'
           + '</span>'
-          + closeBtn()+'</button>',
-      ir:'16px', ib:'84px', il:'20px'
+          + closeBtn()+'</button>'
     }
 
   ];
 
-  // ── Pick style ────────────────────────────────────────────
+  // ── Pick style by store index ─────────────────────────────
   var idx = getIdx(STORE_ID);
-  var S = STYLES[idx];
-
-  if (!S) {
-    console.error('[ChatWidget] Style index out of range:', idx);
-    S = STYLES[0];
-  }
+  var S = STYLES[idx] || STYLES[0];
 
   // ── Build widget ──────────────────────────────────────────
   var wc = document.createElement('div');
   wc.id = 'chat-support-widget';
 
+  // Iframe always at same position regardless of button style
   var iframeCSS = [
     '#chat-widget-iframe{',
-    'position:fixed;bottom:'+S.ib+';left:'+S.il+';',
-    'width:380px;height:560px;border:none;',
-    'border-radius:'+S.ir+';',
-    'box-shadow:0 8px 30px rgba(0,0,0,.15);',
+    'position:fixed;bottom:90px;left:24px;',
+    'width:380px;height:560px;border:none;border-radius:16px;',
+    'box-shadow:0 12px 40px rgba(0,0,0,.18),0 4px 12px rgba(0,0,0,.1);',
     'z-index:9998;display:none;opacity:0;',
-    'transform:translateY(10px) scale(.98);',
-    'transition:opacity .25s ease,transform .25s ease;}',
+    'transform:translateY(12px) scale(.97);',
+    'transition:opacity .28s cubic-bezier(.4,0,.2,1),transform .28s cubic-bezier(.4,0,.2,1);}',
     '#chat-widget-iframe.open{display:block;opacity:1;transform:translateY(0) scale(1);}',
     '@media(max-width:480px){',
     '#chat-widget-iframe,#chat-widget-iframe.open{',
     'width:100vw;height:100vh;bottom:0;left:0;border-radius:0;transform:none;}',
     '#cwb.active{bottom:16px!important;left:16px!important;z-index:10000;',
-    'background:rgba(0,0,0,.5)!important;box-shadow:none!important;border:none!important;}}'
+    'background:rgba(0,0,0,.55)!important;box-shadow:none!important;border:none!important;}}'
   ].join('');
 
   wc.innerHTML = '<style>'+S.css+iframeCSS+'</style>'
@@ -745,12 +779,11 @@
   var frame = document.getElementById('chat-widget-iframe');
 
   if (!btn || !frame) {
-    console.error('[ChatWidget] Could not find button or iframe elements');
+    console.error('[ChatWidget] Elements not found');
     return;
   }
 
   var isOpen = false;
-
   btn.addEventListener('click', function() {
     isOpen = !isOpen;
     if (isOpen) {
@@ -760,11 +793,11 @@
     } else {
       frame.classList.remove('open');
       btn.classList.remove('active');
-      setTimeout(function() { if (!isOpen) frame.style.display = 'none'; }, 250);
+      setTimeout(function() { if (!isOpen) frame.style.display = 'none'; }, 280);
     }
   });
 
-  var names = ['Pill','Circle','Square+Dot','Sharp','Pulse','SideTab','Card','Avatar','Stacked','Glass'];
-  console.log('[ChatWidget] Loaded | Style '+(idx+1)+': '+names[idx]+' | Store: '+STORE_ID);
+  var names = ['ElevatedPill','SoftCircle','BadgePill','WhitePill','DoublePulse','GhostPill','IconCard','AvatarPill','StackedFAB','SplitPill'];
+  console.log('[ChatWidget] Style '+(idx+1)+': '+names[idx]+' | Store: '+STORE_ID);
 
 })();
