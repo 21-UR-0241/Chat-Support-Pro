@@ -1991,6 +1991,10 @@ async function sendMessage() {
 
 
 
+ 
+
+
+
 
 
 
@@ -2264,7 +2268,7 @@ async function sendMessage() {
       if(hdr){hdr.style.background=t.headerBg;hdr.style.boxShadow=t.headerShadow;}
       console.log('[Widget] Theme:',t.name,'| Store:',STORE_ID);
     }
-    var ACTIVE_THEME=THEMES[getThemeIndex(STORE_ID)];
+    var ACTIVE_THEME=THEMES[0];
 
     // ── Shopify theme color override ──────────────────────────
     // If widget-init.js passed ?primary=&dark=&light= in the URL

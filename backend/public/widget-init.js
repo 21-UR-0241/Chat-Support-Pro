@@ -255,11 +255,11 @@
     return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
   }
 
-  // Start with the store-index theme
-  var T = THEMES[getThemeIndex(STORE_ID)];
+// Default to Emerald (green) unless Shopify theme colors are provided
+var T = THEMES[0];
 
-  // Override with Shopify theme colors if provided via Liquid
-  if (config.themeColors && config.themeColors.primary) {
+// Override with Shopify theme colors if provided via Liquid
+if (config.themeColors && config.themeColors.primary) {
     var p = config.themeColors.primary;
     var d = config.themeColors.dark  || p;
     var l = config.themeColors.light || p;
