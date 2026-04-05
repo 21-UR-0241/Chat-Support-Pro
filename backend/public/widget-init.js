@@ -596,30 +596,27 @@
           + '</button>'
     },
 
-    // 5 — Outlined ghost pill
+   // 5 — Solid pill with left icon circle
     {
       css: [
         '#cwb{position:fixed;bottom:24px;left:24px;height:52px;border-radius:26px;',
-        'background:rgba(255,255,255,.08);',
-        'border:2px solid '+T.primary+';cursor:pointer;',
-        'box-shadow:0 4px 16px '+T.shadow+';',
-        'display:flex;align-items:center;gap:10px;padding:0 20px 0 10px;z-index:9999;',
-        'transition:transform .2s,box-shadow .2s,background .2s,width .2s,border-radius .2s,padding .2s;'+FF+'}',
-        '#cwb:hover{transform:scale(1.03);background:'+hexToRgba(T.primary,.1)+';',
-        'box-shadow:0 6px 20px '+T.shadowHov+',0 0 0 4px '+hexToRgba(T.primary,.15)+';}',
-        '#cwb:active{transform:scale(.98);}',
-        '#cwb .cw-ic{width:34px;height:34px;border-radius:50%;background:'+T.grad+';',
-        'display:flex;align-items:center;justify-content:center;flex-shrink:0;',
-        'box-shadow:0 2px 6px '+T.shadow+';}',
-        '#cwb .cw-lbl{color:'+T.primary+';font-size:14px;font-weight:700;letter-spacing:.01em;}',
+        'background:'+T.grad+';border:none;cursor:pointer;',
+        'box-shadow:0 6px 18px '+T.shadow+',0 1px 0 rgba(255,255,255,.25) inset;',
+        'display:flex;align-items:center;gap:0;padding:0 20px 0 6px;z-index:9999;',
+        'transition:transform .2s,box-shadow .2s,width .2s,border-radius .2s,padding .2s;'+FF+'}',
+        '#cwb:hover{transform:translateY(-2px);box-shadow:0 10px 26px '+T.shadowHov+';}',
+        '#cwb:active{transform:translateY(0);}',
+        '#cwb .cw-ic{width:40px;height:40px;border-radius:50%;',
+        'background:rgba(255,255,255,.22);border:1.5px solid rgba(255,255,255,.35);',
+        'display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-right:10px;}',
+        '#cwb .cw-lbl{color:#fff;font-size:14px;font-weight:700;letter-spacing:.01em;}',
         TCSS,
         '#cwb.active .cw-ic{display:none;}',
         '#cwb.active .cw-lbl{display:none;}',
-        '#cwb.active{width:52px;padding:0;justify-content:center;',
-        'background:'+T.grad+';border-color:transparent;}'
+        '#cwb.active{width:52px;padding:0;justify-content:center;border-radius:50%;}'
       ].join(''),
       html: '<button id="cwb" aria-label="Chat with us">'
-          + '<span class="cw-op" style="display:flex;align-items:center;gap:10px;">'
+          + '<span class="cw-op" style="display:flex;align-items:center;">'
           + '<span class="cw-ic">'+ic.chatW+'</span>'
           + '<span class="cw-lbl">Chat</span>'
           + '</span>'
