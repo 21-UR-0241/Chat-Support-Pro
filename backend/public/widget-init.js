@@ -526,10 +526,9 @@
           + closeBtn()+'</button>'
     },
 
-    // 2 — Floating pill with red unread badge
+   // 2 — Floating pill with label
     {
       css: [
-        '@keyframes cw-pop{0%{transform:scale(0)}60%{transform:scale(1.2)}100%{transform:scale(1)}}',
         '#cwb{position:fixed;bottom:24px;left:24px;height:52px;border-radius:26px;',
         'background:'+T.grad+';border:none;cursor:pointer;',
         'box-shadow:0 6px 18px '+T.shadow+',0 1px 0 rgba(255,255,255,.25) inset;',
@@ -537,19 +536,12 @@
         'transition:transform .2s,box-shadow .2s,width .2s,border-radius .2s,padding .2s;'+FF+'}',
         '#cwb:hover{transform:translateY(-2px);box-shadow:0 10px 26px '+T.shadowHov+';}',
         '#cwb:active{transform:translateY(0);}',
-        '#cwb .cw-badge{position:absolute;top:-6px;right:-4px;min-width:20px;height:20px;',
-        'border-radius:10px;background:#ef4444;border:2.5px solid #fff;',
-        'display:flex;align-items:center;justify-content:center;padding:0 4px;',
-        'font-size:10px;font-weight:800;color:#fff;line-height:1;',
-        'animation:cw-pop .4s cubic-bezier(.34,1.56,.64,1);}',
         '#cwb .cw-lbl{color:#fff;font-size:15px;font-weight:700;letter-spacing:.01em;}',
         TCSS,
-        '#cwb.active .cw-badge{display:none;}',
         '#cwb.active .cw-lbl{display:none;}',
         '#cwb.active{width:52px;padding:0;justify-content:center;border-radius:50%;}'
       ].join(''),
-      html: '<button id="cwb" aria-label="Chat with us" style="position:relative;">'
-          + '<span class="cw-badge">1</span>'
+      html: '<button id="cwb" aria-label="Chat with us">'
           + '<span class="cw-op" style="display:flex;align-items:center;gap:9px;">'
           + ic.chat+'<span class="cw-lbl">Chat</span></span>'
           + closeBtn()+'</button>'
