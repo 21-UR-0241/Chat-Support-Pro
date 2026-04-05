@@ -505,7 +505,7 @@
       html: '<button id="cwb" aria-label="Chat with us">'
           + '<span class="cw-op" style="display:flex;align-items:center;gap:9px;">'
           + ic.chat+'<span class="cw-lbl">Chat</span></span>'
-          + closeBtn()+'</button>'
+          + '</button>'
     },
 
     // 1 — Clean circle with layered shadows
@@ -523,7 +523,7 @@
       ].join(''),
       html: '<button id="cwb" aria-label="Chat with us">'
           + '<span class="cw-op">'+ic.msg+'</span>'
-          + closeBtn()+'</button>'
+          + '</button>'
     },
 
    // 2 — Floating pill with label
@@ -544,7 +544,7 @@
       html: '<button id="cwb" aria-label="Chat with us">'
           + '<span class="cw-op" style="display:flex;align-items:center;gap:9px;">'
           + ic.chat+'<span class="cw-lbl">Chat</span></span>'
-          + closeBtn()+'</button>'
+          + '</button>'
     },
 
     // 3 — White pill with colored left icon block
@@ -570,7 +570,7 @@
           + '<span class="cw-bar">'+ic.chatW+'</span>'
           + '<span class="cw-lbl">Chat with us</span>'
           + '</span>'
-          + closeBtn()+'</button>'
+          + '</button>'
     },
 
     // 4 — Double pulse ring circle
@@ -593,7 +593,7 @@
       ].join(''),
       html: '<button id="cwb" aria-label="Chat with us">'
           + '<span class="cw-op">'+ic.chat+'</span>'
-          + closeBtn()+'</button>'
+          + '</button>'
     },
 
     // 5 — Outlined ghost pill
@@ -623,7 +623,7 @@
           + '<span class="cw-ic">'+ic.chatW+'</span>'
           + '<span class="cw-lbl">Chat</span>'
           + '</span>'
-          + closeBtn()+'</button>'
+          + '</button>'
     },
 
     // 6 — Card with icon box + label
@@ -650,7 +650,7 @@
           + '<span class="cw-ic">'+ic.msg+'</span>'
           + '<span class="cw-lbl">Need help?</span>'
           + '</span>'
-          + closeBtn()+'</button>'
+          + '</button>'
     },
 
     // 7 — Avatar initials + name pill
@@ -679,28 +679,29 @@
           + '<span class="cw-av">CS</span>'
           + '<span class="cw-lbl">Chat with us</span>'
           + '</span>'
-          + closeBtn()+'</button>'
+          + '</button>'
     },
 
-    // 8 — Vertical stacked FAB
+// 8 — Single pulse ring circle
     {
       css: [
-        '#cwb{position:fixed;bottom:24px;left:24px;width:62px;height:64px;border-radius:18px;',
+        '@keyframes cw-pulse{0%{transform:scale(1);opacity:.6}100%{transform:scale(1.8);opacity:0}}',
+        '#cwb{position:fixed;bottom:24px;left:24px;width:56px;height:56px;border-radius:50%;',
         'background:'+T.grad+';border:none;cursor:pointer;',
-        'box-shadow:0 6px 20px '+T.shadow+',0 1px 0 rgba(255,255,255,.22) inset;',
-        'display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;',
-        'padding:0;z-index:9999;transition:transform .2s,box-shadow .2s,border-radius .2s,width .2s,height .2s;'+FF+'}',
-        '#cwb:hover{transform:translateY(-3px);box-shadow:0 10px 26px '+T.shadowHov+';border-radius:22px;}',
-        '#cwb:active{transform:translateY(0);}',
-        '#cwb .cw-lbl{color:#fff;font-size:9px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;line-height:1;}',
+        'box-shadow:0 4px 16px '+T.shadow+';',
+        'display:flex;align-items:center;justify-content:center;z-index:9999;',
+        'transition:transform .2s,box-shadow .2s;}',
+        '#cwb::before{content:"";position:absolute;inset:0;border-radius:50%;',
+        'background:'+T.primary+';pointer-events:none;',
+        'animation:cw-pulse 2s ease-out infinite;}',
+        '#cwb:hover{transform:scale(1.1);box-shadow:0 6px 22px '+T.shadowHov+';}',
+        '#cwb:active{transform:scale(.96);}',
         TCSS,
-        '#cwb.active .cw-lbl{display:none;}',
-        '#cwb.active{border-radius:50%;width:56px;height:56px;}'
+        '#cwb.active::before{display:none;}'
       ].join(''),
       html: '<button id="cwb" aria-label="Chat with us">'
-          + '<span class="cw-op" style="display:flex;flex-direction:column;align-items:center;gap:5px;">'
-          + ic.chatW+'<span class="cw-lbl">Chat</span></span>'
-          + closeBtn()+'</button>'
+          + '<span class="cw-op">'+ic.chat+'</span>'
+          +'</button>'
     },
 
     // 9 — Split pill: frosted icon circle + divider + label
@@ -730,7 +731,7 @@
           + '<span class="cw-div"></span>'
           + '<span class="cw-lbl">Chat</span>'
           + '</span>'
-          + closeBtn()+'</button>'
+          + '</button>'
     }
 
   ];
