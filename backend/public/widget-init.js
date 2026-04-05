@@ -619,7 +619,6 @@
           + '<span class="cw-op">'+ic.msg+'</span>'
           + '<span class="cw-txt">'
           + '<span class="cw-lbl">Need help?</span>'
-          + '<span class="cw-sub">We\'re online</span>'
           + '</span>'
           + closeBtn()+'</button>',
       ir:'14px', ib:'88px', il:'20px'
@@ -678,24 +677,27 @@
     {
       css: [
         '#cwb{position:fixed;bottom:20px;left:20px;height:52px;border-radius:26px;',
-        'background:'+hexToRgba(T.primary, 0.18)+';',
-        'backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);',
-        'border:1.5px solid '+hexToRgba(T.primary, 0.55)+';',
-        'cursor:pointer;',
-        'box-shadow:0 4px 20px '+T.shadow+',inset 0 1px 0 rgba(255,255,255,.25);',
-        'display:flex;align-items:center;gap:8px;padding:0 20px 0 14px;z-index:9999;',
-        'transition:transform .2s,box-shadow .2s,background .2s;',
+        'background:'+T.grad+';border:none;cursor:pointer;box-shadow:0 4px 16px '+T.shadow+';',
+        'display:flex;align-items:center;padding:0 18px 0 6px;z-index:9999;',
+        'transition:transform .2s,box-shadow .2s,width .2s,padding .2s,border-radius .2s;',
         'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}',
-        '#cwb:hover{transform:scale(1.04);background:'+hexToRgba(T.primary, 0.3)+';box-shadow:0 6px 24px '+T.shadowHov+';}',
-        '#cwb .cw-lbl{color:#fff;font-size:15px;font-weight:700;text-shadow:0 1px 4px rgba(0,0,0,.3);}',
+        '#cwb:hover{transform:scale(1.03);box-shadow:0 6px 22px '+T.shadowHov+';}',
+        '#cwb .cw-ic{width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.18);',
+        'display:flex;align-items:center;justify-content:center;flex-shrink:0;}',
+        '#cwb .cw-div{width:1px;height:22px;background:rgba(255,255,255,.35);margin:0 12px;flex-shrink:0;}',
+        '#cwb .cw-lbl{color:#fff;font-size:14px;font-weight:700;letter-spacing:.01em;white-space:nowrap;}',
         TCSS,
+        '#cwb.active .cw-ic{display:none;}',
+        '#cwb.active .cw-div{display:none;}',
         '#cwb.active .cw-lbl{display:none;}',
-        '#cwb.active{width:52px;padding:0;justify-content:center;border-radius:50%;',
-        'background:'+T.grad+';border-color:transparent;}'
+        '#cwb.active{width:52px;padding:0;justify-content:center;border-radius:50%;}'
       ].join(''),
       html: '<button id="cwb" aria-label="Chat with us">'
-          + '<span class="cw-op">'+ic.chat+'</span>'
+          + '<span class="cw-op" style="display:flex;align-items:center;">'
+          + '<span class="cw-ic">'+ic.chat+'</span>'
+          + '<span class="cw-div"></span>'
           + '<span class="cw-lbl">Chat</span>'
+          + '</span>'
           + closeBtn()+'</button>',
       ir:'16px', ib:'84px', il:'20px'
     }
