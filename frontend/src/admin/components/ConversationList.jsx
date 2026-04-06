@@ -1582,7 +1582,47 @@ function ConversationList({
                       {hasUnread && <span className="meta-new-badge">NEW</span>}
                     </div>
 
+
                     <div className="conversation-bottom">
+  <p className="conversation-preview">
+    {(() => {
+      if (conversation.lastMessage) {
+        const isAgentMessage =
+          conversation.lastSenderType === 'agent' ||
+          conversation.lastMessageSenderType === 'agent' ||
+          conversation.last_sender_type === 'agent' ||
+          conversation.last_message_sender_type === 'agent';
+
+        // Never show auto-reply text as inbox preview
+        const isAutoReply =
+          isAgentMessage &&
+          conversation.lastMessage.startsWith('We received your message');
+
+        if (isAutoReply) {
+          return <span style={{ color: '#aab8c2', fontStyle: 'italic' }}>Waiting for reply...</span>;
+        }
+
+        return (
+          <>
+            {isAgentMessage && <span className="you-label">You: </span>}
+            {conversation.lastMessage}
+          </>
+        );
+      }
+      return 'No messages yet';
+    })()}
+  </p>
+  {hasUnread && (
+    <span
+      className="unread-badge"
+      style={isLegal ? { background: '#dc2626' } : undefined}
+    >
+      {totalGroupUnread}
+    </span>
+  )}
+</div>
+
+                    {/* <div className="conversation-bottom">
                       <p className="conversation-preview">
                         {(() => {
                           if (conversation.lastMessage) {
@@ -1609,7 +1649,7 @@ function ConversationList({
                           {totalGroupUnread}
                         </span>
                       )}
-                    </div>
+                    </div> */}
                   </div>
                 </div>
               );
