@@ -1583,7 +1583,7 @@ function ConversationList({
                     </div>
 
 
-                    <div className="conversation-bottom">
+<div className="conversation-bottom">
   <p className="conversation-preview">
     {(() => {
       if (conversation.lastMessage) {
@@ -1592,16 +1592,6 @@ function ConversationList({
           conversation.lastMessageSenderType === 'agent' ||
           conversation.last_sender_type === 'agent' ||
           conversation.last_message_sender_type === 'agent';
-
-        // Never show auto-reply text as inbox preview
-        const isAutoReply =
-          isAgentMessage &&
-          conversation.lastMessage.startsWith('We received your message');
-
-        if (isAutoReply) {
-          return <span style={{ color: '#aab8c2', fontStyle: 'italic' }}>Waiting for reply...</span>;
-        }
-
         return (
           <>
             {isAgentMessage && <span className="you-label">You: </span>}
