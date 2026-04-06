@@ -9209,6 +9209,7 @@ const PORT = process.env.PORT || 3000;
 //     process.exit(1);
 //   }
 // }
+
 async function startServer() {
   try {
     await db.testConnection(); console.log('✅ Database connection successful\n');
@@ -9283,6 +9284,13 @@ async function startServer() {
                     WHERE conversation_id = c.id AND sender_type = 'customer'
                   )
               )
+              AND (
+                c.last_read_at IS NULL
+                OR c.last_read_at < (
+                  SELECT MAX(sent_at) FROM messages
+                  WHERE conversation_id = c.id AND sender_type = 'customer'
+                )
+              )
           `);
 
           for (const conv of rows) {
@@ -9298,8 +9306,19 @@ async function startServer() {
 
               const saved = insertResult.rows[0];
 
+              // Stamp auto_replied_at and reset preview back to customer's last message
               await db.pool.query(
-                `UPDATE conversations SET auto_replied_at = NOW() WHERE id = $1`,
+                `UPDATE conversations
+                 SET auto_replied_at = NOW(),
+                     last_message = (
+                       SELECT content FROM messages
+                       WHERE conversation_id = $1
+                         AND sender_type = 'customer'
+                       ORDER BY sent_at DESC
+                       LIMIT 1
+                     ),
+                     last_message_sender_type = 'customer'
+                 WHERE id = $1`,
                 [conv.id]
               );
 
