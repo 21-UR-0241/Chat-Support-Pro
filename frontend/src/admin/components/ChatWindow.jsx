@@ -869,6 +869,11 @@ function ChatWindow({
   const [legalAlert, setLegalAlert] = useState(null);
   const legalDismissTimerRef = useRef(null);
 
+  const autoReplyTimerRef = useRef(null);
+  const AUTO_REPLY_DELAY_MS = 3 * 60 * 1000; // 3 minutes
+  const AUTO_REPLY_TEXT =
+  'We received your message and will answer you ASAP! We answer as early as next business day, sometimes even within a few hours!';
+
   const messagesEndRef = useRef(null);
   const editableRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -1310,7 +1315,7 @@ function ChatWindow({
 
   handleWsMessageRef.current = handleWebSocketMessage;
 
-  const handleIncomingMessage = (message, currentConv, currentEmployeeName) => {
+const handleIncomingMessage = (message, currentConv, currentEmployeeName) => {
     const msgId = message.id;
     const convId = message.conversationId || message.conversation_id;
     if (convId && String(convId) !== String(currentConv?.id)) { showNotification(message); return; }
@@ -1325,8 +1330,25 @@ function ChatWindow({
       if (prev.some(m => String(m.id) === String(msgId))) return prev;
       return [...prev, { ...normalized, sending: false, _optimistic: false }];
     });
-    if (message.senderType === 'customer') showNotification(message);
+    if (message.senderType === 'customer') {
+      showNotification(message);
+
+      // Start (or reset) the 3-min auto-reply countdown
+      if (autoReplyTimerRef.current) clearTimeout(autoReplyTimerRef.current);
+      autoReplyTimerRef.current = setTimeout(async () => {
+        autoReplyTimerRef.current = null;
+        const currentConvSnap = conversationRef.current;
+        if (!currentConvSnap?.id) return;
+        try {
+          await onSendMessage(currentConvSnap, AUTO_REPLY_TEXT, null);
+        } catch (err) {
+          console.error('❌ Auto-reply failed:', err);
+        }
+      }, AUTO_REPLY_DELAY_MS);
+    }
   };
+
+  
 
   const showNotification = (message) => {
     if (!message || message.senderType === 'agent') return;
@@ -1501,6 +1523,12 @@ function ChatWindow({
 
     try {
       setSending(true);
+
+      if (autoReplyTimerRef.current) {
+        clearTimeout(autoReplyTimerRef.current);
+        autoReplyTimerRef.current = null;
+      }
+
       let fileUrl = null;
       let fileData = null;
       if (selectedFile) {

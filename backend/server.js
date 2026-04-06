@@ -9126,15 +9126,96 @@ function setupKeepAlive() {
 
 const PORT = process.env.PORT || 3000;
 
+// async function startServer() {
+//   try {
+//     server.listen(PORT, () => {
+//       setupKeepAlive();
+//       startEmailSweep(db.pool);
+
+//       setInterval(async () => {
+//         try {
+//           const result = await db.pool.query(`UPDATE customer_presence SET status = 'offline', ws_connected = FALSE, updated_at = NOW() WHERE status != 'offline' AND last_heartbeat_at < NOW() - INTERVAL '3 minutes' RETURNING conversation_id`);
+//           if (result.rowCount > 0) console.log(`[Presence] Marked ${result.rowCount} stale sessions offline`);
+//         } catch (err) { console.error('[Presence] Stale cleanup error:', err); }
+//       }, 2 * 60 * 1000);
+
+//       // ============ AUTO-REPLY (3-minute no-response rule) ============
+//       const AUTO_REPLY_TEXT = 'We received your message and will answer you ASAP! We answer as early as next business day, sometimes even within a few hours!';
+
+//       setInterval(async () => {
+//         try {
+//           const { rows } = await db.pool.query(`
+//             SELECT c.id, c.shop_id
+//             FROM conversations c
+//             WHERE c.status = 'open'
+//               AND c.auto_replied_at IS NULL
+//               AND EXISTS (
+//                 SELECT 1 FROM messages m
+//                 WHERE m.conversation_id = c.id
+//                   AND m.sender_type = 'customer'
+//                   AND m.sent_at = (
+//                     SELECT MAX(sent_at) FROM messages WHERE conversation_id = c.id
+//                   )
+//                   AND m.sent_at < NOW() - INTERVAL '3 minutes'
+//               )
+//               AND NOT EXISTS (
+//                 SELECT 1 FROM messages m2
+//                 WHERE m2.conversation_id = c.id
+//                   AND m2.sender_type = 'agent'
+//                   AND m2.sent_at > (
+//                     SELECT MAX(sent_at) FROM messages
+//                     WHERE conversation_id = c.id AND sender_type = 'customer'
+//                   )
+//               )
+//           `);
+
+//           for (const conv of rows) {
+//             try {
+//               // Raw INSERT — bypasses saveMessage so conversation fields are untouched
+//               const insertResult = await db.pool.query(
+//                 `INSERT INTO messages
+//                    (conversation_id, shop_id, sender_type, sender_name, content,
+//                     message_type, file_data, sent_at, timestamp)
+//                  VALUES ($1, $2, 'agent', 'Support', $3, 'text', NULL, NOW(), NOW())
+//                  RETURNING *`,
+//                 [conv.id, conv.shop_id, AUTO_REPLY_TEXT]
+//               );
+
+//               const saved = insertResult.rows[0];
+
+//               // Only stamp auto_replied_at — all other conversation fields stay untouched
+//               await db.pool.query(
+//                 `UPDATE conversations SET auto_replied_at = NOW() WHERE id = $1`,
+//                 [conv.id]
+//               );
+
+//               const msg = snakeToCamel(saved);
+//               sendToConversation(conv.id, { type: 'new_message', message: msg });
+//               broadcastToAgents({ type: 'new_message', message: msg, conversationId: conv.id, storeId: conv.shop_id });
+//               console.log(`🤖 [Auto-reply] Sent to conv #${conv.id}`);
+//             } catch (err) {
+//               console.error(`🤖 [Auto-reply] Failed for conv #${conv.id}:`, err.message);
+//             }
+//           }
+//         } catch (err) {
+//           console.error('🤖 [Auto-reply] Query error:', err.message);
+//         }
+//       }, 60 * 1000);
+//       // ============ END AUTO-REPLY ============
+
+//     });
+//   } catch (error) {
+//     console.error('❌ FATAL: Failed to start server:', error.message);
+//     process.exit(1);
+//   }
+// }
 async function startServer() {
   try {
-    console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('🔄 Initializing Multi-Store Chat Server...');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
     await db.testConnection(); console.log('✅ Database connection successful\n');
     await db.initDatabase(); console.log('✅ Database tables initialized\n');
     await db.runMigrations(); console.log('✅ Database migrations completed\n');
-    server.listen(PORT, () => {
+
+    server.listen(PORT, async () => {
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       console.log('🚀 MULTI-STORE CHAT SERVER READY');
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -9142,14 +9223,100 @@ async function startServer() {
       console.log(`🔌 WebSocket: ws://localhost:${PORT}/ws`);
       console.log(`✦  AI Suggestions: ${process.env.ANTHROPIC_API_KEY ? 'Enabled (Claude)' : 'Fallback mode (no API key)'}`);
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+      // ── Safety: ensure auto_replied_at exists before cron starts ──
+      try {
+        await db.pool.query(`
+          ALTER TABLE conversations
+            ADD COLUMN IF NOT EXISTS auto_replied_at TIMESTAMPTZ DEFAULT NULL
+        `);
+        const check = await db.pool.query(`
+          SELECT column_name FROM information_schema.columns
+          WHERE table_name = 'conversations' AND column_name = 'auto_replied_at'
+        `);
+        if (check.rows.length > 0) {
+          console.log('✅ [Startup] auto_replied_at column confirmed');
+        } else {
+          console.error('❌ [Startup] auto_replied_at column STILL missing — auto-reply will not start');
+          return;
+        }
+      } catch (err) {
+        console.error('❌ [Startup] Failed to ensure auto_replied_at:', err.message);
+        return;
+      }
+
       setupKeepAlive();
       startEmailSweep(db.pool);
+
       setInterval(async () => {
         try {
           const result = await db.pool.query(`UPDATE customer_presence SET status = 'offline', ws_connected = FALSE, updated_at = NOW() WHERE status != 'offline' AND last_heartbeat_at < NOW() - INTERVAL '3 minutes' RETURNING conversation_id`);
           if (result.rowCount > 0) console.log(`[Presence] Marked ${result.rowCount} stale sessions offline`);
         } catch (err) { console.error('[Presence] Stale cleanup error:', err); }
       }, 2 * 60 * 1000);
+
+      // ============ AUTO-REPLY (3-minute no-response rule) ============
+      const AUTO_REPLY_TEXT = 'We received your message and will answer you ASAP! We answer as early as next business day, sometimes even within a few hours!';
+
+      setInterval(async () => {
+        try {
+          const { rows } = await db.pool.query(`
+            SELECT c.id, c.shop_id
+            FROM conversations c
+            WHERE c.status = 'open'
+              AND c.auto_replied_at IS NULL
+              AND EXISTS (
+                SELECT 1 FROM messages m
+                WHERE m.conversation_id = c.id
+                  AND m.sender_type = 'customer'
+                  AND m.sent_at = (
+                    SELECT MAX(sent_at) FROM messages WHERE conversation_id = c.id
+                  )
+                  AND m.sent_at < NOW() - INTERVAL '3 minutes'
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM messages m2
+                WHERE m2.conversation_id = c.id
+                  AND m2.sender_type = 'agent'
+                  AND m2.sent_at > (
+                    SELECT MAX(sent_at) FROM messages
+                    WHERE conversation_id = c.id AND sender_type = 'customer'
+                  )
+              )
+          `);
+
+          for (const conv of rows) {
+            try {
+              const insertResult = await db.pool.query(
+                `INSERT INTO messages
+                   (conversation_id, shop_id, sender_type, sender_name, content,
+                    message_type, file_data, sent_at, timestamp)
+                 VALUES ($1, $2, 'agent', 'Support', $3, 'text', NULL, NOW(), NOW())
+                 RETURNING *`,
+                [conv.id, conv.shop_id, AUTO_REPLY_TEXT]
+              );
+
+              const saved = insertResult.rows[0];
+
+              await db.pool.query(
+                `UPDATE conversations SET auto_replied_at = NOW() WHERE id = $1`,
+                [conv.id]
+              );
+
+              const msg = snakeToCamel(saved);
+              sendToConversation(conv.id, { type: 'new_message', message: msg });
+              broadcastToAgents({ type: 'new_message', message: msg, conversationId: conv.id, storeId: conv.shop_id });
+              console.log(`🤖 [Auto-reply] Sent to conv #${conv.id}`);
+            } catch (err) {
+              console.error(`🤖 [Auto-reply] Failed for conv #${conv.id}:`, err.message);
+            }
+          }
+        } catch (err) {
+          console.error('🤖 [Auto-reply] Query error:', err.message);
+        }
+      }, 60 * 1000);
+      // ============ END AUTO-REPLY ============
+
     });
   } catch (error) {
     console.error('❌ FATAL: Failed to start server:', error.message);

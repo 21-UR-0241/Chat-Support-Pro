@@ -2144,14 +2144,49 @@ async function runMigrations() {
     await migration_010_add_ai_training_brain();
     await migration_011_add_legal_flag_columns();
     await migration_012_add_agent_replied_at();
-    await migration_013_add_blacklist_and_archive();   // ← NEW
-    
+    await migration_013_add_blacklist_and_archive();
+    await migration_014_add_auto_replied_at();
+
+    // ── Verify critical columns exist after migrations ──
+    const { rows } = await pool.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'conversations' 
+        AND column_name IN (
+          'auto_replied_at',
+          'archived_at',
+          'agent_replied_at',
+          'legal_flag',
+          'unread_count',
+          'last_message',
+          'last_message_sender_type'
+        )
+      ORDER BY column_name
+    `);
+    const found = rows.map(r => r.column_name);
+    const expected = [
+      'agent_replied_at',
+      'archived_at',
+      'auto_replied_at',
+      'last_message',
+      'last_message_sender_type',
+      'legal_flag',
+      'unread_count',
+    ];
+    const missing = expected.filter(col => !found.includes(col));
+    if (missing.length > 0) {
+      console.error(`❌ [Migrations] Missing columns after migrations: ${missing.join(', ')}`);
+    } else {
+      console.log(`✅ [Migrations] All critical columns verified: ${found.join(', ')}`);
+    }
+
     console.log('✅ All migrations completed successfully');
   } catch (error) {
     console.error('❌ Migration failed:', error);
     throw error;
   }
 }
+
 
 async function migration_001_add_message_columns() {
   const client = await pool.connect();
@@ -2714,6 +2749,26 @@ async function migration_013_add_blacklist_and_archive() {
     `);
 
     console.log(`✅ [${migrationName}] blacklist table and archived_at column ready`);
+  } catch (error) {
+    console.error(`❌ [${migrationName}] Failed:`, error);
+    throw error;
+  }
+}
+
+async function migration_014_add_auto_replied_at() {
+  const migrationName = 'Migration 014';
+  try {
+    console.log(`📝 [${migrationName}] Adding auto_replied_at to conversations...`);
+    await pool.query(`
+      ALTER TABLE conversations
+        ADD COLUMN IF NOT EXISTS auto_replied_at TIMESTAMPTZ DEFAULT NULL;
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_conversations_auto_replied_at
+        ON conversations(auto_replied_at)
+        WHERE auto_replied_at IS NOT NULL;
+    `);
+    console.log(`✅ [${migrationName}] auto_replied_at column added`);
   } catch (error) {
     console.error(`❌ [${migrationName}] Failed:`, error);
     throw error;
