@@ -2126,8 +2126,6 @@ async function initDatabase() {
     client.release();
   }
 }
-
-
 async function runMigrations() {
   console.log('🔄 Running database migrations...');
   
@@ -2146,6 +2144,7 @@ async function runMigrations() {
     await migration_012_add_agent_replied_at();
     await migration_013_add_blacklist_and_archive();
     await migration_014_add_auto_replied_at();
+    await migration_015_add_notes_order();
 
     // ── Verify critical columns exist after migrations ──
     const { rows } = await pool.query(`
@@ -2186,6 +2185,7 @@ async function runMigrations() {
     throw error;
   }
 }
+
 
 
 async function migration_001_add_message_columns() {
@@ -2774,6 +2774,21 @@ async function migration_014_add_auto_replied_at() {
     throw error;
   }
 }
+
+async function migration_015_add_notes_order() {
+  const migrationName = 'Migration 015';
+  try {
+    console.log(`📝 [${migrationName}] Adding notes_order column to employees...`);
+    await pool.query(`
+      ALTER TABLE employees
+        ADD COLUMN IF NOT EXISTS notes_order JSONB DEFAULT '[]';
+    `);
+    console.log(`✅ [${migrationName}] notes_order column added`);
+  } catch (error) {
+    console.error(`❌ [${migrationName}] Failed:`, error);
+    throw error;
+  }
+}
 // ── END NEW ───────────────────────────────────────────────────────────────────
 
 // ============================================
@@ -3020,7 +3035,7 @@ let query = `
     (SELECT content FROM messages 
      WHERE conversation_id = c.id 
        AND sender_type = 'customer'
-     ORDER BY sent_at DESC LIMIT 1) AS last_customer_message
+     ORDER BY id DESC LIMIT 1) AS last_customer_message
   FROM conversations c 
   JOIN stores s ON c.shop_id = s.id 
   WHERE 1=1
@@ -3291,7 +3306,6 @@ async function markMessageFailed(messageId, error) {
     console.error('Error marking message failed:', err);
   }
 }
-
 // ============================================
 // EMPLOYEE FUNCTIONS
 // ============================================
@@ -3410,6 +3424,19 @@ async function updateEmployeeStatus(employeeId, status) {
     }
   } catch (error) {
     console.error('Error updating employee status:', error);
+  }
+}
+
+async function updateEmployeeNotesOrder(employeeId, order) {
+  try {
+    const result = await pool.query(
+      `UPDATE employees SET notes_order = $1, updated_at = NOW() WHERE id = $2 RETURNING notes_order`,
+      [JSON.stringify(order), employeeId]
+    );
+    return result.rows[0];
+  } catch (error) {
+    console.error('Error updating employee notes order:', error);
+    throw error;
   }
 }
 
@@ -3657,4 +3684,5 @@ module.exports = {
   deleteTemplate,
   getDashboardStats,
   getStoreMetrics,
+  updateEmployeeNotesOrder,
 };

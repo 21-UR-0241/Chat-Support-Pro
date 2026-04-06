@@ -1,6 +1,5 @@
 /* ConversationNotes.css - WhatsApp Color Scheme */
 
-/* Using colors from main app */
 :root {
   --notes-primary: #00a884;
   --notes-primary-dark: #005c4b;
@@ -15,12 +14,11 @@
   --notes-shadow: rgba(11, 20, 26, 0.08);
 }
 
+/* ── Overlay & Modal ────────────────────────────────────────────────────── */
+
 .notes-modal-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(0, 0, 0, 0.5);
   display: flex;
   align-items: center;
@@ -32,7 +30,7 @@
 
 @keyframes fadeIn {
   from { opacity: 0; }
-  to { opacity: 1; }
+  to   { opacity: 1; }
 }
 
 .notes-modal-compact {
@@ -49,17 +47,12 @@
 }
 
 @keyframes slideUp {
-  from {
-    transform: translateY(20px);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
+  from { transform: translateY(20px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
 }
 
-/* Header - WhatsApp Green */
+/* ── Header ─────────────────────────────────────────────────────────────── */
+
 .notes-header-compact {
   padding: 20px 24px;
   border-bottom: 1px solid var(--notes-border);
@@ -115,7 +108,8 @@
   transform: scale(1.05);
 }
 
-/* Error Banner */
+/* ── Error Banner ───────────────────────────────────────────────────────── */
+
 .notes-error-compact {
   background: #fff8e1;
   color: #f57c00;
@@ -139,11 +133,10 @@
   transition: opacity 0.15s;
 }
 
-.notes-error-compact button:hover {
-  opacity: 1;
-}
+.notes-error-compact button:hover { opacity: 1; }
 
-/* Add Note - Compact */
+/* ── Add Note ───────────────────────────────────────────────────────────── */
+
 .notes-add-compact {
   background: var(--notes-bg-main);
   padding: 16px 24px;
@@ -196,9 +189,7 @@
   box-shadow: 0 0 0 2px rgba(0, 168, 132, 0.1);
 }
 
-.note-content-input-compact::placeholder {
-  color: var(--notes-text-tertiary);
-}
+.note-content-input-compact::placeholder { color: var(--notes-text-tertiary); }
 
 .add-note-footer {
   display: flex;
@@ -238,7 +229,8 @@
   transform: none;
 }
 
-/* Grid Wrapper */
+/* ── Grid Wrapper ───────────────────────────────────────────────────────── */
+
 .notes-grid-wrapper {
   flex: 1;
   overflow-y: auto;
@@ -247,7 +239,19 @@
   background: var(--notes-bg-main);
 }
 
-/* Loading - Compact */
+/* ── Drag hint ──────────────────────────────────────────────────────────── */
+
+.notes-drag-hint {
+  font-size: 11px;
+  color: var(--notes-text-tertiary);
+  text-align: center;
+  margin: 0 0 10px;
+  letter-spacing: 0.02em;
+  user-select: none;
+}
+
+/* ── Loading ────────────────────────────────────────────────────────────── */
+
 .notes-loading-compact {
   display: flex;
   flex-direction: column;
@@ -267,9 +271,7 @@
   margin-bottom: 12px;
 }
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
+@keyframes spin { to { transform: rotate(360deg); } }
 
 .notes-loading-compact p {
   margin: 0;
@@ -277,7 +279,8 @@
   font-weight: 500;
 }
 
-/* Empty State - Compact */
+/* ── Empty State ────────────────────────────────────────────────────────── */
+
 .notes-empty-compact {
   text-align: center;
   padding: 60px 20px;
@@ -298,25 +301,29 @@
   margin: 0;
 }
 
-/* Notes Grid - Compact */
+/* ── Notes Grid ─────────────────────────────────────────────────────────── */
+
 .notes-grid-compact {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 16px;
 }
 
-/* Note Card - Compact */
+/* ── Note Card ──────────────────────────────────────────────────────────── */
+
 .note-card-compact {
   background: var(--notes-bg-sidebar);
   border: 1px solid var(--notes-border);
   border-radius: 8px;
   padding: 14px;
-  transition: all 0.2s ease;
   display: flex;
   flex-direction: column;
   gap: 10px;
   min-height: 140px;
   box-shadow: 0 1px 2px var(--notes-shadow);
+  cursor: default;
+  /* smooth transitions for both hover and drag states */
+  transition: opacity 0.15s, transform 0.15s, box-shadow 0.15s, border-color 0.1s, border-width 0.1s;
 }
 
 .note-card-compact:hover {
@@ -324,6 +331,58 @@
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(11, 20, 26, 0.1);
 }
+
+/* ── Drag handle ────────────────────────────────────────────────────────── */
+
+.note-drag-handle {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: center;
+  padding: 2px 0 4px;
+  cursor: grab;
+  opacity: 0.25;
+  transition: opacity 0.15s;
+}
+
+.note-drag-handle:active { cursor: grabbing; }
+
+.note-card-compact:hover .note-drag-handle { opacity: 0.55; }
+
+.note-drag-handle span {
+  display: block;
+  width: 22px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--notes-text-tertiary);
+}
+
+/* ── Drag state modifiers ───────────────────────────────────────────────── */
+
+/* The card being dragged — fade + shrink */
+.note-card--dragging {
+  opacity: 0.35;
+  transform: scale(0.97);
+  box-shadow: none !important;
+  border-style: dashed !important;
+  border-color: var(--notes-primary) !important;
+}
+
+/* Drop-target when dragging FROM below (insert above) */
+.note-card--drag-above {
+  border-top: 3px solid var(--notes-primary) !important;
+  border-top-left-radius: 4px;
+  border-top-right-radius: 4px;
+}
+
+/* Drop-target when dragging FROM above (insert below) */
+.note-card--drag-below {
+  border-bottom: 3px solid var(--notes-primary) !important;
+  border-bottom-left-radius: 4px;
+  border-bottom-right-radius: 4px;
+}
+
+/* ── Card inner layout ──────────────────────────────────────────────────── */
 
 .note-card-top {
   display: flex;
@@ -380,21 +439,10 @@
   transition: all 0.2s ease;
 }
 
-.btn-action:hover {
-  transform: scale(1.1);
-}
-
-.btn-view:hover {
-  background: #e3f2fd;
-}
-
-.btn-copy:hover {
-  background: var(--notes-primary-light);
-}
-
-.btn-delete:hover {
-  background: #ffebee;
-}
+.btn-action:hover        { transform: scale(1.1); }
+.btn-view:hover          { background: #e3f2fd; }
+.btn-copy:hover          { background: var(--notes-primary-light); }
+.btn-delete:hover        { background: #ffebee; }
 
 .note-content-preview {
   font-size: 13px;
@@ -425,13 +473,11 @@
   gap: 4px;
 }
 
-/* View Modal */
+/* ── View Note Modal ────────────────────────────────────────────────────── */
+
 .view-modal-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(0, 0, 0, 0.6);
   display: flex;
   align-items: center;
@@ -546,7 +592,8 @@
   font-weight: 500;
 }
 
-/* Toast Notifications */
+/* ── Toasts ─────────────────────────────────────────────────────────────── */
+
 .note-toast {
   position: fixed;
   bottom: 24px;
@@ -560,48 +607,26 @@
   animation: slideInRight 0.3s ease, slideOutRight 0.3s ease 1.7s;
 }
 
-.note-toast-success {
-  background: var(--notes-primary);
-  color: white;
-}
-
-.note-toast-info {
-  background: #2196f3;
-  color: white;
-}
+.note-toast-success { background: var(--notes-primary); color: white; }
+.note-toast-info    { background: #2196f3;               color: white; }
 
 @keyframes slideInRight {
-  from {
-    transform: translateX(100%);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
 }
 
 @keyframes slideOutRight {
-  from {
-    transform: translateX(0);
-    opacity: 1;
-  }
-  to {
-    transform: translateX(100%);
-    opacity: 0;
-  }
+  from { transform: translateX(0);    opacity: 1; }
+  to   { transform: translateX(100%); opacity: 0; }
 }
 
-/* Scrollbar */
+/* ── Scrollbar ──────────────────────────────────────────────────────────── */
+
 .notes-grid-wrapper::-webkit-scrollbar,
-.view-modal-body::-webkit-scrollbar {
-  width: 6px;
-}
+.view-modal-body::-webkit-scrollbar       { width: 6px; }
 
 .notes-grid-wrapper::-webkit-scrollbar-track,
-.view-modal-body::-webkit-scrollbar-track {
-  background: transparent;
-}
+.view-modal-body::-webkit-scrollbar-track { background: transparent; }
 
 .notes-grid-wrapper::-webkit-scrollbar-thumb,
 .view-modal-body::-webkit-scrollbar-thumb {
@@ -614,7 +639,8 @@
   background: rgba(134, 150, 160, 0.6);
 }
 
-/* Responsive */
+/* ── Responsive ─────────────────────────────────────────────────────────── */
+
 @media (max-width: 1024px) {
   .notes-grid-compact {
     grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
@@ -627,30 +653,17 @@
     max-height: 95vh;
   }
 
-  .notes-header-compact {
-    padding: 16px 20px;
-  }
-
-  .notes-header-compact h2 {
-    font-size: 18px;
-  }
-
-  .notes-add-compact {
-    padding: 14px 20px;
-  }
-
-  .notes-grid-wrapper {
-    padding: 16px 20px;
-  }
+  .notes-header-compact { padding: 16px 20px; }
+  .notes-header-compact h2 { font-size: 18px; }
+  .notes-add-compact    { padding: 14px 20px; }
+  .notes-grid-wrapper   { padding: 16px 20px; }
 
   .notes-grid-compact {
     grid-template-columns: 1fr;
     gap: 12px;
   }
 
-  .view-modal-content {
-    max-width: 95%;
-  }
+  .view-modal-content { max-width: 95%; }
 }
 
 @media (max-width: 480px) {
@@ -660,13 +673,8 @@
     gap: 6px;
   }
 
-  .note-title-compact {
-    font-size: 14px;
-  }
-
-  .note-content-preview {
-    font-size: 12px;
-  }
+  .note-title-compact   { font-size: 14px; }
+  .note-content-preview { font-size: 12px; }
 
   .note-toast {
     bottom: 16px;

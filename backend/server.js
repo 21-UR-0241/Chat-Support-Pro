@@ -8910,6 +8910,30 @@ app.put('/api/employees/:id/status', authenticateToken, async (req, res) => {
   catch (error) { res.status(500).json({ error: error.message }); }
 });
 
+// Add this route alongside your other /api/employees routes
+
+app.patch('/api/employees/:id/notes-order', authenticateToken, async (req, res) => {
+  try {
+    const employeeId = parseInt(req.params.id);
+    const { order } = req.body;
+ 
+    if (req.user.id !== employeeId && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+ 
+    if (!Array.isArray(order)) {
+      return res.status(400).json({ error: 'order must be an array of note IDs' });
+    }
+ 
+    await db.updateEmployeeNotesOrder(employeeId, order);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error saving notes order:', error);
+    res.status(500).json({ error: 'Failed to save notes order' });
+  }
+});
+ 
+
 // ============ TEMPLATE ENDPOINTS ============
 
 app.get('/api/templates', authenticateToken, async (req, res) => {

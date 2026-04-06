@@ -164,6 +164,48 @@
 //     return this.fetch(`/api/conversations/${id}/unread`, { method: 'PUT' });
 //   }
 
+//   // ============ Archive ============
+
+//   async archiveConversation(id) {
+//     return this.fetch(`/api/conversations/${id}/archive`, { method: 'PATCH' });
+//   }
+
+//   async unarchiveConversation(id) {
+//     return this.fetch(`/api/conversations/${id}/unarchive`, { method: 'PATCH' });
+//   }
+
+//   async getArchivedConversations({ page = 1, limit = 30, storeIdentifier } = {}) {
+//     const params = new URLSearchParams({ page, limit });
+//     if (storeIdentifier) params.set('storeIdentifier', storeIdentifier);
+//     return this.fetch(`/api/conversations/archived?${params}`);
+//   }
+
+//   // ============ Blacklist ============
+
+//   async blacklistCustomer({ email, storeIdentifier, allStores = false, reason, customerName }) {
+//     return this.fetch('/api/blacklist', {
+//       method: 'POST',
+//       body: JSON.stringify({ email, storeIdentifier, allStores, reason, customerName }),
+//     });
+//   }
+
+//   async getBlacklist({ page = 1, limit = 50, storeIdentifier, email } = {}) {
+//     const params = new URLSearchParams({ page, limit });
+//     if (storeIdentifier) params.set('storeIdentifier', storeIdentifier);
+//     if (email)           params.set('email', email);
+//     return this.fetch(`/api/blacklist?${params}`);
+//   }
+
+//   async removeBlacklistEntry(blacklistId) {
+//     return this.fetch(`/api/blacklist/${blacklistId}`, { method: 'DELETE' });
+//   }
+
+//   async checkBlacklist(email, storeIdentifier) {
+//     const params = new URLSearchParams({ email });
+//     if (storeIdentifier) params.set('storeIdentifier', storeIdentifier);
+//     return this.fetch(`/api/blacklist/check?${params}`);
+//   }
+
 //   // ============ Cross-Store History ============
 
 //   async getLinkedConversations(email, excludeConversationId = null) {
@@ -331,7 +373,6 @@
 // }
 
 // export default new ApiService();
-
 
 
 const API_URL = import.meta.env.PROD 
@@ -621,6 +662,10 @@ class ApiService {
     return this.fetch(`/api/employees/${encodeURIComponent(email)}`);
   }
 
+  async getEmployeeById(id) {
+    return this.fetch(`/api/employees/${id}`);
+  }
+
   async createEmployee(data) {
     return this.fetch('/api/employees', {
       method: 'POST',
@@ -643,6 +688,13 @@ class ApiService {
     return this.fetch(`/api/employees/${id}/status`, {
       method: 'PUT',
       body: JSON.stringify({ status }),
+    });
+  }
+
+  async updateNotesOrder(employeeId, order) {
+    return this.fetch(`/api/employees/${employeeId}/notes-order`, {
+      method: 'PATCH',
+      body: JSON.stringify({ order }),
     });
   }
 

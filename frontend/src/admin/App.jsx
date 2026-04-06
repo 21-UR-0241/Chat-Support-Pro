@@ -704,21 +704,12 @@ function DashboardContent({ employee, onLogout }) {
   const [showLogoutModal,     setShowLogoutModal]     = useState(false);
   const [showNotesModal,      setShowNotesModal]      = useState(false);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
-
-  // Session-level exclusion set — conversations hidden after archive/blacklist.
-  // Managed explicitly; NO generic self-healing effect (that caused blocked convs
-  // to reappear when the server status update was delayed or didn't match).
   const [excludedConversationIds, setExcludedConversationIds] = useState(new Set());
-
   const profileDropdownRef          = useRef(null);
   const activeNotificationsRef      = useRef(new Map());
   const markAsReadTimerRef          = useRef(new Map());
   const activeConversationRef       = useRef(activeConversation);
   const conversationsRef            = useRef([]);
-
-  // Emails we've explicitly unblacklisted — used by the targeted self-heal
-  // effect so it only restores conversations we deliberately unblacklisted,
-  // never ones that were just blacklisted and are pending a server update.
   const pendingUnblacklistEmailsRef = useRef(new Set());
 
   const {
@@ -740,9 +731,6 @@ function DashboardContent({ employee, onLogout }) {
       return next;
     });
   }, []);
-
-  // Removes ALL conversation IDs belonging to a given email.
-  // Used when unblacklisting (blacklist is keyed by email, not conv ID).
   const removeEmailFromExcluded = useCallback((email) => {
     if (!email) return;
     setExcludedConversationIds(prev => {
@@ -771,14 +759,6 @@ function DashboardContent({ employee, onLogout }) {
     [conversations, excludedConversationIds]
   );
 
-  // ── Targeted self-heal for unblacklist ───────────────────────────────────
-  // Blacklisted conversations are NOT returned by the server API, so they are
-  // absent from conversationsRef when blacklisted. That means removeEmailFromExcluded
-  // can't find their IDs to clear them from the exclusion set.
-  // This effect runs after refreshConversations() brings them back as status:'open'
-  // and clears them from the exclusion set — but ONLY for emails we explicitly
-  // unblacklisted (pendingUnblacklistEmailsRef), so we never accidentally restore
-  // a conversation that was just blacklisted and is pending a slow server update.
   useEffect(() => {
     if (!conversations?.length || !excludedConversationIds.size) return;
     if (!pendingUnblacklistEmailsRef.current.size) return;
@@ -893,12 +873,6 @@ function DashboardContent({ employee, onLogout }) {
       refreshConversations();
     } catch (err) { console.error('[Blacklist] Failed:', err); }
   }, [updateConversation, setActiveConversationId, refreshConversations]);
-
-  // Called by BlacklistManager when removing an entry.
-  // 1. Marks email in pendingUnblacklistEmailsRef so the self-heal effect
-  //    knows it's safe to clear those IDs from the exclusion set once
-  //    refreshConversations brings them back as status:'open'.
-  // 2. awaits refreshConversations so state updates before the effect fires.
   const handleUnblacklist = useCallback(async ({ id, email }) => {
     try {
       await api.removeFromBlacklist(id);
@@ -1247,7 +1221,7 @@ return () => { u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8(); u9(); u10(); u11(
       )}
 
       {showNotesModal && (
-        <ConversationNotes employeeId={employee.id} employeeName={employee.name} onClose={() => setShowNotesModal(false)} />
+        <ConversationNotes employee={employee}  employeeId={employee.id} employeeName={employee.name} onClose={() => setShowNotesModal(false)} />
       )}
 
       <MobileMenu
