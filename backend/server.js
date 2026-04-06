@@ -9284,13 +9284,6 @@ async function startServer() {
                     WHERE conversation_id = c.id AND sender_type = 'customer'
                   )
               )
-              AND (
-                c.last_read_at IS NULL
-                OR c.last_read_at < (
-                  SELECT MAX(sent_at) FROM messages
-                  WHERE conversation_id = c.id AND sender_type = 'customer'
-                )
-              )
           `);
 
 for (const conv of rows) {
@@ -9321,9 +9314,10 @@ for (const conv of rows) {
       [conv.id]
     );
 
-    const msg = snakeToCamel(saved);
-    sendToConversation(conv.id, { type: 'new_message', message: msg });
-    broadcastToAgents({ type: 'new_message', message: msg, conversationId: conv.id, storeId: conv.shop_id });
+const msg = { ...snakeToCamel(saved), isAutoReply: true };
+
+sendToConversation(conv.id, { type: 'new_message', message: msg });
+broadcastToAgents({ type: 'new_message', message: msg, conversationId: conv.id, storeId: conv.shop_id });
 
     // ── REPLACE OLD correctedConv BLOCK WITH THIS ──
     const correctedConv = await db.pool.query(

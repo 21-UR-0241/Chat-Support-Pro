@@ -636,6 +636,10 @@
 
 // export default App;
 
+
+
+
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import api from './services/api';
 import { useConversations } from './hooks/useConversations';
@@ -963,9 +967,10 @@ const u1 = ws.on('new_message', (data) => {
   const isActive = curConv?.id === convId;
 
   // Skip preview update for auto-reply — conversation_updated will correct it
-  const isAutoReply = sender === 'agent' && senderName === 'Support' && 
-    (msg.content || '').startsWith('We received your message');
-
+  // const isAutoReply = sender === 'agent' && senderName === 'Support' && 
+  //   (msg.content || '').startsWith('We received your message');
+// NEW — uses the explicit flag from server
+const isAutoReply = msg.isAutoReply === true;
   const patch = {};
 
   if (!isAutoReply) {
