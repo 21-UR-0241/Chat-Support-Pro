@@ -9293,43 +9293,56 @@ async function startServer() {
               )
           `);
 
-          for (const conv of rows) {
-            try {
-              const insertResult = await db.pool.query(
-                `INSERT INTO messages
-                   (conversation_id, shop_id, sender_type, sender_name, content,
-                    message_type, file_data, sent_at, timestamp)
-                 VALUES ($1, $2, 'agent', 'Support', $3, 'text', NULL, NOW(), NOW())
-                 RETURNING *`,
-                [conv.id, conv.shop_id, AUTO_REPLY_TEXT]
-              );
+        for (const conv of rows) {
+          try {
+            const insertResult = await db.pool.query(
+              `INSERT INTO messages
+                (conversation_id, shop_id, sender_type, sender_name, content,
+                  message_type, file_data, sent_at, timestamp)
+              VALUES ($1, $2, 'agent', 'Support', $3, 'text', NULL, NOW(), NOW())
+              RETURNING *`,
+              [conv.id, conv.shop_id, AUTO_REPLY_TEXT]
+            );
 
-              const saved = insertResult.rows[0];
+            const saved = insertResult.rows[0];
 
-              // Stamp auto_replied_at and reset preview back to customer's last message
-              await db.pool.query(
-                `UPDATE conversations
-                 SET auto_replied_at = NOW(),
-                     last_message = (
-                       SELECT content FROM messages
-                       WHERE conversation_id = $1
-                         AND sender_type = 'customer'
-                       ORDER BY sent_at DESC
-                       LIMIT 1
-                     ),
-                     last_message_sender_type = 'customer'
-                 WHERE id = $1`,
-                [conv.id]
-              );
+            await db.pool.query(
+              `UPDATE conversations
+              SET auto_replied_at = NOW(),
+                  last_message = (
+                    SELECT content FROM messages
+                    WHERE conversation_id = $1
+                      AND sender_type = 'customer'
+                    ORDER BY sent_at DESC
+                    LIMIT 1
+                  ),
+                  last_message_sender_type = 'customer'
+              WHERE id = $1`,
+              [conv.id]
+            );
 
-              const msg = snakeToCamel(saved);
-              sendToConversation(conv.id, { type: 'new_message', message: msg });
-              broadcastToAgents({ type: 'new_message', message: msg, conversationId: conv.id, storeId: conv.shop_id });
-              console.log(`🤖 [Auto-reply] Sent to conv #${conv.id}`);
-            } catch (err) {
-              console.error(`🤖 [Auto-reply] Failed for conv #${conv.id}:`, err.message);
+            const msg = snakeToCamel(saved);
+            sendToConversation(conv.id, { type: 'new_message', message: msg });
+            broadcastToAgents({ type: 'new_message', message: msg, conversationId: conv.id, storeId: conv.shop_id });
+
+            // Broadcast corrected conversation preview to agents
+            const correctedConv = await db.pool.query(
+              `SELECT * FROM conversations WHERE id = $1`,
+              [conv.id]
+            );
+            if (correctedConv.rows.length > 0) {
+              broadcastToAgents({
+                type: 'conversation_updated',
+                conversationId: conv.id,
+                conversation: snakeToCamel(correctedConv.rows[0]),
+              });
             }
+
+            console.log(`🤖 [Auto-reply] Sent to conv #${conv.id}`);
+          } catch (err) {
+            console.error(`🤖 [Auto-reply] Failed for conv #${conv.id}:`, err.message);
           }
+        }
         } catch (err) {
           console.error('🤖 [Auto-reply] Query error:', err.message);
         }
