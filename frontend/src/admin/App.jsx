@@ -1038,8 +1038,21 @@ function DashboardContent({ employee, onLogout }) {
       if (data.email) removeEmailFromExcluded(data.email);
       refreshConversations();
     });
+    const u11 = ws.on('conversation_updated', (data) => {
+  if (!data?.conversationId || !data?.conversation) return;
+  const conv = data.conversation;
+  updateConversation(data.conversationId, {
+    lastMessage:           conv.lastMessage           || conv.last_message           || '',
+    lastMessageSenderType: conv.lastMessageSenderType || conv.last_message_sender_type || 'customer',
+    lastSenderType:        conv.lastMessageSenderType || conv.last_message_sender_type || 'customer',
+    lastMessageAt:         conv.lastMessageAt          || conv.last_message_at,
+    unreadCount:           conv.unreadCount            ?? conv.unread_count,
+    unread_count:          conv.unreadCount            ?? conv.unread_count,
+  });
+});
 
-    return () => { u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8(); u9(); u10(); };
+return () => { u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8(); u9(); u10(); u11(); };
+
   }, [ws, handleMarkAsRead, updateConversation, setActiveConversationId,
       removeFromExcluded, removeEmailFromExcluded, refreshConversations]);
 
