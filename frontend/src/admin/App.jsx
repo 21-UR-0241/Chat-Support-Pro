@@ -953,36 +953,44 @@ function DashboardContent({ employee, onLogout }) {
   useEffect(() => {
     if (!ws) return;
 
-    const u1 = ws.on('new_message', (data) => {
-      const curConv  = activeConversationRef.current;
-      const curList  = conversationsRef.current;
-      const msg      = data.message || {};
-      const sender   = msg.senderType || msg.sender_type;
-      const convId   = data.conversationId || msg.conversationId;
-      const isActive = curConv?.id === convId;
+const u1 = ws.on('new_message', (data) => {
+  const curConv  = activeConversationRef.current;
+  const curList  = conversationsRef.current;
+  const msg      = data.message || {};
+  const sender   = msg.senderType || msg.sender_type;
+  const senderName = msg.senderName || msg.sender_name || '';
+  const convId   = data.conversationId || msg.conversationId;
+  const isActive = curConv?.id === convId;
 
-      const patch = {
-        lastMessage:           msg.content || '',
-        lastMessageAt:         msg.createdAt || msg.created_at || new Date().toISOString(),
-        lastSenderType:        sender,
-        lastMessageSenderType: sender,
-      };
-      if (sender === 'customer' && !isActive) {
-        const existing = curList.find(c => c.id === convId);
-        const prev = existing?.unreadCount || existing?.unread_count || 0;
-        patch.unreadCount = prev + 1; patch.unread_count = prev + 1;
-      }
-      updateConversation(convId, patch);
+  // Skip preview update for auto-reply — conversation_updated will correct it
+  const isAutoReply = sender === 'agent' && senderName === 'Support' && 
+    (msg.content || '').startsWith('We received your message');
 
-      if (sender === 'agent') { clearNotificationsForConversation(convId); return; }
-      if (sender === 'customer' && !isActive) {
-        const name = curList.find(c => c.id === convId)?.customerName || data.conversation?.customerName || 'Guest';
-        showNotification(convId, name, msg.content?.substring(0, 50) || 'New message');
-      } else if (sender === 'customer' && isActive) {
-        handleMarkAsRead(convId);
-      }
-    });
+  const patch = {};
 
+  if (!isAutoReply) {
+    patch.lastMessage           = msg.content || '';
+    patch.lastMessageAt         = msg.createdAt || msg.created_at || new Date().toISOString();
+    patch.lastSenderType        = sender;
+    patch.lastMessageSenderType = sender;
+  }
+
+  if (sender === 'customer' && !isActive) {
+    const existing = curList.find(c => c.id === convId);
+    const prev = existing?.unreadCount || existing?.unread_count || 0;
+    patch.unreadCount = prev + 1; patch.unread_count = prev + 1;
+  }
+
+  if (Object.keys(patch).length > 0) updateConversation(convId, patch);
+
+  if (sender === 'agent') { clearNotificationsForConversation(convId); return; }
+  if (sender === 'customer' && !isActive) {
+    const name = curList.find(c => c.id === convId)?.customerName || data.conversation?.customerName || 'Guest';
+    showNotification(convId, name, msg.content?.substring(0, 50) || 'New message');
+  } else if (sender === 'customer' && isActive) {
+    handleMarkAsRead(convId);
+  }
+});
     const u2 = ws.on('connected',             () => setError(null));
     const u3 = ws.on('error',                 () => setError('WebSocket connection error. Retrying…'));
     const u4 = ws.on('max_reconnect_reached',  () => setError('Unable to connect to server. Please refresh the page.'));
