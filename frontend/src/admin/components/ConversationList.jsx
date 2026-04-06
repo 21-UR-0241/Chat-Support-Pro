@@ -1586,20 +1586,30 @@ function ConversationList({
 <div className="conversation-bottom">
   <p className="conversation-preview">
     {(() => {
-      if (conversation.lastMessage) {
-        const isAgentMessage =
-          conversation.lastSenderType === 'agent' ||
-          conversation.lastMessageSenderType === 'agent' ||
-          conversation.last_sender_type === 'agent' ||
-          conversation.last_message_sender_type === 'agent';
-        return (
-          <>
-            {isAgentMessage && <span className="you-label">You: </span>}
-            {conversation.lastMessage}
-          </>
-        );
-      }
-      return 'No messages yet';
+      const AUTO_REPLY_PREFIX = 'We received your message and will answer you ASAP';
+      const isAutoReply = conversation.lastMessage?.startsWith(AUTO_REPLY_PREFIX);
+
+      // If auto-reply is the lastMessage, fall back to lastCustomerMessage from DB
+      // If lastMessage is already the customer message (server fixed it), use it directly
+      const displayMessage = isAutoReply
+        ? (conversation.lastCustomerMessage || conversation.last_customer_message)
+        : (conversation.lastMessage || conversation.lastCustomerMessage || conversation.last_customer_message);
+
+      if (!displayMessage) return 'No messages yet';
+
+      const isAgentMessage = !isAutoReply && (
+        conversation.lastSenderType === 'agent' ||
+        conversation.lastMessageSenderType === 'agent' ||
+        conversation.last_sender_type === 'agent' ||
+        conversation.last_message_sender_type === 'agent'
+      );
+
+      return (
+        <>
+          {isAgentMessage && <span className="you-label">You: </span>}
+          {displayMessage}
+        </>
+      );
     })()}
   </p>
   {hasUnread && (
@@ -1611,7 +1621,6 @@ function ConversationList({
     </span>
   )}
 </div>
-
                     {/* <div className="conversation-bottom">
                       <p className="conversation-preview">
                         {(() => {

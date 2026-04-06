@@ -2944,14 +2944,87 @@ async function getConversation(conversationId, storeId = null) {
   }
 }
 
+// async function getConversations(filters = {}) {
+//   try {
+//     let query = `
+//       SELECT c.*, s.brand_name, s.logo_url, s.primary_color, s.store_identifier
+//       FROM conversations c 
+//       JOIN stores s ON c.shop_id = s.id 
+//       WHERE 1=1
+//     `;
+//     const params = [];
+//     let paramCount = 1;
+    
+//     if (filters.storeId) {
+//       query += ` AND c.shop_id = $${paramCount}`;
+//       params.push(filters.storeId);
+//       paramCount++;
+//     }
+//     if (filters.storeIdentifier) {
+//       query += ` AND c.shop_domain = $${paramCount}`;
+//       params.push(filters.storeIdentifier);
+//       paramCount++;
+//     }
+//     if (filters.customerEmail) {
+//       query += ` AND c.customer_email = $${paramCount}`;
+//       params.push(filters.customerEmail);
+//       paramCount++;
+//     }
+//     if (filters.status) {
+//       query += ` AND c.status = $${paramCount}`;
+//       params.push(filters.status);
+//       paramCount++;
+//     }
+//     // When no explicit status filter is set, exclude archived from the main inbox.
+//     // Pass excludeArchived: true from server.js GET /api/conversations.
+//     if (!filters.status && filters.excludeArchived) {
+//       query += ` AND c.status != 'archived'`;
+//     }
+//     if (filters.priority) {
+//       query += ` AND c.priority = $${paramCount}`;
+//       params.push(filters.priority);
+//       paramCount++;
+//     }
+//     if (filters.assignedTo) {
+//       query += ` AND c.assigned_to = $${paramCount}`;
+//       params.push(filters.assignedTo);
+//       paramCount++;
+//     }
+//     if (filters.search) {
+//       query += ` AND (c.customer_email ILIKE $${paramCount} OR c.customer_name ILIKE $${paramCount})`;
+//       params.push(`%${filters.search}%`);
+//       paramCount++;
+//     }
+    
+//     const limit = filters.limit;
+//     const offset = filters.offset || 0;
+//     if (limit) {
+//       query += ` ORDER BY c.updated_at DESC LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
+//       params.push(limit, offset);
+//     } else {
+//       query += ` ORDER BY c.updated_at DESC`;
+//     }
+    
+//     const result = await pool.query(query, params);
+//     return result.rows;
+//   } catch (error) {
+//     console.error('Error fetching conversations:', error);
+//     throw error;
+//   }
+// }
+
 async function getConversations(filters = {}) {
   try {
-    let query = `
-      SELECT c.*, s.brand_name, s.logo_url, s.primary_color, s.store_identifier
-      FROM conversations c 
-      JOIN stores s ON c.shop_id = s.id 
-      WHERE 1=1
-    `;
+let query = `
+  SELECT c.*, s.brand_name, s.logo_url, s.primary_color, s.store_identifier,
+    (SELECT content FROM messages 
+     WHERE conversation_id = c.id 
+       AND sender_type = 'customer'
+     ORDER BY sent_at DESC LIMIT 1) AS last_customer_message
+  FROM conversations c 
+  JOIN stores s ON c.shop_id = s.id 
+  WHERE 1=1
+`;
     const params = [];
     let paramCount = 1;
     
@@ -2975,8 +3048,6 @@ async function getConversations(filters = {}) {
       params.push(filters.status);
       paramCount++;
     }
-    // When no explicit status filter is set, exclude archived from the main inbox.
-    // Pass excludeArchived: true from server.js GET /api/conversations.
     if (!filters.status && filters.excludeArchived) {
       query += ` AND c.status != 'archived'`;
     }
@@ -3146,6 +3217,7 @@ async function saveMessage(data) {
       updateFields.push('customer_message_count = customer_message_count + 1');
       updateFields.push('last_customer_message_at = NOW()');
       updateFields.push('unread_count = unread_count + 1');
+       updateFields.push('auto_replied_at = NULL');
     } else if (sender_type === 'agent') {
       updateFields.push('agent_message_count = agent_message_count + 1');
       updateFields.push('last_agent_message_at = NOW()');
