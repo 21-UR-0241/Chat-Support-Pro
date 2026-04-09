@@ -551,23 +551,29 @@
           + '</button>'
     },
 
-    // 2 — Glassmorphism pill (no icon badge, no pulse)
+    // 2 — Solid gradient pill with pulsing icon circle
     {
       css: [
+        IC_RING,
         '#cwb{position:fixed;bottom:24px;left:24px;height:52px;border-radius:26px;',
-        'background:'+hexToRgba(T.primary, 0.18)+';border:1.5px solid '+hexToRgba(T.light, 0.45)+';cursor:pointer;',
-        'backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);',
-        'box-shadow:0 4px 24px '+T.shadow+';',
-        'display:flex;align-items:center;gap:9px;padding:0 20px 0 14px;z-index:9999;',
-        'transition:transform .2s,background .2s,box-shadow .2s;'+FF+'}',
-        '#cwb:hover{background:'+hexToRgba(T.primary, 0.28)+';transform:translateY(-2px);box-shadow:0 8px 28px '+T.shadowHov+';}',
+        'background:'+T.grad+';border:none;cursor:pointer;',
+        'box-shadow:0 6px 20px '+T.shadow+',0 1px 0 rgba(255,255,255,.25) inset;',
+        'display:flex;align-items:center;padding:0 20px 0 6px;z-index:9999;',
+        'transition:transform .2s,box-shadow .2s;'+FF+'}',
+        '#cwb:hover{transform:translateY(-2px);box-shadow:0 10px 28px '+T.shadowHov+';}',
         '#cwb:active{transform:translateY(0);}',
-        '#cwb .cw-lbl{color:#fff;font-size:15px;font-weight:700;text-shadow:0 1px 4px rgba(0,0,0,.3);}',
+        '#cwb .cw-ic{width:40px;height:40px;border-radius:50%;',
+        'background:rgba(255,255,255,.22);border:1.5px solid rgba(255,255,255,.35);',
+        'display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-right:10px;',
+        'animation:cw-ic-ring 2s ease-out infinite;}',
+        '#cwb .cw-lbl{color:#fff;font-size:15px;font-weight:700;letter-spacing:.01em;}',
         TCSS
       ].join(''),
       html: '<button id="cwb" aria-label="Talk to us">'
-          + '<span style="display:flex;align-items:center;gap:9px;">'
-          + ic.s2+'<span class="cw-lbl">Talk to Us</span></span>'
+          + '<span style="display:flex;align-items:center;">'
+          + '<span class="cw-ic">'+ic.s2+'</span>'
+          + '<span class="cw-lbl">Talk to Us</span>'
+          + '</span>'
           + '</button>'
     },
 
@@ -646,22 +652,27 @@
           + '</button>'
     },
 
-    // 6 — Ghost outline pill (no icon badge, no pulse)
+    // 6 — Solid split pill: dark left block + label
     {
       css: [
+        IC_RING,
         '#cwb{position:fixed;bottom:24px;left:24px;height:52px;border-radius:26px;',
-        'background:transparent;border:2px solid '+T.primary+';cursor:pointer;',
-        'display:flex;align-items:center;gap:9px;padding:0 20px 0 14px;z-index:9999;',
-        'transition:background .2s,box-shadow .2s,transform .2s;'+FF+'}',
-        '#cwb:hover{background:'+T.primary+';box-shadow:0 6px 20px '+T.shadow+';transform:translateY(-2px);}',
-        '#cwb:hover .cw-lbl{color:#fff;}',
+        'background:'+T.grad+';border:none;cursor:pointer;overflow:hidden;',
+        'box-shadow:0 6px 20px '+T.shadow+';',
+        'display:flex;align-items:center;padding:0 20px 0 0;z-index:9999;',
+        'transition:transform .2s,box-shadow .2s;'+FF+'}',
+        '#cwb:hover{transform:translateY(-2px);box-shadow:0 10px 28px '+T.shadowHov+';}',
         '#cwb:active{transform:translateY(0);}',
-        '#cwb .cw-lbl{color:'+T.primary+';font-size:15px;font-weight:700;transition:color .2s;}',
+        '#cwb .cw-ic{width:52px;height:52px;flex-shrink:0;',
+        'background:rgba(0,0,0,.18);',
+        'display:flex;align-items:center;justify-content:center;margin-right:12px;',
+        'animation:cw-ic-ring 2s ease-out infinite;}',
+        '#cwb .cw-lbl{color:#fff;font-size:14px;font-weight:700;letter-spacing:.01em;white-space:nowrap;}',
         TCSS
       ].join(''),
       html: '<button id="cwb" aria-label="Contact support">'
-          + '<span style="display:flex;align-items:center;gap:9px;">'
-          + ic.s6
+          + '<span style="display:flex;align-items:center;">'
+          + '<span class="cw-ic">'+ic.s4+'</span>'
           + '<span class="cw-lbl">Support</span>'
           + '</span>'
           + '</button>'
