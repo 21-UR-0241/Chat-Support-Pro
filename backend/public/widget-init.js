@@ -190,29 +190,29 @@
 //       html: '<button id="cwb" aria-label="Chat with us">'+ic.chat+'</button>'
 //     },
 
-//     // 5 — Solid pill with frosted icon circle
-//     {
-//       css: [
-//         '#cwb{position:fixed;bottom:24px;left:24px;height:52px;border-radius:26px;',
-//         'background:'+T.grad+';border:none;cursor:pointer;',
-//         'box-shadow:0 6px 18px '+T.shadow+',0 1px 0 rgba(255,255,255,.25) inset;',
-//         'display:flex;align-items:center;padding:0 20px 0 6px;z-index:9999;',
-//         'transition:transform .2s,box-shadow .2s;'+FF+'}',
-//         '#cwb:hover{transform:translateY(-2px);box-shadow:0 10px 26px '+T.shadowHov+';}',
-//         '#cwb:active{transform:translateY(0);}',
-//         '#cwb .cw-ic{width:40px;height:40px;border-radius:50%;',
-//         'background:rgba(255,255,255,.22);border:1.5px solid rgba(255,255,255,.35);',
-//         'display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-right:10px;}',
-//         '#cwb .cw-lbl{color:#fff;font-size:14px;font-weight:700;letter-spacing:.01em;}',
-//         TCSS
-//       ].join(''),
-//       html: '<button id="cwb" aria-label="Chat with us">'
-//           + '<span style="display:flex;align-items:center;">'
-//           + '<span class="cw-ic">'+ic.chatW+'</span>'
-//           + '<span class="cw-lbl">Chat</span>'
-//           + '</span>'
-//           + '</button>'
-//     },
+    // 5 — Solid pill with frosted icon circle
+    // {
+    //   css: [
+    //     '#cwb{position:fixed;bottom:24px;left:24px;height:52px;border-radius:26px;',
+    //     'background:'+T.grad+';border:none;cursor:pointer;',
+    //     'box-shadow:0 6px 18px '+T.shadow+',0 1px 0 rgba(255,255,255,.25) inset;',
+    //     'display:flex;align-items:center;padding:0 20px 0 6px;z-index:9999;',
+    //     'transition:transform .2s,box-shadow .2s;'+FF+'}',
+    //     '#cwb:hover{transform:translateY(-2px);box-shadow:0 10px 26px '+T.shadowHov+';}',
+    //     '#cwb:active{transform:translateY(0);}',
+    //     '#cwb .cw-ic{width:40px;height:40px;border-radius:50%;',
+    //     'background:rgba(255,255,255,.22);border:1.5px solid rgba(255,255,255,.35);',
+    //     'display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-right:10px;}',
+    //     '#cwb .cw-lbl{color:#fff;font-size:14px;font-weight:700;letter-spacing:.01em;}',
+    //     TCSS
+    //   ].join(''),
+    //   html: '<button id="cwb" aria-label="Chat with us">'
+    //       + '<span style="display:flex;align-items:center;">'
+    //       + '<span class="cw-ic">'+ic.chatW+'</span>'
+    //       + '<span class="cw-lbl">Chat</span>'
+    //       + '</span>'
+    //       + '</button>'
+    // },
 
 //     // 6 — Rounded card with icon box + label
 //     {
@@ -523,29 +523,30 @@
           + '</button>'
     },
 
-// 1 — Soft pill with icon circle
-{
-  css: [
-    '#cwb{position:fixed;bottom:24px;left:24px;height:50px;border-radius:25px;',
-    'background:'+T.grad+';border:none;cursor:pointer;',
-    'box-shadow:0 4px 14px '+T.shadow+';',
-    'display:flex;align-items:center;padding:0 18px 0 6px;z-index:9999;',
-    'transition:transform .2s,box-shadow .2s;'+FF+'}',
-    '#cwb:hover{transform:translateY(-2px);box-shadow:0 8px 22px '+T.shadowHov+';}',
-    '#cwb:active{transform:translateY(0);}',
-    '#cwb .cw-ic{width:38px;height:38px;border-radius:19px;',
-    'background:rgba(255,255,255,.28);',
-    'display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-right:10px;}',
-    '#cwb .cw-lbl{color:#fff;font-size:14px;font-weight:700;letter-spacing:.01em;}',
-    TCSS
-  ].join(''),
-  html: '<button id="cwb" aria-label="Chat">'
-      + '<span style="display:flex;align-items:center;">'
-      + '<span class="cw-ic">'+ic.s1+'</span>'
-      + '<span class="cw-lbl">Chat</span>'
-      + '</span>'
-      + '</button>'
-},
+    
+
+    {
+      css: [
+        '#cwb{position:fixed;bottom:24px;left:24px;height:52px;border-radius:26px;',
+        'background:'+T.grad+';border:none;cursor:pointer;',
+        'box-shadow:0 6px 18px '+T.shadow+',0 1px 0 rgba(255,255,255,.25) inset;',
+        'display:flex;align-items:center;padding:0 20px 0 6px;z-index:9999;',
+        'transition:transform .2s,box-shadow .2s;'+FF+'}',
+        '#cwb:hover{transform:translateY(-2px);box-shadow:0 10px 26px '+T.shadowHov+';}',
+        '#cwb:active{transform:translateY(0);}',
+        '#cwb .cw-ic{width:40px;height:40px;border-radius:50%;',
+        'background:rgba(255,255,255,.22);border:1.5px solid rgba(255,255,255,.35);',
+        'display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-right:10px;}',
+        '#cwb .cw-lbl{color:#fff;font-size:14px;font-weight:700;letter-spacing:.01em;}',
+        TCSS
+      ].join(''),
+      html: '<button id="cwb" aria-label="Chat with us">'
+          + '<span style="display:flex;align-items:center;">'
+          + '<span class="cw-ic">'+ic.chatW+'</span>'
+          + '<span class="cw-lbl">Chat</span>'
+          + '</span>'
+          + '</button>'
+    },
 
     // 2 — Glassmorphism pill
     {
@@ -590,30 +591,34 @@
           + '</button>'
     },
 
-// 4 — Double pulse ring with label
+// 4 — Double pulse pill
 {
   css: [
     '@keyframes cw-ring{0%{transform:scale(1);opacity:.6}100%{transform:scale(1.9);opacity:0}}',
-    '#cwb{position:fixed;bottom:24px;left:24px;height:56px;border-radius:28px;',
+    '#cwb{position:fixed;bottom:24px;left:24px;height:50px;border-radius:25px;',
     'background:'+T.grad+';border:none;cursor:pointer;',
     'box-shadow:0 4px 16px '+T.shadow+';',
-    'display:flex;align-items:center;gap:9px;padding:0 22px 0 14px;z-index:9999;',
+    'display:flex;align-items:center;padding:0 18px 0 6px;z-index:9999;',
     'transition:transform .2s,box-shadow .2s;'+FF+'}',
-    '#cwb::before,#cwb::after{content:"";position:absolute;inset:0;border-radius:28px;',
+    '#cwb::before,#cwb::after{content:"";position:absolute;inset:0;border-radius:25px;',
     'background:'+T.primary+';pointer-events:none;z-index:-1;}',
     '#cwb::before{animation:cw-ring 2.2s ease-out infinite;}',
     '#cwb::after{animation:cw-ring 2.2s ease-out infinite .8s;}',
     '#cwb:hover{transform:scale(1.04);box-shadow:0 6px 22px '+T.shadowHov+';}',
     '#cwb:active{transform:scale(.96);}',
-    '#cwb .cw-lbl{color:#fff;font-size:15px;font-weight:700;letter-spacing:.01em;}',
+    '#cwb .cw-ic{width:38px;height:38px;border-radius:19px;',
+    'background:rgba(255,255,255,.28);',
+    'display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-right:10px;}',
+    '#cwb .cw-lbl{color:#fff;font-size:14px;font-weight:700;letter-spacing:.01em;}',
     TCSS
   ].join(''),
   html: '<button id="cwb" aria-label="Chat with us">'
-      + '<span style="display:flex;align-items:center;gap:9px;">'
-      + ic.s0+'<span class="cw-lbl">Chat</span></span>'
+      + '<span style="display:flex;align-items:center;">'
+      + '<span class="cw-ic">'+ic.s0+'</span>'
+      + '<span class="cw-lbl">Chat</span>'
+      + '</span>'
       + '</button>'
 },
-
 
 // 5 — Gradient pill with frosted icon badge
 {
