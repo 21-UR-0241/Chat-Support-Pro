@@ -523,30 +523,29 @@
           + '</button>'
     },
 
-    
-
-    {
-      css: [
-        '#cwb{position:fixed;bottom:24px;left:24px;height:52px;border-radius:26px;',
-        'background:'+T.grad+';border:none;cursor:pointer;',
-        'box-shadow:0 6px 18px '+T.shadow+',0 1px 0 rgba(255,255,255,.25) inset;',
-        'display:flex;align-items:center;padding:0 20px 0 6px;z-index:9999;',
-        'transition:transform .2s,box-shadow .2s;'+FF+'}',
-        '#cwb:hover{transform:translateY(-2px);box-shadow:0 10px 26px '+T.shadowHov+';}',
-        '#cwb:active{transform:translateY(0);}',
-        '#cwb .cw-ic{width:40px;height:40px;border-radius:50%;',
-        'background:rgba(255,255,255,.22);border:1.5px solid rgba(255,255,255,.35);',
-        'display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-right:10px;}',
-        '#cwb .cw-lbl{color:#fff;font-size:14px;font-weight:700;letter-spacing:.01em;}',
-        TCSS
-      ].join(''),
-      html: '<button id="cwb" aria-label="Chat with us">'
-          + '<span style="display:flex;align-items:center;">'
-          + '<span class="cw-ic">'+ic.chatW+'</span>'
-          + '<span class="cw-lbl">Chat</span>'
-          + '</span>'
-          + '</button>'
-    },
+// 1 — Soft pill with icon circle
+{
+  css: [
+    '#cwb{position:fixed;bottom:24px;left:24px;height:50px;border-radius:25px;',
+    'background:'+T.grad+';border:none;cursor:pointer;',
+    'box-shadow:0 4px 14px '+T.shadow+';',
+    'display:flex;align-items:center;padding:0 18px 0 6px;z-index:9999;',
+    'transition:transform .2s,box-shadow .2s;'+FF+'}',
+    '#cwb:hover{transform:translateY(-2px);box-shadow:0 8px 22px '+T.shadowHov+';}',
+    '#cwb:active{transform:translateY(0);}',
+    '#cwb .cw-ic{width:38px;height:38px;border-radius:19px;',
+    'background:rgba(255,255,255,.28);',
+    'display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-right:10px;}',
+    '#cwb .cw-lbl{color:#fff;font-size:14px;font-weight:700;letter-spacing:.01em;}',
+    TCSS
+  ].join(''),
+  html: '<button id="cwb" aria-label="Chat">'
+      + '<span style="display:flex;align-items:center;">'
+      + '<span class="cw-ic">'+ic.s1+'</span>'
+      + '<span class="cw-lbl">Chat</span>'
+      + '</span>'
+      + '</button>'
+},
 
     // 2 — Glassmorphism pill
     {
@@ -690,22 +689,29 @@
           + '</button>'
     },
 
-// 8 — Gradient circle with neon glow animation
-{
-  css: [
-    '@keyframes cw-glow{0%,100%{box-shadow:0 0 10px 2px '+T.shadow+'}50%{box-shadow:0 0 22px 6px '+T.shadowHov+'}}',
-    '#cwb{position:fixed;bottom:24px;left:24px;width:58px;height:58px;border-radius:50%;',
-    'background:'+T.grad+';border:2px solid '+hexToRgba(T.light,.5)+';cursor:pointer;',
-    'animation:cw-glow 2.4s ease-in-out infinite;',
-    'display:flex;align-items:center;justify-content:center;z-index:9999;',
-    'transition:transform .2s;}',
-    '#cwb:hover{transform:scale(1.1);}',
-    '#cwb:active{transform:scale(.96);}',
-    TCSS
-  ].join(''),
-  html: '<button id="cwb" aria-label="Chat with us">'+ic.s1+'</button>'
-},
-
+    
+    {
+      css: [
+        '#cwb{position:fixed;bottom:24px;left:24px;height:52px;border-radius:26px;',
+        'background:'+T.grad+';border:none;cursor:pointer;',
+        'box-shadow:0 6px 18px '+T.shadow+',0 1px 0 rgba(255,255,255,.25) inset;',
+        'display:flex;align-items:center;padding:0 20px 0 6px;z-index:9999;',
+        'transition:transform .2s,box-shadow .2s;'+FF+'}',
+        '#cwb:hover{transform:translateY(-2px);box-shadow:0 10px 26px '+T.shadowHov+';}',
+        '#cwb:active{transform:translateY(0);}',
+        '#cwb .cw-ic{width:40px;height:40px;border-radius:50%;',
+        'background:rgba(255,255,255,.22);border:1.5px solid rgba(255,255,255,.35);',
+        'display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-right:10px;}',
+        '#cwb .cw-lbl{color:#fff;font-size:14px;font-weight:700;letter-spacing:.01em;}',
+        TCSS
+      ].join(''),
+      html: '<button id="cwb" aria-label="Chat with us">'
+          + '<span style="display:flex;align-items:center;">'
+          + '<span class="cw-ic">'+ic.chatW+'</span>'
+          + '<span class="cw-lbl">Chat</span>'
+          + '</span>'
+          + '</button>'
+    },
     // 9 — White rounded card with top accent strip
     {
       css: [
