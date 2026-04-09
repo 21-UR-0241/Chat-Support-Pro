@@ -523,20 +523,29 @@
           + '</button>'
     },
 
-    // 1 — Flat circle with hard offset shadow
-    {
-      css: [
-        '#cwb{position:fixed;bottom:24px;left:24px;width:58px;height:58px;border-radius:50%;',
-        'background:'+T.primary+';border:none;cursor:pointer;',
-        'box-shadow:4px 4px 0px '+T.dark+';',
-        'display:flex;align-items:center;justify-content:center;z-index:9999;',
-        'transition:transform .15s,box-shadow .15s;}',
-        '#cwb:hover{transform:translate(-2px,-2px);box-shadow:6px 6px 0px '+T.dark+';}',
-        '#cwb:active{transform:translate(2px,2px);box-shadow:2px 2px 0px '+T.dark+';}',
-        TCSS
-      ].join(''),
-      html: '<button id="cwb" aria-label="Chat with us">'+ic.s1+'</button>'
-    },
+// 1 — Soft pill with icon circle
+{
+  css: [
+    '#cwb{position:fixed;bottom:24px;left:24px;height:50px;border-radius:25px;',
+    'background:'+T.grad+';border:none;cursor:pointer;',
+    'box-shadow:0 4px 14px '+T.shadow+';',
+    'display:flex;align-items:center;padding:0 18px 0 6px;z-index:9999;',
+    'transition:transform .2s,box-shadow .2s;'+FF+'}',
+    '#cwb:hover{transform:translateY(-2px);box-shadow:0 8px 22px '+T.shadowHov+';}',
+    '#cwb:active{transform:translateY(0);}',
+    '#cwb .cw-ic{width:38px;height:38px;border-radius:19px;',
+    'background:rgba(255,255,255,.28);',
+    'display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-right:10px;}',
+    '#cwb .cw-lbl{color:#fff;font-size:14px;font-weight:700;letter-spacing:.01em;}',
+    TCSS
+  ].join(''),
+  html: '<button id="cwb" aria-label="Chat">'
+      + '<span style="display:flex;align-items:center;">'
+      + '<span class="cw-ic">'+ic.s1+'</span>'
+      + '<span class="cw-lbl">Chat</span>'
+      + '</span>'
+      + '</button>'
+},
 
     // 2 — Glassmorphism pill
     {
