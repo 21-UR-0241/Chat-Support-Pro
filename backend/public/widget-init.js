@@ -581,49 +581,54 @@
           + '</button>'
     },
 
-    // 4 — Double pulse ring circle
-    {
-      css: [
-        '@keyframes cw-ring{0%{transform:scale(1);opacity:.6}100%{transform:scale(1.9);opacity:0}}',
-        '#cwb{position:fixed;bottom:24px;left:24px;width:56px;height:56px;border-radius:50%;',
-        'background:'+T.grad+';border:none;cursor:pointer;',
-        'box-shadow:0 4px 16px '+T.shadow+';',
-        'display:flex;align-items:center;justify-content:center;z-index:9999;',
-        'transition:transform .2s,box-shadow .2s;}',
-        '#cwb::before,#cwb::after{content:"";position:absolute;inset:0;border-radius:50%;',
-        'background:'+T.primary+';pointer-events:none;}',
-        '#cwb::before{animation:cw-ring 2.2s ease-out infinite;}',
-        '#cwb::after{animation:cw-ring 2.2s ease-out infinite .8s;}',
-        '#cwb:hover{transform:scale(1.1);box-shadow:0 6px 22px '+T.shadowHov+';}',
-        '#cwb:active{transform:scale(.96);}',
-        TCSS
-      ].join(''),
-      html: '<button id="cwb" aria-label="Chat with us">'+ic.s4+'</button>'
-    },
+// 4 — Double pulse ring with label
+{
+  css: [
+    '@keyframes cw-ring{0%{transform:scale(1);opacity:.6}100%{transform:scale(1.9);opacity:0}}',
+    '#cwb{position:fixed;bottom:24px;left:24px;height:56px;border-radius:28px;',
+    'background:'+T.grad+';border:none;cursor:pointer;',
+    'box-shadow:0 4px 16px '+T.shadow+';',
+    'display:flex;align-items:center;gap:9px;padding:0 22px 0 14px;z-index:9999;',
+    'transition:transform .2s,box-shadow .2s;'+FF+'}',
+    '#cwb::before,#cwb::after{content:"";position:absolute;inset:0;border-radius:28px;',
+    'background:'+T.primary+';pointer-events:none;z-index:-1;}',
+    '#cwb::before{animation:cw-ring 2.2s ease-out infinite;}',
+    '#cwb::after{animation:cw-ring 2.2s ease-out infinite .8s;}',
+    '#cwb:hover{transform:scale(1.04);box-shadow:0 6px 22px '+T.shadowHov+';}',
+    '#cwb:active{transform:scale(.96);}',
+    '#cwb .cw-lbl{color:#fff;font-size:15px;font-weight:700;letter-spacing:.01em;}',
+    TCSS
+  ].join(''),
+  html: '<button id="cwb" aria-label="Chat with us">'
+      + '<span style="display:flex;align-items:center;gap:9px;">'
+      + ic.s0+'<span class="cw-lbl">Chat</span></span>'
+      + '</button>'
+},
 
-    // 5 — Dark charcoal pill with colored icon badge
-    {
-      css: [
-        '#cwb{position:fixed;bottom:24px;left:24px;height:52px;border-radius:14px;',
-        'background:#1a1a1a;border:none;cursor:pointer;',
-        'box-shadow:0 6px 20px rgba(0,0,0,.35);',
-        'display:flex;align-items:center;padding:0 18px 0 6px;z-index:9999;',
-        'transition:transform .2s,box-shadow .2s;'+FF+'}',
-        '#cwb:hover{transform:translateY(-2px);box-shadow:0 10px 28px rgba(0,0,0,.45);}',
-        '#cwb:active{transform:translateY(0);}',
-        '#cwb .cw-ic{width:40px;height:40px;border-radius:10px;',
-        'background:'+T.grad+';',
-        'display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-right:12px;}',
-        '#cwb .cw-lbl{color:#fff;font-size:14px;font-weight:700;letter-spacing:.02em;}',
-        TCSS
-      ].join(''),
-      html: '<button id="cwb" aria-label="Contact us">'
-          + '<span style="display:flex;align-items:center;">'
-          + '<span class="cw-ic">'+ic.s5+'</span>'
-          + '<span class="cw-lbl">Contact Us</span>'
-          + '</span>'
-          + '</button>'
-    },
+
+// 5 — Gradient pill with frosted icon badge
+{
+  css: [
+    '#cwb{position:fixed;bottom:24px;left:24px;height:52px;border-radius:14px;',
+    'background:'+T.grad+';border:none;cursor:pointer;',
+    'box-shadow:0 6px 20px '+T.shadow+';',
+    'display:flex;align-items:center;padding:0 18px 0 6px;z-index:9999;',
+    'transition:transform .2s,box-shadow .2s;'+FF+'}',
+    '#cwb:hover{transform:translateY(-2px);box-shadow:0 10px 28px '+T.shadowHov+';}',
+    '#cwb:active{transform:translateY(0);}',
+    '#cwb .cw-ic{width:40px;height:40px;border-radius:10px;',
+    'background:rgba(255,255,255,.22);border:1.5px solid rgba(255,255,255,.35);',
+    'display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-right:12px;}',
+    '#cwb .cw-lbl{color:#fff;font-size:14px;font-weight:700;letter-spacing:.02em;}',
+    TCSS
+  ].join(''),
+  html: '<button id="cwb" aria-label="Contact us">'
+      + '<span style="display:flex;align-items:center;">'
+      + '<span class="cw-ic">'+ic.s5+'</span>'
+      + '<span class="cw-lbl">Contact Us</span>'
+      + '</span>'
+      + '</button>'
+},
 
     // 6 — Ghost outline pill
     {
@@ -671,21 +676,21 @@
           + '</button>'
     },
 
-    // 8 — Dark circle with neon glow animation
-    {
-      css: [
-        '@keyframes cw-glow{0%,100%{box-shadow:0 0 10px 2px '+T.shadow+'}50%{box-shadow:0 0 22px 6px '+T.shadowHov+'}}',
-        '#cwb{position:fixed;bottom:24px;left:24px;width:58px;height:58px;border-radius:50%;',
-        'background:#111;border:2px solid '+T.primary+';cursor:pointer;',
-        'animation:cw-glow 2.4s ease-in-out infinite;',
-        'display:flex;align-items:center;justify-content:center;z-index:9999;',
-        'transition:transform .2s,background .2s;}',
-        '#cwb:hover{transform:scale(1.1);background:'+T.dark+';}',
-        '#cwb:active{transform:scale(.96);}',
-        TCSS
-      ].join(''),
-      html: '<button id="cwb" aria-label="Chat with us">'+ic.s8+'</button>'
-    },
+// 8 — Gradient circle with neon glow animation
+{
+  css: [
+    '@keyframes cw-glow{0%,100%{box-shadow:0 0 10px 2px '+T.shadow+'}50%{box-shadow:0 0 22px 6px '+T.shadowHov+'}}',
+    '#cwb{position:fixed;bottom:24px;left:24px;width:58px;height:58px;border-radius:50%;',
+    'background:'+T.grad+';border:2px solid '+hexToRgba(T.light,.5)+';cursor:pointer;',
+    'animation:cw-glow 2.4s ease-in-out infinite;',
+    'display:flex;align-items:center;justify-content:center;z-index:9999;',
+    'transition:transform .2s;}',
+    '#cwb:hover{transform:scale(1.1);}',
+    '#cwb:active{transform:scale(.96);}',
+    TCSS
+  ].join(''),
+  html: '<button id="cwb" aria-label="Chat with us">'+ic.s1+'</button>'
+},
 
     // 9 — White rounded card with top accent strip
     {
