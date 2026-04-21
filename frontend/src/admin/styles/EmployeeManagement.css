@@ -784,3 +784,19 @@
     margin: var(--spacing-lg) 0;
   }
 }
+
+.response-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.response-fast   { background: #d1fae5; color: #065f46; }
+.response-medium { background: #fef3c7; color: #92400e; }
+.response-slow   { background: #fee2e2; color: #991b1b; }
+.response-none   { background: #f3f4f6; color: #6b7280; }

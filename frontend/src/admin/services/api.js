@@ -1,4 +1,6 @@
 
+
+
 // const API_URL = import.meta.env.PROD 
 //   ? import.meta.env.VITE_API_URL || 'https://chat-support-pro.onrender.com'
 //   : '';
@@ -286,6 +288,10 @@
 //     return this.fetch(`/api/employees/${encodeURIComponent(email)}`);
 //   }
 
+//   async getEmployeeById(id) {
+//     return this.fetch(`/api/employees/${id}`);
+//   }
+
 //   async createEmployee(data) {
 //     return this.fetch('/api/employees', {
 //       method: 'POST',
@@ -308,6 +314,13 @@
 //     return this.fetch(`/api/employees/${id}/status`, {
 //       method: 'PUT',
 //       body: JSON.stringify({ status }),
+//     });
+//   }
+
+//   async updateNotesOrder(employeeId, order) {
+//     return this.fetch(`/api/employees/${employeeId}/notes-order`, {
+//       method: 'PATCH',
+//       body: JSON.stringify({ order }),
 //     });
 //   }
 
@@ -373,6 +386,8 @@
 // }
 
 // export default new ApiService();
+
+
 
 
 const API_URL = import.meta.env.PROD 
@@ -639,6 +654,24 @@ class ApiService {
 
   async getWebSocketStats() {
     return this.fetch('/api/stats/websocket');
+  }
+
+  // ============ Response Time Stats ============
+
+  /**
+   * Get team-wide average response time stats (auto-replies excluded).
+   * Returns: { avgMinutes, medianMinutes, fastestMinutes, totalResponses, under5Min, under30Min, over1Hour }
+   */
+  async getTeamResponseStats() {
+    return this.fetch('/api/stats/response-times/team');
+  }
+
+  /**
+   * Get response time stats for a single conversation (auto-replies excluded).
+   * Returns: { conversationId, avgResponseMinutes, totalResponses, responses: [{ senderName, minutes, at }] }
+   */
+  async getConversationResponseStats(conversationId) {
+    return this.fetch(`/api/conversations/${conversationId}/response-stats`);
   }
 
   // ============ Analytics ============

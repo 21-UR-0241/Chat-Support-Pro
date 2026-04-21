@@ -7938,7 +7938,16 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
     res.json(snakeToCamel(tempMessage));
     setImmediate(async () => {
       try {
-        const savedMessage = await db.saveMessage({ conversation_id: conversationId, store_id: storeId, sender_type: senderType, sender_name: senderName, content: content || '', file_data: fileData ? JSON.stringify(fileData) : null, sent_at: timestamp });
+        const savedMessage = await db.saveMessage({
+          conversation_id: conversationId,
+          store_id: storeId,
+          sender_type: senderType,
+          sender_name: senderName,
+          sender_id: senderType === 'agent' ? req.user.id : null,  // ← tracks admin + agent by ID
+          content: content || '',
+          file_data: fileData ? JSON.stringify(fileData) : null,
+          sent_at: timestamp
+        });
         const updatedConversation = await db.getConversation(conversationId);
         sendToConversation(conversationId, { type: 'message_confirmed', tempId, message: snakeToCamel(savedMessage) });
         broadcastToAgents({ type: 'message_confirmed', tempId, message: snakeToCamel(savedMessage), conversationId, storeId, conversation: snakeToCamel(updatedConversation) });
@@ -7947,6 +7956,7 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
     });
   } catch (error) { console.error('Send message error:', error); res.status(500).json({ error: error.message }); }
 });
+
 
 app.post('/api/widget/messages', async (req, res) => {
   try {
@@ -8863,13 +8873,78 @@ function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis, ad
 
 // ============ EMPLOYEE ENDPOINTS ============
 
+// app.get('/api/employees', authenticateToken, async (req, res) => {
+//   try {
+//     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+//     const employees = await db.getAllEmployees();
+//     res.json(employees.map(emp => { const { password_hash, api_token, ...safe } = emp; return snakeToCamel(safe); }));
+//   } catch (error) { console.error('Get employees error:', error); res.status(500).json({ error: 'Failed to fetch employees' }); }
+// });
+
 app.get('/api/employees', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+
     const employees = await db.getAllEmployees();
-    res.json(employees.map(emp => { const { password_hash, api_token, ...safe } = emp; return snakeToCamel(safe); }));
-  } catch (error) { console.error('Get employees error:', error); res.status(500).json({ error: 'Failed to fetch employees' }); }
+
+    // Per-employee response time stats — matched by sender_id (employees.id).
+    // Excludes auto-replies and all legacy messages where sender_id was never populated.
+    // Going forward, real agent/admin replies carry their sender_id from req.user.id.
+    const responseStats = await db.pool.query(`
+      WITH real_messages AS (
+        SELECT id, conversation_id, sender_id, sender_type, sent_at,
+          LAG(sender_type) OVER (PARTITION BY conversation_id ORDER BY sent_at) AS prev_sender_type,
+          LAG(sent_at)     OVER (PARTITION BY conversation_id ORDER BY sent_at) AS prev_sent_at
+        FROM messages
+        WHERE sender_type IN ('customer', 'agent')
+          AND NOT (sender_type = 'agent' AND sender_id IS NULL)
+      ),
+      response_times AS (
+        SELECT sender_id,
+          EXTRACT(EPOCH FROM (sent_at - prev_sent_at)) / 60.0 AS response_minutes
+        FROM real_messages
+        WHERE sender_type = 'agent'
+          AND sender_id IS NOT NULL
+          AND prev_sender_type = 'customer'
+          AND prev_sent_at IS NOT NULL
+          AND EXTRACT(EPOCH FROM (sent_at - prev_sent_at)) / 60.0 BETWEEN 0 AND 1440
+      )
+      SELECT sender_id,
+        ROUND(AVG(response_minutes)::numeric, 1) AS avg_response_minutes,
+        ROUND(MIN(response_minutes)::numeric, 1) AS fastest_minutes,
+        COUNT(*)::int AS total_responses_counted
+      FROM response_times
+      GROUP BY sender_id
+    `);
+
+    // sender_id is VARCHAR in the DB; normalize to string keys for lookup
+    const statsById = {};
+    for (const row of responseStats.rows) {
+      statsById[String(row.sender_id)] = {
+        avgResponseMinutes: row.avg_response_minutes !== null ? parseFloat(row.avg_response_minutes) : null,
+        fastestMinutes: row.fastest_minutes !== null ? parseFloat(row.fastest_minutes) : null,
+        totalResponsesCounted: row.total_responses_counted,
+      };
+    }
+
+    const enriched = employees.map(emp => {
+      const { password_hash, api_token, ...safe } = emp;
+      const stats = statsById[String(emp.id)] || {
+        avgResponseMinutes: null,
+        fastestMinutes: null,
+        totalResponsesCounted: 0,
+      };
+      return { ...snakeToCamel(safe), ...stats };
+    });
+
+    res.json(enriched);
+  } catch (error) {
+    console.error('Get employees error:', error);
+    res.status(500).json({ error: 'Failed to fetch employees' });
+  }
 });
+
+
 app.post('/api/employees', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
@@ -9123,6 +9198,94 @@ app.get('/api/stats/websocket', authenticateToken, (req, res) => {
   catch (error) { res.status(500).json({ error: error.message }); }
 });
 
+app.get('/api/stats/response-times/team', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+
+    const { rows } = await db.pool.query(`
+      WITH real_messages AS (
+        SELECT conversation_id, sender_type, sent_at,
+          LAG(sender_type) OVER (PARTITION BY conversation_id ORDER BY sent_at) AS prev_sender_type,
+          LAG(sent_at)     OVER (PARTITION BY conversation_id ORDER BY sent_at) AS prev_sent_at
+        FROM messages
+        WHERE sender_type IN ('customer', 'agent')
+          AND NOT (sender_type = 'agent' AND sender_id IS NULL)
+      ),
+      rt AS (
+        SELECT EXTRACT(EPOCH FROM (sent_at - prev_sent_at)) / 60.0 AS minutes
+        FROM real_messages
+        WHERE sender_type = 'agent' AND prev_sender_type = 'customer'
+          AND prev_sent_at IS NOT NULL
+          AND EXTRACT(EPOCH FROM (sent_at - prev_sent_at)) / 60.0 BETWEEN 0 AND 1440
+      )
+      SELECT
+        ROUND(AVG(minutes)::numeric, 1)  AS avg_minutes,
+        ROUND(MIN(minutes)::numeric, 1)  AS fastest_minutes,
+        ROUND((PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY minutes))::numeric, 1) AS median_minutes,
+        COUNT(*)::int AS total_responses,
+        COUNT(*) FILTER (WHERE minutes <= 5)::int  AS under_5_min,
+        COUNT(*) FILTER (WHERE minutes <= 30)::int AS under_30_min,
+        COUNT(*) FILTER (WHERE minutes > 60)::int  AS over_1_hour
+      FROM rt
+    `);
+
+    const r = rows[0] || {};
+    res.json({
+      avgMinutes: r.avg_minutes !== null ? parseFloat(r.avg_minutes) : null,
+      medianMinutes: r.median_minutes !== null ? parseFloat(r.median_minutes) : null,
+      fastestMinutes: r.fastest_minutes !== null ? parseFloat(r.fastest_minutes) : null,
+      totalResponses: r.total_responses || 0,
+      under5Min: r.under_5_min || 0,
+      under30Min: r.under_30_min || 0,
+      over1Hour: r.over_1_hour || 0,
+    });
+  } catch (error) {
+    console.error('Team response stats error:', error);
+    res.status(500).json({ error: 'Failed to fetch team response stats' });
+  }
+});
+
+app.get('/api/conversations/:id/response-stats', authenticateToken, async (req, res) => {
+  try {
+    const conversationId = parseInt(req.params.id);
+    const { rows } = await db.pool.query(`
+      WITH real_messages AS (
+        SELECT sender_type, sender_name, sent_at,
+          LAG(sender_type) OVER (ORDER BY sent_at) AS prev_sender_type,
+          LAG(sent_at)     OVER (ORDER BY sent_at) AS prev_sent_at
+        FROM messages
+        WHERE conversation_id = $1
+          AND sender_type IN ('customer', 'agent')
+          AND NOT (sender_type = 'agent' AND sender_id IS NULL)
+      )
+      SELECT sender_name, EXTRACT(EPOCH FROM (sent_at - prev_sent_at)) / 60.0 AS minutes, sent_at
+      FROM real_messages
+      WHERE sender_type = 'agent' AND prev_sender_type = 'customer' AND prev_sent_at IS NOT NULL
+      ORDER BY sent_at ASC
+    `, [conversationId]);
+
+    const responses = rows.map(r => ({
+      senderName: r.sender_name,
+      minutes: parseFloat(r.minutes),
+      at: r.sent_at,
+    }));
+    const avg = responses.length
+      ? responses.reduce((s, r) => s + r.minutes, 0) / responses.length
+      : null;
+
+    res.json({
+      conversationId,
+      avgResponseMinutes: avg !== null ? Math.round(avg * 10) / 10 : null,
+      totalResponses: responses.length,
+      responses,
+    });
+  } catch (error) {
+    console.error('Conversation response stats error:', error);
+    res.status(500).json({ error: 'Failed to fetch conversation response stats' });
+  }
+});
+
+
 // ============ ERROR HANDLER ============
 
 app.use((err, req, res, next) => {
@@ -9280,103 +9443,133 @@ async function startServer() {
         } catch (err) { console.error('[Presence] Stale cleanup error:', err); }
       }, 2 * 60 * 1000);
 
-      // ============ AUTO-REPLY (3-minute no-response rule) ============
-      const AUTO_REPLY_TEXT = 'We received your message and will answer you ASAP! We answer as early as next business day, sometimes even within a few hours!';
+// ============ AUTO-REPLY (9-minute no-response rule) ============
+const AUTO_REPLY_TEXT = 'We received your message and will answer you ASAP! We answer as early as next business day, sometimes even within a few hours!';
 
-      setInterval(async () => {
-        try {
-          const { rows } = await db.pool.query(`
-            SELECT c.id, c.shop_id
-            FROM conversations c
-            WHERE c.status = 'open'
-              AND c.auto_replied_at IS NULL
-              AND EXISTS (
-                SELECT 1 FROM messages m
-                WHERE m.conversation_id = c.id
-                  AND m.sender_type = 'customer'
-                  AND m.sent_at = (
-                    SELECT MAX(sent_at) FROM messages WHERE conversation_id = c.id
-                  )
-                  AND m.sent_at < NOW() - INTERVAL '3 minutes'
-              )
-              AND NOT EXISTS (
-                SELECT 1 FROM messages m2
-                WHERE m2.conversation_id = c.id
-                  AND m2.sender_type = 'agent'
-                  AND m2.sent_at > (
-                    SELECT MAX(sent_at) FROM messages
-                    WHERE conversation_id = c.id AND sender_type = 'customer'
-                  )
-              )
-          `);
-
-for (const conv of rows) {
+setInterval(async () => {
   try {
-    const insertResult = await db.pool.query(
-      `INSERT INTO messages
-         (conversation_id, shop_id, sender_type, sender_name, content,
-          message_type, file_data, sent_at, timestamp)
-       VALUES ($1, $2, 'agent', 'Support', $3, 'text', NULL, NOW(), NOW())
-       RETURNING *`,
-      [conv.id, conv.shop_id, AUTO_REPLY_TEXT]
-    );
+    // LAYER 1: Select candidate conversations.
+    // Three conditions must hold:
+    //   (a) Status is open (not closed/archived)
+    //   (b) 8-hour rate limit not currently active
+    //   (c) The single latest message in the conversation IS a customer message
+    //       AND that message is at least 9 minutes old
+    // Condition (c) uses MAX(sent_at) which inherently excludes ANY non-customer
+    // reply — whether from agent, admin, or any other sender_type — because if
+    // a non-customer message existed after the customer's, MAX(sent_at) would
+    // point to THAT message and the EXISTS clause would fail.
+    const { rows } = await db.pool.query(`
+      SELECT c.id, c.shop_id
+      FROM conversations c
+      WHERE c.status = 'open'
+        AND (
+          c.auto_replied_at IS NULL
+          OR c.auto_replied_at < NOW() - INTERVAL '8 hours'
+        )
+        AND EXISTS (
+          SELECT 1 FROM messages m
+          WHERE m.conversation_id = c.id
+            AND m.sender_type = 'customer'
+            AND m.sent_at = (
+              SELECT MAX(sent_at) FROM messages WHERE conversation_id = c.id
+            )
+            AND m.sent_at < NOW() - INTERVAL '9 minutes'
+        )
+    `);
 
-    const saved = insertResult.rows[0];
-
-    await db.pool.query(
-      `UPDATE conversations
-       SET auto_replied_at = NOW(),
-           last_message = (
-             SELECT content FROM messages
+    for (const conv of rows) {
+      try {
+        // LAYER 2: Atomic check-and-insert to close the race window.
+        // The INSERT ... SELECT ... WHERE NOT EXISTS pattern is a single
+        // SQL statement, so no other transaction can slip a message in
+        // between the check and the insert. If an agent/admin replied
+        // during the ~ms gap since the outer SELECT ran, RETURNING returns
+        // zero rows and we skip this conversation.
+        //
+        // Note: `sender_type != 'customer'` is intentionally broader than
+        // `= 'agent'` — it catches 'agent', 'admin', 'bot', 'system', or
+        // any future sender_type we might add. Anything that isn't the
+        // customer counts as "someone already answered."
+        const insertResult = await db.pool.query(
+          `INSERT INTO messages
+             (conversation_id, shop_id, sender_type, sender_name, content,
+              message_type, file_data, sent_at, timestamp)
+           SELECT $1, $2, 'agent', 'Support', $3, 'text', NULL, NOW(), NOW()
+           WHERE NOT EXISTS (
+             SELECT 1 FROM messages
              WHERE conversation_id = $1
-               AND sender_type = 'customer'
-             ORDER BY sent_at DESC
-             LIMIT 1
-           ),
-           last_message_sender_type = 'customer'
-       WHERE id = $1`,
-      [conv.id]
-    );
+               AND sender_type != 'customer'
+               AND sent_at > (
+                 SELECT MAX(sent_at) FROM messages
+                 WHERE conversation_id = $1 AND sender_type = 'customer'
+               )
+           )
+           RETURNING *`,
+          [conv.id, conv.shop_id, AUTO_REPLY_TEXT]
+        );
 
-const msg = { ...snakeToCamel(saved), isAutoReply: true };
-
-sendToConversation(conv.id, { type: 'new_message', message: msg });
-broadcastToAgents({ type: 'new_message', message: msg, conversationId: conv.id, storeId: conv.shop_id });
-
-    // ── REPLACE OLD correctedConv BLOCK WITH THIS ──
-    const correctedConv = await db.pool.query(
-      `SELECT c.*,
-        (SELECT content FROM messages
-         WHERE conversation_id = c.id AND sender_type = 'customer'
-         ORDER BY sent_at DESC LIMIT 1) AS last_customer_message
-       FROM conversations c WHERE c.id = $1`,
-      [conv.id]
-    );
-    if (correctedConv.rows.length > 0) {
-      const convData = snakeToCamel(correctedConv.rows[0]);
-      broadcastToAgents({
-        type: 'conversation_updated',
-        conversationId: conv.id,
-        conversation: {
-          ...convData,
-          lastMessage: convData.lastCustomerMessage || convData.lastMessage,
-          lastMessageSenderType: 'customer',
-          lastSenderType: 'customer',
-        },
-      });
-    }
-    // ── END REPLACEMENT ──
-
-    console.log(`🤖 [Auto-reply] Sent to conv #${conv.id}`);
-  } catch (err) {
-    console.error(`🤖 [Auto-reply] Failed for conv #${conv.id}:`, err.message);
-  }
-}
-        } catch (err) {
-          console.error('🤖 [Auto-reply] Query error:', err.message);
+        // If the race guard triggered, skip cleanly
+        if (insertResult.rows.length === 0) {
+          console.log(`🤖 [Auto-reply] Skipped conv #${conv.id} — team replied in the meantime`);
+          continue;
         }
-      }, 60 * 1000);
-      // ============ END AUTO-REPLY ============
+
+        const saved = insertResult.rows[0];
+
+        // LAYER 3: Only NOW set auto_replied_at — ensures the rate limit
+        // timestamp only updates when an auto-reply actually went out.
+        await db.pool.query(
+          `UPDATE conversations
+           SET auto_replied_at = NOW(),
+               last_message = (
+                 SELECT content FROM messages
+                 WHERE conversation_id = $1
+                   AND sender_type = 'customer'
+                 ORDER BY sent_at DESC
+                 LIMIT 1
+               ),
+               last_message_sender_type = 'customer'
+           WHERE id = $1`,
+          [conv.id]
+        );
+
+        const msg = { ...snakeToCamel(saved), isAutoReply: true };
+
+        sendToConversation(conv.id, { type: 'new_message', message: msg });
+        broadcastToAgents({ type: 'new_message', message: msg, conversationId: conv.id, storeId: conv.shop_id });
+
+        const correctedConv = await db.pool.query(
+          `SELECT c.*,
+            (SELECT content FROM messages
+             WHERE conversation_id = c.id AND sender_type = 'customer'
+             ORDER BY sent_at DESC LIMIT 1) AS last_customer_message
+           FROM conversations c WHERE c.id = $1`,
+          [conv.id]
+        );
+        if (correctedConv.rows.length > 0) {
+          const convData = snakeToCamel(correctedConv.rows[0]);
+          broadcastToAgents({
+            type: 'conversation_updated',
+            conversationId: conv.id,
+            conversation: {
+              ...convData,
+              lastMessage: convData.lastCustomerMessage || convData.lastMessage,
+              lastMessageSenderType: 'customer',
+              lastSenderType: 'customer',
+            },
+          });
+        }
+
+        console.log(`🤖 [Auto-reply] Sent to conv #${conv.id}`);
+      } catch (err) {
+        console.error(`🤖 [Auto-reply] Failed for conv #${conv.id}:`, err.message);
+      }
+    }
+  } catch (err) {
+    console.error('🤖 [Auto-reply] Query error:', err.message);
+  }
+}, 60 * 1000);
+// ============ END AUTO-REPLY ============
 
     });
   } catch (error) {

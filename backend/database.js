@@ -3232,7 +3232,17 @@ async function saveMessage(data) {
       updateFields.push('customer_message_count = customer_message_count + 1');
       updateFields.push('last_customer_message_at = NOW()');
       updateFields.push('unread_count = unread_count + 1');
-       updateFields.push('auto_replied_at = NULL');
+      // Auto-reply rate limit: max once per 8 hours per conversation.
+      // Keep auto_replied_at set if the last one was within 8h — cron will skip.
+      // Reset to NULL only if it's been 8h+ since last auto-reply (or never sent).
+      updateFields.push(`
+        auto_replied_at = CASE
+          WHEN auto_replied_at IS NULL
+            OR auto_replied_at < NOW() - INTERVAL '8 hours'
+          THEN NULL
+          ELSE auto_replied_at
+        END
+      `);
     } else if (sender_type === 'agent') {
       updateFields.push('agent_message_count = agent_message_count + 1');
       updateFields.push('last_agent_message_at = NOW()');
@@ -3266,6 +3276,85 @@ async function saveMessage(data) {
     client.release();
   }
 }
+
+// async function saveMessage(data) {
+//   const {
+//     conversation_id, store_id, sender_type, sender_name, sender_id,
+//     content, message_type = 'text', attachment_url, attachment_type, file_data
+//   } = data;
+  
+//   console.log('💾 [saveMessage] Called with:', {
+//     conversation_id, sender_type, sender_name,
+//     content: content?.substring(0, 30), hasFileData: !!file_data
+//   });
+  
+//   const client = await pool.connect();
+  
+//   try {
+//     await client.query('BEGIN');
+    
+//     const messageResult = await client.query(`
+//       INSERT INTO messages (
+//         conversation_id, shop_id, sender_type, sender_name, sender_id,
+//         content, message_type, attachment_url, attachment_type, 
+//         file_data, sent_at, timestamp
+//       )
+//       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
+//       RETURNING *
+//     `, [
+//       conversation_id, store_id, sender_type, sender_name, sender_id,
+//       content, message_type, attachment_url, attachment_type, file_data
+//     ]);
+    
+//     const message = messageResult.rows[0];
+//     console.log('✅ [saveMessage] Message inserted, id:', message.id);
+    
+//     const updateFields = [
+//       'total_message_count = total_message_count + 1',
+//       'last_message_at = NOW()',
+//       'updated_at = NOW()',
+//       'last_message = $2',
+//       'last_message_sender_type = $3'
+//     ];
+    
+//     if (sender_type === 'customer') {
+//       updateFields.push('customer_message_count = customer_message_count + 1');
+//       updateFields.push('last_customer_message_at = NOW()');
+//       updateFields.push('unread_count = unread_count + 1');
+//        updateFields.push('auto_replied_at = NULL');
+//     } else if (sender_type === 'agent') {
+//       updateFields.push('agent_message_count = agent_message_count + 1');
+//       updateFields.push('last_agent_message_at = NOW()');
+//       updateFields.push('agent_replied_at = COALESCE(agent_replied_at, NOW())');
+//       updateFields.push(`
+//         response_time_seconds = CASE 
+//           WHEN last_agent_message_at IS NULL AND first_message_at IS NOT NULL
+//           THEN EXTRACT(EPOCH FROM (NOW() - first_message_at))::INTEGER
+//           ELSE response_time_seconds
+//         END
+//       `);
+//     }
+    
+//     updateFields.push(`first_message_at = COALESCE(first_message_at, NOW())`);
+    
+//     await client.query(`
+//       UPDATE conversations 
+//       SET ${updateFields.join(', ')}
+//       WHERE id = $1
+//     `, [conversation_id, content, sender_type]);
+    
+//     console.log('✅ [saveMessage] Conversation updated successfully');
+    
+//     await client.query('COMMIT');
+//     return parseMessageFileData(message);
+//   } catch (error) {
+//     await client.query('ROLLBACK');
+//     console.error('❌ [saveMessage] Error:', error);
+//     throw error;
+//   } finally {
+//     client.release();
+//   }
+// }
 
 async function getMessages(conversationId, limit = 100) {
   try {
