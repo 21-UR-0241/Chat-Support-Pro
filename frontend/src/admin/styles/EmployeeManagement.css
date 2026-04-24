@@ -1,11 +1,22 @@
 /**
  * Employee Management Styles - Mobile Optimized
+ * Scroll-safe version: page scrolls vertically, table scrolls horizontally on narrow screens.
  */
 
+/* ──────────────────────────────────────────────────────────
+   PAGE WRAPPER
+   Key change: use min-height (not height) and allow overflow.
+   If a parent container has `height: 100vh; overflow: hidden`,
+   this wrapper needs its own scroll context as a fallback.
+   ────────────────────────────────────────────────────────── */
 .employee-management {
   padding: var(--spacing-xl);
   background: var(--bg-primary);
-  min-height: calc(100vh - 72px);
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  box-sizing: border-box;
 }
 
 /* Header */
@@ -78,6 +89,9 @@
 
 .em-header-right {
   flex-shrink: 0;
+  display: flex;
+  gap: var(--spacing-md);
+  flex-wrap: wrap;
 }
 
 /* Alerts */
@@ -164,16 +178,22 @@
   border-color: var(--primary-color);
 }
 
-/* Table */
+/* ──────────────────────────────────────────────────────────
+   TABLE CONTAINER — horizontal scroll for wide table
+   ────────────────────────────────────────────────────────── */
 .em-table-container {
   background: var(--bg-secondary);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
 }
 
 .em-table {
   width: 100%;
+  min-width: 900px;
   border-collapse: collapse;
 }
 
@@ -190,6 +210,10 @@
   text-transform: uppercase;
   letter-spacing: 0.5px;
   white-space: nowrap;
+  position: sticky;
+  top: 0;
+  background: var(--bg-tertiary);
+  z-index: 2;
 }
 
 .em-table td {
@@ -365,8 +389,13 @@
   border: 2px solid var(--border-light);
 }
 
-.btn-secondary:hover {
+.btn-secondary:hover:not(:disabled) {
   border-color: var(--primary-color);
+}
+
+.btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Modal */
@@ -523,7 +552,9 @@
   font-size: 14px;
 }
 
-/* Responsive - Tablet */
+/* ──────────────────────────────────────────────────────────
+   RESPONSIVE - TABLET
+   ────────────────────────────────────────────────────────── */
 @media (max-width: 1024px) {
   .employee-management {
     padding: var(--spacing-lg);
@@ -532,7 +563,7 @@
   .em-table {
     font-size: 13px;
   }
-  
+
   .em-table th,
   .em-table td {
     padding: 12px;
@@ -545,10 +576,17 @@
   }
 }
 
-/* Responsive - Mobile */
+/* ──────────────────────────────────────────────────────────
+   RESPONSIVE - MOBILE (card layout, no horizontal scroll)
+   ────────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .employee-management {
     padding: var(--spacing-md);
+    /* On mobile the page itself must scroll */
+    height: auto;
+    min-height: 100vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   /* Header */
@@ -564,7 +602,6 @@
     gap: var(--spacing-sm);
   }
 
-  /* Keep back button small on mobile too */
   .btn-back-icon {
     width: 40px;
     height: 40px;
@@ -579,13 +616,16 @@
 
   .em-header-right {
     width: 100%;
+    flex-direction: column;
+    gap: var(--spacing-sm);
   }
 
   .em-header h1 {
     font-size: 22px;
   }
 
-  .btn-primary {
+  .em-header-right .btn-primary,
+  .em-header-right .btn-secondary {
     width: 100%;
     justify-content: center;
     display: flex;
@@ -599,7 +639,7 @@
     gap: var(--spacing-md);
     margin-bottom: var(--spacing-lg);
   }
-  
+
   .filter-search {
     width: 100%;
     min-width: 100%;
@@ -622,10 +662,13 @@
     overflow: visible;
     background: transparent;
     box-shadow: none;
+    /* Don't constrain height on mobile — let page handle scroll */
+    max-height: none;
   }
 
   .em-table {
     display: block;
+    min-width: 0; /* override desktop min-width */
   }
 
   .em-table thead {
@@ -650,6 +693,11 @@
     padding: 8px 0;
     border: none;
     text-align: left;
+  }
+
+  .em-table th {
+    /* Headers hidden on mobile — kill sticky positioning */
+    position: static;
   }
 
   .em-table td:before {
@@ -785,6 +833,7 @@
   }
 }
 
+/* Response time badges */
 .response-time {
   display: inline-flex;
   align-items: center;
