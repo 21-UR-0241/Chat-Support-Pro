@@ -1387,18 +1387,45 @@ async function assignConversation(conversationId, employeeEmail) {
   }
 }
 
+// async function markConversationRead(conversationId) {
+//   try {
+//     await pool.query(`
+//       UPDATE conversations
+//       SET unread_count = 0, last_read_at = NOW(), updated_at = NOW()
+//       WHERE id = $1
+//     `, [conversationId]);
+//   } catch (error) {
+//     console.error('Error marking conversation read:', error);
+//     throw error;
+//   }
+// }
+
+
 async function markConversationRead(conversationId) {
   try {
+    // Reset the conversation-level unread state
     await pool.query(`
       UPDATE conversations
       SET unread_count = 0, last_read_at = NOW(), updated_at = NOW()
       WHERE id = $1
+    `, [conversationId]);
+
+    // Stamp customer messages as seen so response-time metrics know exactly
+    // when the agent first viewed them. Only stamps unstamped messages —
+    // once read_at is set, it sticks (later opens don't overwrite it).
+    await pool.query(`
+      UPDATE messages
+         SET read_at = NOW()
+       WHERE conversation_id = $1
+         AND sender_type = 'customer'
+         AND read_at IS NULL
     `, [conversationId]);
   } catch (error) {
     console.error('Error marking conversation read:', error);
     throw error;
   }
 }
+
 
 // ============================================
 // MESSAGE FUNCTIONS

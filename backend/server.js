@@ -413,6 +413,132 @@ app.use('/shopify', shopifyAppRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/ai/training', aiTrainingRoutes);
 
+
+// ============ HOURLY DISCORD RESPONSE-TIME REPORT ============
+
+const DISCORD_STATS_WEBHOOK = process.env.DISCORD_STATS_WEBHOOK;
+
+async function sendHourlyResponseTimeStats() {
+  if (!DISCORD_STATS_WEBHOOK) {
+    console.log('📊 [Discord Stats] No webhook configured — skipping');
+    return;
+  }
+
+  try {
+    // Per-employee response times for agent replies sent in the last hour.
+    // Response time = sent_at - COALESCE(prev_read_at, prev_sent_at)
+    //   • If the agent saw the customer message (read_at stamped), measure
+    //     from when they SAW it.
+    //   • If read_at is NULL (legacy data from before stamping), fall back
+    //     to message sent_at — same as the old behavior.
+    const { rows: perAgent } = await db.pool.query(`
+      WITH real_messages AS (
+        SELECT id, conversation_id, sender_id, sender_type, sent_at,
+          LAG(sender_type) OVER (PARTITION BY conversation_id ORDER BY sent_at) AS prev_sender_type,
+          LAG(sent_at)     OVER (PARTITION BY conversation_id ORDER BY sent_at) AS prev_sent_at,
+          LAG(read_at)     OVER (PARTITION BY conversation_id ORDER BY sent_at) AS prev_read_at
+        FROM messages
+        WHERE sender_type IN ('customer', 'agent')
+          AND NOT (sender_type = 'agent' AND sender_id IS NULL)
+      ),
+      rt AS (
+        SELECT sender_id,
+          EXTRACT(EPOCH FROM (sent_at - COALESCE(prev_read_at, prev_sent_at))) / 60.0 AS minutes
+        FROM real_messages
+        WHERE sender_type = 'agent'
+          AND sender_id IS NOT NULL
+          AND prev_sender_type = 'customer'
+          AND prev_sent_at IS NOT NULL
+          AND sent_at >= NOW() - INTERVAL '1 hour'
+          AND EXTRACT(EPOCH FROM (sent_at - COALESCE(prev_read_at, prev_sent_at))) / 60.0 BETWEEN 0 AND 240
+      )
+      SELECT
+        COALESCE(e.employee_name, e.name, 'Unknown #' || rt.sender_id) AS display_name,
+        ROUND(AVG(rt.minutes)::numeric, 1) AS avg_minutes,
+        ROUND(MIN(rt.minutes)::numeric, 1) AS fastest_minutes,
+        COUNT(*)::int AS replies
+      FROM rt
+      LEFT JOIN employees e ON e.id::text = rt.sender_id
+      GROUP BY display_name
+      ORDER BY replies DESC, avg_minutes ASC
+    `);
+
+    // Skip empty hours — no replies in the past hour means nothing to report.
+    if (perAgent.length === 0) {
+      console.log('📊 [Discord Stats] No activity in past hour — skipping post');
+      return;
+    }
+
+    // Team totals for the last hour — same time-from-seen logic
+    const { rows: teamRows } = await db.pool.query(`
+      WITH real_messages AS (
+        SELECT conversation_id, sender_type, sent_at,
+          LAG(sender_type) OVER (PARTITION BY conversation_id ORDER BY sent_at) AS prev_sender_type,
+          LAG(sent_at)     OVER (PARTITION BY conversation_id ORDER BY sent_at) AS prev_sent_at,
+          LAG(read_at)     OVER (PARTITION BY conversation_id ORDER BY sent_at) AS prev_read_at
+        FROM messages
+        WHERE sender_type IN ('customer', 'agent')
+          AND NOT (sender_type = 'agent' AND sender_id IS NULL)
+      )
+      SELECT
+        ROUND(AVG(EXTRACT(EPOCH FROM (sent_at - COALESCE(prev_read_at, prev_sent_at))) / 60.0)::numeric, 1) AS avg_minutes,
+        ROUND(MIN(EXTRACT(EPOCH FROM (sent_at - COALESCE(prev_read_at, prev_sent_at))) / 60.0)::numeric, 1) AS fastest_minutes,
+        COUNT(*)::int AS total_replies
+      FROM real_messages
+      WHERE sender_type = 'agent' AND prev_sender_type = 'customer'
+        AND prev_sent_at IS NOT NULL
+        AND sent_at >= NOW() - INTERVAL '1 hour'
+        AND EXTRACT(EPOCH FROM (sent_at - COALESCE(prev_read_at, prev_sent_at))) / 60.0 BETWEEN 0 AND 240
+    `);
+
+    const team       = teamRows[0] || {};
+    const teamAvg    = team.avg_minutes !== null ? parseFloat(team.avg_minutes) : null;
+    const teamFast   = team.fastest_minutes !== null ? parseFloat(team.fastest_minutes) : null;
+    const teamTotal  = team.total_replies || 0;
+
+    const fields = perAgent.slice(0, 25).map(r => ({
+      name: r.display_name,
+      value: `Avg: **${parseFloat(r.avg_minutes).toFixed(1)}m**\nFastest: ${parseFloat(r.fastest_minutes).toFixed(1)}m\nReplies: ${r.replies}`,
+      inline: true,
+    }));
+
+    const description = `**Team avg:** ${teamAvg.toFixed(1)}m  •  **Fastest:** ${teamFast.toFixed(1)}m  •  **Replies:** ${teamTotal}`;
+
+    // Colour: green ≤5m, amber ≤30m, red >30m, grey if no data
+    const color = teamAvg === null ? 0x6b7280
+                : teamAvg <= 5     ? 0x10b981
+                : teamAvg <= 30    ? 0xf59e0b
+                :                    0xef4444;
+
+    const payload = {
+      username: 'Response Time Bot',
+      embeds: [{
+        title: '⏱️ Hourly Response Time Report',
+        description,
+        color,
+        fields,
+        timestamp: new Date().toISOString(),
+        footer: { text: 'Past hour • Measured from when agent first viewed the message • Cap 4h per response' },
+      }],
+    };
+
+    const res = await fetch(DISCORD_STATS_WEBHOOK, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      console.error(`📊 [Discord Stats] Webhook ${res.status}: ${err}`);
+    } else {
+      console.log(`📊 [Discord Stats] Sent — ${perAgent.length} agents, team avg ${teamAvg.toFixed(1)}m`);
+    }
+  } catch (err) {
+    console.error('📊 [Discord Stats] Error:', err.message);
+  }
+}
+
 // ============ EMAIL SEND ============
 app.post('/api/email/send', authenticateToken, async (req, res) => {
   const { to, subject, body, conversationId, customerName } = req.body;
@@ -1057,8 +1183,6 @@ app.post('/api/blacklist', authenticateToken, async (req, res) => {
       [normalizedEmail, normalizedStore, reason, customerName, blockedBy]
     );
 
-    // Mark matching conversations as 'blacklisted' in the DB.
-    // conversations table uses shop_domain (NOT store_identifier).
     let convUpdate;
     if (allStores) {
       convUpdate = await db.pool.query(
@@ -1083,7 +1207,6 @@ app.post('/api/blacklist', authenticateToken, async (req, res) => {
       );
     }
 
-    // Broadcast so every connected agent's inbox hides the conversation live
     convUpdate.rows.forEach(row => {
       broadcastToAgents({
         type:           'conversation_blacklisted',
@@ -1100,11 +1223,6 @@ app.post('/api/blacklist', authenticateToken, async (req, res) => {
   }
 });
 
-/**
- * GET /api/blacklist
- * Query: page, limit, storeIdentifier, email (partial search)
- * UNCHANGED
- */
 app.get('/api/blacklist', authenticateToken, async (req, res) => {
   const page            = Math.max(1, parseInt(req.query.page)  || 1);
   const limit           = Math.min(200, parseInt(req.query.limit) || 50);
@@ -1866,152 +1984,11 @@ function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis, ad
 }
 
 
-// ============ EMPLOYEE ENDPOINTS ============
-
-// app.get('/api/employees', authenticateToken, async (req, res) => {
-//   try {
-//     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
-//     const employees = await db.getAllEmployees();
-//     res.json(employees.map(emp => { const { password_hash, api_token, ...safe } = emp; return snakeToCamel(safe); }));
-//   } catch (error) { console.error('Get employees error:', error); res.status(500).json({ error: 'Failed to fetch employees' }); }
-// });
-
-// app.get('/api/employees', authenticateToken, async (req, res) => {
-//   try {
-//     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
-
-//     const employees = await db.getAllEmployees();
-//     const responseStats = await db.pool.query(`
-//       WITH real_messages AS (
-//         SELECT id, conversation_id, sender_id, sender_type, sent_at,
-//           LAG(sender_type) OVER (PARTITION BY conversation_id ORDER BY sent_at) AS prev_sender_type,
-//           LAG(sent_at)     OVER (PARTITION BY conversation_id ORDER BY sent_at) AS prev_sent_at
-//         FROM messages
-//         WHERE sender_type IN ('customer', 'agent')
-//           AND NOT (sender_type = 'agent' AND sender_id IS NULL)
-//       ),
-//       response_times AS (
-//         SELECT sender_id,
-//           EXTRACT(EPOCH FROM (sent_at - prev_sent_at)) / 60.0 AS response_minutes
-//         FROM real_messages
-//         WHERE sender_type = 'agent'
-//           AND sender_id IS NOT NULL
-//           AND prev_sender_type = 'customer'
-//           AND prev_sent_at IS NOT NULL
-//           AND EXTRACT(EPOCH FROM (sent_at - prev_sent_at)) / 60.0 BETWEEN 0 AND 1440
-//       )
-//       SELECT sender_id,
-//         ROUND(AVG(response_minutes)::numeric, 1) AS avg_response_minutes,
-//         ROUND(MIN(response_minutes)::numeric, 1) AS fastest_minutes,
-//         COUNT(*)::int AS total_responses_counted
-//       FROM response_times
-//       GROUP BY sender_id
-//     `);
-
-//     // sender_id is VARCHAR in the DB; normalize to string keys for lookup
-//     const statsById = {};
-//     for (const row of responseStats.rows) {
-//       statsById[String(row.sender_id)] = {
-//         avgResponseMinutes: row.avg_response_minutes !== null ? parseFloat(row.avg_response_minutes) : null,
-//         fastestMinutes: row.fastest_minutes !== null ? parseFloat(row.fastest_minutes) : null,
-//         totalResponsesCounted: row.total_responses_counted,
-//       };
-//     }
-
-//     const enriched = employees.map(emp => {
-//       const { password_hash, api_token, ...safe } = emp;
-//       const stats = statsById[String(emp.id)] || {
-//         avgResponseMinutes: null,
-//         fastestMinutes: null,
-//         totalResponsesCounted: 0,
-//       };
-//       return { ...snakeToCamel(safe), ...stats };
-//     });
-
-//     res.json(enriched);
-//   } catch (error) {
-//     console.error('Get employees error:', error);
-//     res.status(500).json({ error: 'Failed to fetch employees' });
-//   }
-// });
-
-
-// app.post('/api/employees', authenticateToken, async (req, res) => {
-//   try {
-//     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
-//     const { email, name, role, password, canViewAllStores, isActive } = req.body;
-//     if (!email || !name || !password) return res.status(400).json({ error: 'Email, name, and password are required' });
-//     const password_hash = await hashPassword(password);
-//     const employee = await db.createEmployee({ email, name, role: role || 'agent', password_hash, can_view_all_stores: canViewAllStores !== undefined ? canViewAllStores : true, is_active: isActive !== undefined ? isActive : true, assigned_stores: [] });
-//     delete employee.password_hash; delete employee.api_token;
-//     res.json(snakeToCamel(employee));
-//   } catch (error) { console.error('Create employee error:', error); res.status(500).json({ error: error.message }); }
-// });
-
-
-// app.put('/api/employees/:id', authenticateToken, async (req, res) => {
-//   try {
-//     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
-//     const employeeId = parseInt(req.params.id); const updates = req.body;
-//     const dbUpdates = {};
-//     if (updates.name !== undefined) dbUpdates.name = updates.name; if (updates.email !== undefined) dbUpdates.email = updates.email;
-//     if (updates.role !== undefined) dbUpdates.role = updates.role; if (updates.isActive !== undefined) dbUpdates.is_active = updates.isActive;
-//     if (updates.canViewAllStores !== undefined) dbUpdates.can_view_all_stores = updates.canViewAllStores;
-//     if (updates.assignedStores !== undefined) dbUpdates.assigned_stores = updates.assignedStores;
-//     if (updates.password) dbUpdates.password_hash = await hashPassword(updates.password);
-//     const employee = await db.updateEmployee(employeeId, dbUpdates);
-//     delete employee.password_hash; delete employee.api_token;
-//     res.json(snakeToCamel(employee));
-//   } catch (error) { console.error('Update employee error:', error); res.status(500).json({ error: 'Failed to update employee' }); }
-// });
-
-// app.delete('/api/employees/:id', authenticateToken, async (req, res) => {
-//   try {
-//     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
-//     const employeeId = parseInt(req.params.id);
-//     if (employeeId === req.user.id) return res.status(400).json({ error: 'Cannot delete your own account' });
-//     await db.deleteEmployee(employeeId);
-//     res.json({ success: true, message: 'Employee deleted' });
-//   } catch (error) { console.error('Delete employee error:', error); res.status(500).json({ error: 'Failed to delete employee' }); }
-// });
-// app.put('/api/employees/:id/status', authenticateToken, async (req, res) => {
-//   try { await db.updateEmployeeStatus(parseInt(req.params.id), req.body.status); res.json({ success: true }); }
-//   catch (error) { res.status(500).json({ error: error.message }); }
-// });
-
-
-// app.patch('/api/employees/:id/notes-order', authenticateToken, async (req, res) => {
-//   try {
-//     const employeeId = parseInt(req.params.id);
-//     const { order } = req.body;
- 
-//     if (req.user.id !== employeeId && req.user.role !== 'admin') {
-//       return res.status(403).json({ error: 'Forbidden' });
-//     }
- 
-//     if (!Array.isArray(order)) {
-//       return res.status(400).json({ error: 'order must be an array of note IDs' });
-//     }
- 
-//     await db.updateEmployeeNotesOrder(employeeId, order);
-//     res.json({ success: true });
-//   } catch (error) {
-//     console.error('Error saving notes order:', error);
-//     res.status(500).json({ error: 'Failed to save notes order' });
-//   }
-// });
-
-
-
 app.get('/api/employees', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
 
     const employees = await db.getAllEmployees();
-
-    // ── Overall response time stats per agent ──
-    // 4-hour cap (240 min): only counts replies sent while agent was actively working.
-    // Overnight gaps and weekend gaps are excluded — they inflate the avg otherwise.
     const responseStats = await db.pool.query(`
       WITH real_messages AS (
         SELECT id, conversation_id, sender_id, sender_type, sent_at,
@@ -2377,10 +2354,34 @@ app.get('/api/stats/dashboard', authenticateToken, async (req, res) => {
   try { const stats = await db.getDashboardStats(req.query); res.json(stats); }
   catch (error) { res.status(500).json({ error: error.message }); }
 });
+
+
+
+
 app.get('/api/stats/websocket', authenticateToken, (req, res) => {
   try { const stats = getWebSocketStats(); res.json(stats); }
   catch (error) { res.status(500).json({ error: error.message }); }
 });
+
+// Manual trigger for the hourly Discord response-time report
+app.post('/api/stats/discord-report/trigger', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    if (!process.env.DISCORD_STATS_WEBHOOK) {
+      return res.status(400).json({ error: 'DISCORD_STATS_WEBHOOK not configured' });
+    }
+    sendHourlyResponseTimeStats().catch(err =>
+      console.error('📊 [Discord Stats] Manual trigger failed:', err.message)
+    );
+    res.json({ ok: true, message: 'Discord report triggered — check the channel in a few seconds' });
+  } catch (err) {
+    console.error('📊 [Discord Stats] Trigger endpoint error:', err.message);
+    res.status(500).json({ error: 'Failed to trigger report' });
+  }
+});
+
 
 app.get('/api/stats/response-times/team', authenticateToken, async (req, res) => {
   try {
@@ -2497,90 +2498,6 @@ function setupKeepAlive() {
 
 const PORT = process.env.PORT || 3000;
 
-// async function startServer() {
-//   try {
-//     server.listen(PORT, () => {
-//       setupKeepAlive();
-//       startEmailSweep(db.pool);
-
-//       setInterval(async () => {
-//         try {
-//           const result = await db.pool.query(`UPDATE customer_presence SET status = 'offline', ws_connected = FALSE, updated_at = NOW() WHERE status != 'offline' AND last_heartbeat_at < NOW() - INTERVAL '3 minutes' RETURNING conversation_id`);
-//           if (result.rowCount > 0) console.log(`[Presence] Marked ${result.rowCount} stale sessions offline`);
-//         } catch (err) { console.error('[Presence] Stale cleanup error:', err); }
-//       }, 2 * 60 * 1000);
-
-//       // ============ AUTO-REPLY (3-minute no-response rule) ============
-//       const AUTO_REPLY_TEXT = 'We received your message and will answer you ASAP! We answer as early as next business day, sometimes even within a few hours!';
-
-//       setInterval(async () => {
-//         try {
-//           const { rows } = await db.pool.query(`
-//             SELECT c.id, c.shop_id
-//             FROM conversations c
-//             WHERE c.status = 'open'
-//               AND c.auto_replied_at IS NULL
-//               AND EXISTS (
-//                 SELECT 1 FROM messages m
-//                 WHERE m.conversation_id = c.id
-//                   AND m.sender_type = 'customer'
-//                   AND m.sent_at = (
-//                     SELECT MAX(sent_at) FROM messages WHERE conversation_id = c.id
-//                   )
-//                   AND m.sent_at < NOW() - INTERVAL '3 minutes'
-//               )
-//               AND NOT EXISTS (
-//                 SELECT 1 FROM messages m2
-//                 WHERE m2.conversation_id = c.id
-//                   AND m2.sender_type = 'agent'
-//                   AND m2.sent_at > (
-//                     SELECT MAX(sent_at) FROM messages
-//                     WHERE conversation_id = c.id AND sender_type = 'customer'
-//                   )
-//               )
-//           `);
-
-//           for (const conv of rows) {
-//             try {
-//               // Raw INSERT — bypasses saveMessage so conversation fields are untouched
-//               const insertResult = await db.pool.query(
-//                 `INSERT INTO messages
-//                    (conversation_id, shop_id, sender_type, sender_name, content,
-//                     message_type, file_data, sent_at, timestamp)
-//                  VALUES ($1, $2, 'agent', 'Support', $3, 'text', NULL, NOW(), NOW())
-//                  RETURNING *`,
-//                 [conv.id, conv.shop_id, AUTO_REPLY_TEXT]
-//               );
-
-//               const saved = insertResult.rows[0];
-
-//               // Only stamp auto_replied_at — all other conversation fields stay untouched
-//               await db.pool.query(
-//                 `UPDATE conversations SET auto_replied_at = NOW() WHERE id = $1`,
-//                 [conv.id]
-//               );
-
-//               const msg = snakeToCamel(saved);
-//               sendToConversation(conv.id, { type: 'new_message', message: msg });
-//               broadcastToAgents({ type: 'new_message', message: msg, conversationId: conv.id, storeId: conv.shop_id });
-//               console.log(`🤖 [Auto-reply] Sent to conv #${conv.id}`);
-//             } catch (err) {
-//               console.error(`🤖 [Auto-reply] Failed for conv #${conv.id}:`, err.message);
-//             }
-//           }
-//         } catch (err) {
-//           console.error('🤖 [Auto-reply] Query error:', err.message);
-//         }
-//       }, 60 * 1000);
-//       // ============ END AUTO-REPLY ============
-
-//     });
-//   } catch (error) {
-//     console.error('❌ FATAL: Failed to start server:', error.message);
-//     process.exit(1);
-//   }
-// }
-
 async function startServer() {
   try {
     await db.testConnection(); console.log('✅ Database connection successful\n');
@@ -2619,6 +2536,42 @@ async function startServer() {
 
       setupKeepAlive();
       startEmailSweep(db.pool);
+
+// ── Hourly Discord report — aligned to top of every hour ──
+      function scheduleNextHourlyReport() {
+        const now = new Date();
+        const nextHour = new Date(now);
+        nextHour.setHours(now.getHours() + 1, 0, 5, 0); // :00:05 of next hour
+        const msUntilNextHour = nextHour - now;
+
+        console.log(`📊 [Discord Stats] Next hourly report scheduled for ${nextHour.toLocaleString()} (in ${Math.round(msUntilNextHour / 1000 / 60)}m)`);
+
+        setTimeout(async () => {
+          console.log(`📊 [Discord Stats] Hourly tick at ${new Date().toLocaleString()}`);
+          try {
+            await sendHourlyResponseTimeStats();
+          } catch (err) {
+            console.error('📊 [Discord Stats] Hourly tick failed:', err.message);
+          }
+          scheduleNextHourlyReport(); // chain the next one
+        }, msUntilNextHour);
+      }
+
+      // Startup report only in production — avoids spam during dev nodemon restarts.
+      // In dev, the next report comes at the top of the next hour.
+      if (process.env.NODE_ENV === 'production') {
+        setTimeout(() => {
+          console.log('📊 [Discord Stats] Sending startup report (then aligning to top-of-hour)');
+          sendHourlyResponseTimeStats().catch(err =>
+            console.error('📊 [Discord Stats] Startup report failed:', err.message)
+          );
+        }, 30 * 1000);
+      } else {
+        console.log('📊 [Discord Stats] Skipping startup report (dev mode) — next report at top of hour');
+      }
+
+      scheduleNextHourlyReport();
+
 
       setInterval(async () => {
         try {
@@ -2663,17 +2616,7 @@ setInterval(async () => {
 
     for (const conv of rows) {
       try {
-        // LAYER 2: Atomic check-and-insert to close the race window.
-        // The INSERT ... SELECT ... WHERE NOT EXISTS pattern is a single
-        // SQL statement, so no other transaction can slip a message in
-        // between the check and the insert. If an agent/admin replied
-        // during the ~ms gap since the outer SELECT ran, RETURNING returns
-        // zero rows and we skip this conversation.
-        //
-        // Note: `sender_type != 'customer'` is intentionally broader than
-        // `= 'agent'` — it catches 'agent', 'admin', 'bot', 'system', or
-        // any future sender_type we might add. Anything that isn't the
-        // customer counts as "someone already answered."
+
         const insertResult = await db.pool.query(
           `INSERT INTO messages
              (conversation_id, shop_id, sender_type, sender_name, content,
@@ -2691,17 +2634,12 @@ setInterval(async () => {
            RETURNING *`,
           [conv.id, conv.shop_id, AUTO_REPLY_TEXT]
         );
-
-        // If the race guard triggered, skip cleanly
         if (insertResult.rows.length === 0) {
           console.log(`🤖 [Auto-reply] Skipped conv #${conv.id} — team replied in the meantime`);
           continue;
         }
 
         const saved = insertResult.rows[0];
-
-        // LAYER 3: Only NOW set auto_replied_at — ensures the rate limit
-        // timestamp only updates when an auto-reply actually went out.
         await db.pool.query(
           `UPDATE conversations
            SET auto_replied_at = NOW(),

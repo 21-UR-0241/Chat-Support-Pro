@@ -1,14 +1,4 @@
-/**
- * Employee Management Styles - Mobile Optimized
- * Scroll-safe version: page scrolls vertically, table scrolls horizontally on narrow screens.
- */
 
-/* ──────────────────────────────────────────────────────────
-   PAGE WRAPPER
-   Key change: use min-height (not height) and allow overflow.
-   If a parent container has `height: 100vh; overflow: hidden`,
-   this wrapper needs its own scroll context as a fallback.
-   ────────────────────────────────────────────────────────── */
 .employee-management {
   padding: var(--spacing-xl);
   background: var(--bg-primary);

@@ -2214,46 +2214,6 @@ async function sendMessage() {
     const WS_URL = window.location.origin.replace(/^http/,'ws') + '/ws';
     const HEIC_PATH_RE = /file:\/\/[^\s]*\.hei[cf]/i;
 
-    // =========================================================
-    // THEME SYSTEM — new design per 10 stores, 8 distinct themes
-    //  1-10  → Emerald   11-20 → Ocean    21-30 → Violet
-    // 31-40  → Sunset    41-50 → Rose     51-60 → Teal
-    // 61-70  → Indigo    71-80 → Amber    (then cycles)
-    // =========================================================
-    var THEMES = [
-      {name:'Emerald',primary:'#3bbe28',dark:'#2fa01e',light:'#4cd938',
-       headerBg:'linear-gradient(135deg,#3bbe28,#2fa01e)',
-       headerShadow:'0 2px 10px rgba(59,190,40,0.35)',bubbleRadius:'12px',avatarRadius:'6px'},
-      {name:'Ocean',primary:'#2563eb',dark:'#1d4ed8',light:'#3b82f6',
-       headerBg:'linear-gradient(135deg,#1d4ed8,#2563eb)',
-       headerShadow:'0 2px 10px rgba(37,99,235,0.35)',bubbleRadius:'18px',avatarRadius:'50%'},
-      {name:'Violet',primary:'#7c3aed',dark:'#6d28d9',light:'#8b5cf6',
-       headerBg:'linear-gradient(135deg,#6d28d9,#7c3aed)',
-       headerShadow:'0 2px 10px rgba(124,58,237,0.35)',bubbleRadius:'16px',avatarRadius:'8px'},
-      {name:'Sunset',primary:'#ea580c',dark:'#c2410c',light:'#f97316',
-       headerBg:'linear-gradient(135deg,#c2410c,#f97316)',
-       headerShadow:'0 2px 10px rgba(234,88,12,0.35)',bubbleRadius:'8px',avatarRadius:'4px'},
-      {name:'Rose',primary:'#e11d48',dark:'#be123c',light:'#fb7185',
-       headerBg:'linear-gradient(135deg,#be123c,#e11d48)',
-       headerShadow:'0 2px 10px rgba(225,29,72,0.35)',bubbleRadius:'20px',avatarRadius:'50%'},
-      {name:'Teal',primary:'#0891b2',dark:'#0e7490',light:'#22d3ee',
-       headerBg:'linear-gradient(135deg,#0e7490,#22d3ee)',
-       headerShadow:'0 2px 10px rgba(8,145,178,0.35)',bubbleRadius:'12px',avatarRadius:'6px'},
-      {name:'Indigo',primary:'#4f46e5',dark:'#4338ca',light:'#6366f1',
-       headerBg:'linear-gradient(135deg,#4338ca,#6366f1)',
-       headerShadow:'0 2px 10px rgba(79,70,229,0.35)',bubbleRadius:'14px',avatarRadius:'7px'},
-      {name:'Amber',primary:'#d97706',dark:'#b45309',light:'#f59e0b',
-       headerBg:'linear-gradient(135deg,#b45309,#f59e0b)',
-       headerShadow:'0 2px 10px rgba(217,119,6,0.35)',bubbleRadius:'6px',avatarRadius:'3px'}
-    ];
-
-    function hashString(s){var h=5381;for(var i=0;i<s.length;i++){h=((h<<5)+h)+s.charCodeAt(i);h|=0;}return Math.abs(h);}
-    function getThemeIndex(id){
-      if(!id)return 0;
-      var n=parseInt(id,10);
-      if(!isNaN(n)&&String(n)===String(id)&&n>0)return Math.floor((n-1)/10)%THEMES.length;
-      return Math.floor(hashString(String(id))/10)%THEMES.length;
-    }
     function applyTheme(t){
       var r=document.documentElement;
       r.style.setProperty('--primary-color',t.primary);
@@ -2268,7 +2228,7 @@ async function sendMessage() {
       if(hdr){hdr.style.background=t.headerBg;hdr.style.boxShadow=t.headerShadow;}
       console.log('[Widget] Theme:',t.name,'| Store:',STORE_ID);
     }
-    var ACTIVE_THEME=THEMES[0];
+   var ACTIVE_THEME={name:'Emerald',primary:'#3bbe28',dark:'#2fa01e',light:'#4cd938',headerBg:'linear-gradient(135deg,#3bbe28,#2fa01e)',headerShadow:'0 2px 10px rgba(59,190,40,0.35)',bubbleRadius:'12px',avatarRadius:'6px'};
 
     // ── Shopify theme color override ──────────────────────────
     // If widget-init.js passed ?primary=&dark=&light= in the URL
@@ -2705,3 +2665,5 @@ async function sendMessage() {
   </script>
 </body>
 </html>
+
+
