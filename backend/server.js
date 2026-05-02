@@ -418,6 +418,28 @@ app.use('/api/ai/training', aiTrainingRoutes);
 
 const DISCORD_STATS_WEBHOOK = process.env.DISCORD_STATS_WEBHOOK;
 
+// Format decimal minutes into a precise human-readable string.
+//   0.1   -> "6s"
+//   0.5   -> "30s"
+//   1.0   -> "1m"
+//   1.25  -> "1m 15s"
+//   18.6  -> "18m 36s"
+//   65.5  -> "1h 5m"
+//   null  -> "n/a"
+function formatDuration(minutes) {
+  if (minutes == null) return 'n/a';
+  const totalSeconds = Math.round(minutes * 60);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  if (totalSeconds < 3600) {
+    const m = Math.floor(totalSeconds / 60);
+    const s = totalSeconds % 60;
+    return s === 0 ? `${m}m` : `${m}m ${s}s`;
+  }
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
 async function sendHourlyResponseTimeStats() {
   if (!DISCORD_STATS_WEBHOOK) {
     console.log('📊 [Discord Stats] No webhook configured — skipping');
@@ -431,6 +453,8 @@ async function sendHourlyResponseTimeStats() {
     //     from when they SAW it.
     //   • If read_at is NULL (legacy data from before stamping), fall back
     //     to message sent_at — same as the old behavior.
+    // SQL returns minutes with 3 decimal places so the JS formatter has
+    // sub-second precision to work with.
     const { rows: perAgent } = await db.pool.query(`
       WITH real_messages AS (
         SELECT id, conversation_id, sender_id, sender_type, sent_at,
@@ -454,8 +478,8 @@ async function sendHourlyResponseTimeStats() {
       )
       SELECT
         COALESCE(e.employee_name, e.name, 'Unknown #' || rt.sender_id) AS display_name,
-        ROUND(AVG(rt.minutes)::numeric, 1) AS avg_minutes,
-        ROUND(MIN(rt.minutes)::numeric, 1) AS fastest_minutes,
+        ROUND(AVG(rt.minutes)::numeric, 3) AS avg_minutes,
+        ROUND(MIN(rt.minutes)::numeric, 3) AS fastest_minutes,
         COUNT(*)::int AS replies
       FROM rt
       LEFT JOIN employees e ON e.id::text = rt.sender_id
@@ -481,8 +505,8 @@ async function sendHourlyResponseTimeStats() {
           AND NOT (sender_type = 'agent' AND sender_id IS NULL)
       )
       SELECT
-        ROUND(AVG(EXTRACT(EPOCH FROM (sent_at - COALESCE(prev_read_at, prev_sent_at))) / 60.0)::numeric, 1) AS avg_minutes,
-        ROUND(MIN(EXTRACT(EPOCH FROM (sent_at - COALESCE(prev_read_at, prev_sent_at))) / 60.0)::numeric, 1) AS fastest_minutes,
+        ROUND(AVG(EXTRACT(EPOCH FROM (sent_at - COALESCE(prev_read_at, prev_sent_at))) / 60.0)::numeric, 3) AS avg_minutes,
+        ROUND(MIN(EXTRACT(EPOCH FROM (sent_at - COALESCE(prev_read_at, prev_sent_at))) / 60.0)::numeric, 3) AS fastest_minutes,
         COUNT(*)::int AS total_replies
       FROM real_messages
       WHERE sender_type = 'agent' AND prev_sender_type = 'customer'
@@ -498,11 +522,11 @@ async function sendHourlyResponseTimeStats() {
 
     const fields = perAgent.slice(0, 25).map(r => ({
       name: r.display_name,
-      value: `Avg: **${parseFloat(r.avg_minutes).toFixed(1)}m**\nFastest: ${parseFloat(r.fastest_minutes).toFixed(1)}m\nReplies: ${r.replies}`,
+      value: `Avg: **${formatDuration(parseFloat(r.avg_minutes))}**\nFastest: ${formatDuration(parseFloat(r.fastest_minutes))}\nReplies: ${r.replies}`,
       inline: true,
     }));
 
-    const description = `**Team avg:** ${teamAvg.toFixed(1)}m  •  **Fastest:** ${teamFast.toFixed(1)}m  •  **Replies:** ${teamTotal}`;
+    const description = `**Team avg:** ${formatDuration(teamAvg)}  •  **Fastest:** ${formatDuration(teamFast)}  •  **Replies:** ${teamTotal}`;
 
     // Colour: green ≤5m, amber ≤30m, red >30m, grey if no data
     const color = teamAvg === null ? 0x6b7280
@@ -532,7 +556,7 @@ async function sendHourlyResponseTimeStats() {
       const err = await res.text();
       console.error(`📊 [Discord Stats] Webhook ${res.status}: ${err}`);
     } else {
-      console.log(`📊 [Discord Stats] Sent — ${perAgent.length} agents, team avg ${teamAvg.toFixed(1)}m`);
+      console.log(`📊 [Discord Stats] Sent — ${perAgent.length} agents, team avg ${formatDuration(teamAvg)}`);
     }
   } catch (err) {
     console.error('📊 [Discord Stats] Error:', err.message);
