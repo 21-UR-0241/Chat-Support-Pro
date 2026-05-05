@@ -447,14 +447,6 @@ async function sendHourlyResponseTimeStats() {
   }
 
   try {
-    // Per-employee response times for agent replies sent in the last hour.
-    // Response time = sent_at - COALESCE(prev_read_at, prev_sent_at)
-    //   • If the agent saw the customer message (read_at stamped), measure
-    //     from when they SAW it.
-    //   • If read_at is NULL (legacy data from before stamping), fall back
-    //     to message sent_at — same as the old behavior.
-    // SQL returns minutes with 3 decimal places so the JS formatter has
-    // sub-second precision to work with.
     const { rows: perAgent } = await db.pool.query(`
       WITH real_messages AS (
         SELECT id, conversation_id, sender_id, sender_type, sent_at,
@@ -560,6 +552,112 @@ async function sendHourlyResponseTimeStats() {
     }
   } catch (err) {
     console.error('📊 [Discord Stats] Error:', err.message);
+  }
+}
+
+// ============ DAILY DISCORD ACTIVITY REPORT ============
+
+async function sendDailyActivityStats() {
+  const webhook = process.env.DISCORD_DAILY_WEBHOOK || DISCORD_STATS_WEBHOOK;
+  if (!webhook) {
+    console.log('📊 [Discord Daily] No webhook configured — skipping');
+    return;
+  }
+
+  try {
+    // Conversations: new vs active (any message) in the past 24h
+    const { rows: convRows } = await db.pool.query(`
+      SELECT
+        (SELECT COUNT(*)::int FROM conversations
+           WHERE created_at >= NOW() - INTERVAL '24 hours') AS new_convs,
+        (SELECT COUNT(DISTINCT conversation_id)::int FROM messages
+           WHERE sent_at >= NOW() - INTERVAL '24 hours'
+             AND sender_type IN ('customer','agent')
+             AND NOT (sender_type = 'agent' AND sender_id IS NULL)) AS active_convs
+    `);
+
+    // Sent (agent, excluding auto-reply bots) + received (customer) in last 24h
+    const { rows: msgRows } = await db.pool.query(`
+      SELECT
+        COUNT(*) FILTER (WHERE sender_type = 'agent' AND sender_id IS NOT NULL)::int AS sent_count,
+        COUNT(*) FILTER (WHERE sender_type = 'customer')::int                        AS received_count
+      FROM messages
+      WHERE sent_at >= NOW() - INTERVAL '24 hours'
+    `);
+
+    // Per-agent activity in the last 24h
+    const { rows: agentRows } = await db.pool.query(`
+      SELECT
+        COALESCE(e.employee_name, e.name, 'Unknown #' || m.sender_id) AS display_name,
+        COUNT(*)::int AS message_count
+      FROM messages m
+      LEFT JOIN employees e ON e.id::text = m.sender_id
+      WHERE m.sender_type = 'agent'
+        AND m.sender_id IS NOT NULL
+        AND m.sent_at >= NOW() - INTERVAL '24 hours'
+      GROUP BY display_name
+      ORDER BY message_count DESC
+    `);
+
+    const newConvs    = convRows[0]?.new_convs    || 0;
+    const activeConvs = convRows[0]?.active_convs || 0;
+    const sentCount   = msgRows[0]?.sent_count    || 0;
+    const recvCount   = msgRows[0]?.received_count || 0;
+    const activeEmps  = agentRows.length;
+
+    const fields = [
+      { name: '💬 Conversations', value: `**${activeConvs}** active\n**${newConvs}** new`,        inline: true },
+      { name: '📥 Received',      value: `**${recvCount}** customer messages`,                   inline: true },
+      { name: '📤 Sent',          value: `**${sentCount}** agent replies`,                       inline: true },
+    ];
+
+    if (agentRows.length > 0) {
+      const topList = agentRows.slice(0, 15)
+        .map(r => `**${r.display_name}** — ${r.message_count} msgs`).join('\n');
+      const remainder = agentRows.length > 15 ? `\n_…and ${agentRows.length - 15} more_` : '';
+      fields.push({
+        name:  `👥 Active Employees (${activeEmps})`,
+        value: topList + remainder,
+        inline: false,
+      });
+    } else {
+      fields.push({ name: '👥 Active Employees', value: '_No employee activity_', inline: false });
+    }
+
+const now  = new Date();
+    const then = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const fmtRange = (d) => d.toLocaleString('en-US', {
+      timeZone: 'America/Toronto',
+      month: 'short', day: 'numeric',
+      hour: 'numeric', minute: '2-digit',
+    });
+
+    const payload = {
+      username: 'Daily Activity Bot',
+      embeds: [{
+        title: '📅 Daily Activity Report',
+        description: `**${fmtRange(then)} → ${fmtRange(now)}** (ET)`,
+        color: 0x3b82f6,
+        fields,
+        timestamp: now.toISOString(),
+        footer: { text: 'Past 24 hours • Excludes auto-replies' },
+      }],
+    };
+
+    const res = await fetch(webhook, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      console.error(`📊 [Discord Daily] Webhook ${res.status}: ${err}`);
+    } else {
+      console.log(`📊 [Discord Daily] Sent — ${activeConvs} convs (${newConvs} new), ${sentCount} sent, ${recvCount} received, ${activeEmps} agents`);
+    }
+  } catch (err) {
+    console.error('📊 [Discord Daily] Error:', err.message);
   }
 }
 
@@ -2406,6 +2504,26 @@ app.post('/api/stats/discord-report/trigger', authenticateToken, async (req, res
   }
 });
 
+// Manual trigger for the daily Discord activity report
+app.post('/api/stats/discord-daily-report/trigger', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    const webhook = process.env.DISCORD_DAILY_WEBHOOK || process.env.DISCORD_STATS_WEBHOOK;
+    if (!webhook) {
+      return res.status(400).json({ error: 'No Discord webhook configured' });
+    }
+    sendDailyActivityStats().catch(err =>
+      console.error('📊 [Discord Daily] Manual trigger failed:', err.message)
+    );
+    res.json({ ok: true, message: 'Daily Discord report triggered — check the channel in a few seconds' });
+  } catch (err) {
+    console.error('📊 [Discord Daily] Trigger endpoint error:', err.message);
+    res.status(500).json({ error: 'Failed to trigger report' });
+  }
+});
+
 
 app.get('/api/stats/response-times/team', authenticateToken, async (req, res) => {
   try {
@@ -2595,6 +2713,30 @@ async function startServer() {
       }
 
       scheduleNextHourlyReport();
+
+      // ── Daily report — fires once per day at DISCORD_DAILY_REPORT_HOUR (default 9 AM server time) ──
+      function scheduleNextDailyReport() {
+        const REPORT_HOUR = parseInt(process.env.DISCORD_DAILY_REPORT_HOUR || '9', 10);
+        const now  = new Date();
+        const next = new Date(now);
+        next.setHours(REPORT_HOUR, 0, 5, 0);
+        if (next <= now) next.setDate(next.getDate() + 1);
+        const msUntilNext = next - now;
+
+        console.log(`📊 [Discord Daily] Next daily report scheduled for ${next.toLocaleString()} (in ${Math.round(msUntilNext / 1000 / 60 / 60)}h)`);
+
+        setTimeout(async () => {
+          console.log(`📊 [Discord Daily] Daily tick at ${new Date().toLocaleString()}`);
+          try {
+            await sendDailyActivityStats();
+          } catch (err) {
+            console.error('📊 [Discord Daily] Daily tick failed:', err.message);
+          }
+          scheduleNextDailyReport();
+        }, msUntilNext);
+      }
+
+      scheduleNextDailyReport();
 
 
       setInterval(async () => {

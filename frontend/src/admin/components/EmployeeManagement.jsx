@@ -176,6 +176,22 @@ function EmployeeManagement({ currentUser, onBack }) {
     }
   };
 
+  const handleSendDailyReport = async () => {
+    if (!window.confirm('Send the daily activity report to the Discord channel now?')) {
+      return;
+    }
+    try {
+      await api.triggerDailyDiscordReport();
+      setSuccess('📅 Daily report sent — check the channel');
+      setTimeout(() => setSuccess(''), 4000);
+    } catch (err) {
+      console.error('Daily Discord send error:', err);
+      setError(err.message || 'Failed to send daily report');
+      setTimeout(() => setError(''), 4000);
+    }
+  };
+
+
   // Filter employees
   const filteredEmployees = employees.filter(emp => {
     // Search filter — matches display name, employee name, or email
@@ -349,6 +365,13 @@ function EmployeeManagement({ currentUser, onBack }) {
             title="Send the response-time report to the Discord channel now (skips if no activity in the past hour)"
           >
             📊 Send Manual Report
+          </button>
+                    <button
+            className="btn-secondary"
+            onClick={handleSendDailyReport}
+            title="Send the daily activity report — past 24h conversations, sent/received messages, active employees"
+          >
+            📅 Send Daily Report
           </button>
           <button
             className="btn-secondary"

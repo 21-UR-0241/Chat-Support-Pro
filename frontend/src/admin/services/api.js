@@ -266,20 +266,10 @@ class ApiService {
     return this.fetch('/api/stats/websocket');
   }
 
-  // ============ Response Time Stats ============
-
-  /**
-   * Get team-wide average response time stats (auto-replies excluded).
-   * Returns: { avgMinutes, medianMinutes, fastestMinutes, totalResponses, under5Min, under30Min, over1Hour }
-   */
   async getTeamResponseStats() {
     return this.fetch('/api/stats/response-times/team');
   }
 
-  /**
-   * Get response time stats for a single conversation (auto-replies excluded).
-   * Returns: { conversationId, avgResponseMinutes, totalResponses, responses: [{ senderName, minutes, at }] }
-   */
   async getConversationResponseStats(conversationId) {
     return this.fetch(`/api/conversations/${conversationId}/response-stats`);
   }
@@ -288,6 +278,10 @@ class ApiService {
   return this.fetch('/api/stats/discord-report/trigger', { method: 'POST' });
 }
 
+  async triggerDailyDiscordReport() {
+    return this.fetch('/api/stats/discord-daily-report/trigger', { method: 'POST' });
+  }
+  
   // ============ Analytics ============
 
   async getCommonQuestions(params = {}) {
