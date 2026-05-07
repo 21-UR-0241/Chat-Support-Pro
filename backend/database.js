@@ -1599,7 +1599,7 @@ async function saveMessage(data) {
 //   }
 // }
 
-async function getMessages(conversationId, limit = 100) {
+async function getMessages(conversationId) {
   try {
     const result = await pool.query(
       `SELECT m.*,
@@ -1613,9 +1613,8 @@ async function getMessages(conversationId, limit = 100) {
            AND CAST(m.sender_id AS INTEGER) = e.id
          )
         WHERE m.conversation_id = $1
-        ORDER BY m.timestamp ASC
-        LIMIT $2`,
-      [conversationId, limit]
+        ORDER BY m.timestamp ASC`,
+      [conversationId]
     );
     return result.rows.map(parseMessageFileData);
   } catch (error) {

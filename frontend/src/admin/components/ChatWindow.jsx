@@ -3552,32 +3552,64 @@ function ChatWindow({
 
   useEffect(() => {
     if (!conversation?.id) { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current); return; }
+
+
+    // pollIntervalRef.current = setInterval(async () => {
+    //   try {
+    //     const data = await api.getMessages(conversation.id);
+    //     const serverMessages = (Array.isArray(data) ? data : []).map(normalizeMessage);
+    //     setMessages(prev => {
+    //       const existingIds = new Set(prev.map(m => String(m.id)));
+    //       const newMessages = serverMessages.filter(m => m.id && !existingIds.has(String(m.id)) && !displayedMessageIds.current.has(String(m.id)));
+    //       if (newMessages.length === 0) return prev;
+    //       newMessages.forEach(m => { if (m.id) displayedMessageIds.current.add(String(m.id)); });
+    //       let updated = prev.map(existing => {
+    //         if (!String(existing.id).startsWith('temp-')) return existing;
+    //         const confirmed = serverMessages.find(s =>
+    //           s.content === existing.content &&
+    //           s.senderType === existing.senderType &&
+    //           !existingIds.has(String(s.id))
+    //         );
+    //         if (confirmed) {
+    //           displayedMessageIds.current.add(String(confirmed.id));
+    //           return { ...confirmed, sending: false, _optimistic: false };
+    //         }
+    //         return existing;
+    //       });
+    //       return [...updated, ...newMessages.map(m => ({ ...m, sending: false, _optimistic: false }))];
+    //     });
+    //   } catch (error) {}
+    // }, 5000);
+
+
     pollIntervalRef.current = setInterval(async () => {
-      try {
-        const data = await api.getMessages(conversation.id);
-        const serverMessages = (Array.isArray(data) ? data : []).map(normalizeMessage);
-        setMessages(prev => {
-          const existingIds = new Set(prev.map(m => String(m.id)));
-          const newMessages = serverMessages.filter(m => m.id && !existingIds.has(String(m.id)) && !displayedMessageIds.current.has(String(m.id)));
-          if (newMessages.length === 0) return prev;
-          newMessages.forEach(m => { if (m.id) displayedMessageIds.current.add(String(m.id)); });
-          let updated = prev.map(existing => {
-            if (!String(existing.id).startsWith('temp-')) return existing;
-            const confirmed = serverMessages.find(s =>
-              s.content === existing.content &&
-              s.senderType === existing.senderType &&
-              !existingIds.has(String(s.id))
-            );
-            if (confirmed) {
-              displayedMessageIds.current.add(String(confirmed.id));
-              return { ...confirmed, sending: false, _optimistic: false };
-            }
-            return existing;
-          });
-          return [...updated, ...newMessages.map(m => ({ ...m, sending: false, _optimistic: false }))];
-        });
-      } catch (error) {}
-    }, 5000);
+  try {
+    const data = await api.getMessages(conversation.id); // no limit arg
+    const serverMessages = (Array.isArray(data) ? data : []).map(normalizeMessage);
+    setMessages(prev => {
+      const existingIds = new Set(prev.map(m => String(m.id)));
+      const newMessages = serverMessages.filter(m => m.id && !existingIds.has(String(m.id)) && !displayedMessageIds.current.has(String(m.id)));
+      if (newMessages.length === 0) return prev;
+      newMessages.forEach(m => { if (m.id) displayedMessageIds.current.add(String(m.id)); });
+      let updated = prev.map(existing => {
+        if (!String(existing.id).startsWith('temp-')) return existing;
+        const confirmed = serverMessages.find(s =>
+          s.content === existing.content &&
+          s.senderType === existing.senderType &&
+          !existingIds.has(String(s.id))
+        );
+        if (confirmed) {
+          displayedMessageIds.current.add(String(confirmed.id));
+          return { ...confirmed, sending: false, _optimistic: false };
+        }
+        return existing;
+      });
+      return [...updated, ...newMessages.map(m => ({ ...m, sending: false, _optimistic: false }))];
+    });
+  } catch (error) {}
+}, 5000);
+
+
     return () => { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current); };
   }, [conversation?.id]);
 
@@ -3592,20 +3624,35 @@ function ChatWindow({
     return () => window.removeEventListener('paste', handleGlobalPaste);
   }, [selectedFile]);
 
+  // const loadMessages = async () => {
+  //   try {
+  //     setLoading(true);
+  //     const data = await api.getMessages(conversation.id);
+  //     const messageArray = (Array.isArray(data) ? data : []).map(normalizeMessage);
+  //     messageArray.forEach(msg => { if (msg.id) displayedMessageIds.current.add(String(msg.id)); });
+  //     setMessages(messageArray);
+  //   } catch (error) {
+  //     console.error('Failed to load messages:', error);
+  //     setMessages([]);
+  //   } finally {
+  //     setLoading(false);
+  //   }
+  // };
+
   const loadMessages = async () => {
-    try {
-      setLoading(true);
-      const data = await api.getMessages(conversation.id);
-      const messageArray = (Array.isArray(data) ? data : []).map(normalizeMessage);
-      messageArray.forEach(msg => { if (msg.id) displayedMessageIds.current.add(String(msg.id)); });
-      setMessages(messageArray);
-    } catch (error) {
-      console.error('Failed to load messages:', error);
-      setMessages([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+  try {
+    setLoading(true);
+    const data = await api.getMessages(conversation.id); // no limit arg
+    const messageArray = (Array.isArray(data) ? data : []).map(normalizeMessage);
+    messageArray.forEach(msg => { if (msg.id) displayedMessageIds.current.add(String(msg.id)); });
+    setMessages(messageArray);
+  } catch (error) {
+    console.error('Failed to load messages:', error);
+    setMessages([]);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const scrollToBottom = () => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); };
 
