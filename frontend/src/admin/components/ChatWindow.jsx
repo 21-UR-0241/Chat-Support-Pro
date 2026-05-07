@@ -3585,7 +3585,7 @@ function ChatWindow({
     pollIntervalRef.current = setInterval(async () => {
   try {
     const data = await api.getMessages(conversation.id); // no limit arg
-    const serverMessages = (Array.isArray(data) ? data : []).map(normalizeMessage);
+    const serverMessages = (Array.isArray(data) ? data : []).map(normalizeMessage); 
     setMessages(prev => {
       const existingIds = new Set(prev.map(m => String(m.id)));
       const newMessages = serverMessages.filter(m => m.id && !existingIds.has(String(m.id)) && !displayedMessageIds.current.has(String(m.id)));

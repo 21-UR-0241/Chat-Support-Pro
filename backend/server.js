@@ -628,7 +628,7 @@ const now  = new Date();
     const then = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     const fmtRange = (d) => d.toLocaleString('en-US', {
       timeZone: 'America/Toronto',
-      month: 'short', day: 'numeric',
+      month: 'short', day: 'numeric', 
       hour: 'numeric', minute: '2-digit',
     });
 
