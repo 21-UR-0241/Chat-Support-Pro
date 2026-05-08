@@ -2,9 +2,6 @@
 //backend/shopify-handler.js
 const db = require('./db');
 
-/**
- * Get shop by domain from database (using Drizzle)
- */
 async function getShopByDomain(domain) {
   try {
     return await db.getStoreByDomain(domain);
@@ -14,9 +11,6 @@ async function getShopByDomain(domain) {
   }
 }
 
-/**
- * Get shop by identifier
- */
 async function getShopByIdentifier(identifier) {
   try {
     return await db.getStoreByIdentifier(identifier);
@@ -26,9 +20,6 @@ async function getShopByIdentifier(identifier) {
   }
 }
 
-/**
- * Create Shopify REST client for a shop
- */
 function getShopClient(shop) {
   const fetch = require('node-fetch');
   
@@ -58,9 +49,6 @@ function getShopClient(shop) {
   };
 }
 
-/**
- * Fetch customer from Shopify
- */
 async function getCustomer(client, customerId) {
   try {
     const data = await client.request(`/customers/${customerId}.json`);
@@ -71,9 +59,6 @@ async function getCustomer(client, customerId) {
   }
 }
 
-/**
- * Fetch customer orders from Shopify
- */
 async function getCustomerOrders(client, customerId) {
   try {
     const data = await client.request(`/customers/${customerId}/orders.json?limit=50`);

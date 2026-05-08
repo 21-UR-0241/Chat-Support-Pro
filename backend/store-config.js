@@ -1,11 +1,6 @@
 // backend/store-config.js
 const redisManager = require('./redis-manager');
 const db = require('./database');
-
-/**
- * Store Configuration Manager
- * Manages per-store settings and feature flags
- */
 class StoreConfigManager {
   async getConfig(storeId) {
     try {

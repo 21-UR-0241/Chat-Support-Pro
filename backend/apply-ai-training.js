@@ -1,6 +1,3 @@
-#!/usr/bin/env node
-// run: node apply-ai-training-patch.js
-// This script patches your server.js in-place with the AI Training integration
 
 const fs = require('fs');
 const path = require('path');

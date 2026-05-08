@@ -3,10 +3,6 @@ const crypto = require('crypto');
 const db = require('./database');
 const queueManager = require('./queue-manager');
 
-/**
- * Raw body middleware for webhook verification
- * Includes size limit (1MB)
- */
 function rawBodyMiddleware(req, res, next) {
   let data = '';
   let tooLarge = false;

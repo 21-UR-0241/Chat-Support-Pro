@@ -1,8 +1,4 @@
-/**
- * Lightweight markdown parser for chat message content.
- * Converts markdown syntax to sanitized HTML strings.
- * Supports: **bold**, *italic*, `code`, ~~strikethrough~~, line breaks
- */
+
 export const parseMarkdown = (text) => {
   if (!text || typeof text !== 'string') return '';
 

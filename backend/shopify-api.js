@@ -1,37 +1,24 @@
-/**
- * Shopify API - Complete Multi-Store Implementation
- * Enhanced with rate limiting, caching, and error handling
- * FIXED: priority parameter issue
- */
+
 const rateLimiter = require('./shopify-rate-limiter');
 const redisManager = require('./redis-manager');
 const crypto = require('crypto');
 
 const API_VERSION = process.env.SHOPIFY_API_VERSION || '2024-01';
 
-/**
- * Enhanced Shopify REST client with rate limiting + retry
- */
 function getShopClient(store) {
   return {
     shop: store.shop_domain,
     accessToken: store.access_token,
     storeId: store.id,
 
-    /**
-     * Make rate-limited request to Shopify API
-     * FIXED: Extract priority and retryCount before passing to fetch
-     */
     async request(endpoint, options = {}) {
       const url = `https://${store.shop_domain}/admin/api/${API_VERSION}${endpoint}`;
 
       const attempt = async () => {
-        // Extract custom options that shouldn't be passed to fetch
-        // FIX: priority and retryCount are custom options, not fetch options
         const { priority, retryCount, ...fetchOptions } = options;
 
         const response = await fetch(url, {
-          ...fetchOptions,  // FIXED: Now only passes valid fetch options
+          ...fetchOptions,
           headers: {
             'Content-Type': 'application/json',
             'X-Shopify-Access-Token': store.access_token,
@@ -88,9 +75,6 @@ function getShopClient(store) {
   };
 }
 
-/**
- * Get customer context from Shopify by email with caching
- */
 async function getCustomerContext(store, customerEmail) {
   const cached = await redisManager.getCustomerContext(store.id, customerEmail);
   if (cached) {
@@ -102,9 +86,6 @@ async function getCustomerContext(store, customerEmail) {
     console.log(`📊 Fetching customer context for: ${customerEmail} from ${store.shop_domain}`);
 
     const client = getShopClient(store);
-
-    // Search for customer by email (rate-limited)
-    // Note: priority is custom option for internal use, not passed to fetch
     const searchResult = await client.request(
       `/customers/search.json?query=email:${encodeURIComponent(customerEmail)}`,
       { priority: 7 }

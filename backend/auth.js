@@ -1,40 +1,25 @@
-/**
- * Authentication Module - Production Ready
- * JWT token generation and verification
- */
+
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
-
-// Widget tokens (separate secret recommended)
 const WIDGET_JWT_SECRET = process.env.WIDGET_JWT_SECRET || JWT_SECRET;
 const WIDGET_JWT_EXPIRES_IN = process.env.WIDGET_JWT_EXPIRES_IN || '2h';
 
-// ✅ Enforce JWT secret in production
 if (process.env.NODE_ENV === 'production' && !JWT_SECRET) {
   throw new Error('JWT_SECRET is required in production');
 }
 
-/**
- * Hash password with bcrypt
- */
 async function hashPassword(password) {
   const saltRounds = 10;
   return await bcrypt.hash(password, saltRounds);
 }
 
-/**
- * Compare password with hash
- */
 async function verifyPassword(password, hash) {
   return await bcrypt.compare(password, hash);
 }
 
-/**
- * Generate employee JWT token
- */
 function generateToken(employee) {
   return jwt.sign(
     { 
@@ -48,9 +33,6 @@ function generateToken(employee) {
   );
 }
 
-/**
- * Verify employee JWT token
- */
 function verifyToken(token) {
   try {
     return jwt.verify(token, JWT_SECRET);
@@ -62,9 +44,6 @@ function verifyToken(token) {
   }
 }
 
-/**
- * Generate widget JWT token
- */
 function generateWidgetToken(store) {
   return jwt.sign(
     {
@@ -78,9 +57,6 @@ function generateWidgetToken(store) {
   );
 }
 
-/**
- * Verify widget JWT token
- */
 function verifyWidgetToken(token) {
   try {
     return jwt.verify(token, WIDGET_JWT_SECRET);
@@ -89,9 +65,6 @@ function verifyWidgetToken(token) {
   }
 }
 
-/**
- * Auth middleware - protect routes
- */
 function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
@@ -107,9 +80,7 @@ function authenticateToken(req, res, next) {
   next();
 }
 
-/**
- * Optional auth - allows both authenticated and unauthenticated
- */
+
 function optionalAuth(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -123,9 +94,6 @@ function optionalAuth(req, res, next) {
   next();
 }
 
-/**
- * Admin-only middleware
- */
 function requireAdmin(req, res, next) {
   if (!req.user) {
     return res.status(401).json({ error: 'Authentication required' });
@@ -138,16 +106,12 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-/**
- * Check if user can access store
- */
 function canAccessStore(employee, storeId) {
-  // Admin or employees who can view all stores
+
   if (employee.role === 'admin' || employee.can_view_all_stores) {
     return true;
   }
 
-  // Check if store is in assigned stores
   if (employee.assigned_stores && employee.assigned_stores.includes(storeId)) {
     return true;
   }
@@ -155,9 +119,6 @@ function canAccessStore(employee, storeId) {
   return false;
 }
 
-/**
- * Middleware to verify store access
- */
 function verifyStoreAccess(req, res, next) {
   const storeId = parseInt(req.params.storeId || req.query.storeId || req.body.storeId);
 

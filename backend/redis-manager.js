@@ -1,10 +1,5 @@
 // backend/redis-manager.js
 const Redis = require('ioredis');
-
-/**
- * Redis Manager for Caching and Pub/Sub
- * Handles store data, customer context, WebSocket sessions, and cross-server messaging
- */
 class RedisManager {
   constructor() {
     const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';

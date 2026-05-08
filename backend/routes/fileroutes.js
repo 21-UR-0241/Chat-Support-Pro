@@ -5,15 +5,13 @@ const axios = require('axios');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 
-// Configure multer for memory storage
 const storage = multer.memoryStorage();
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB max file size
+    fileSize: 10 * 1024 * 1024,
   },
   fileFilter: (req, file, cb) => {
-    // Allow specific file types
     const allowedTypes = [
       'image/jpeg',
       'image/png',
@@ -36,15 +34,11 @@ const upload = multer({
   },
 });
 
-// Bunny.net configuration
 const BUNNY_STORAGE_ZONE = process.env.BUNNY_STORAGE_ZONE || 'your-storage-zone-name';
 const BUNNY_ACCESS_KEY = process.env.BUNNY_ACCESS_KEY || 'your-bunny-access-key';
 const BUNNY_STORAGE_HOSTNAME = process.env.BUNNY_STORAGE_HOSTNAME || 'storage.bunnycdn.com';
 const BUNNY_CDN_URL = process.env.BUNNY_CDN_URL || `https://${BUNNY_STORAGE_ZONE}.b-cdn.net`;
 
-/**
- * Upload file to Bunny.net Storage
- */
 const uploadToBunny = async (fileBuffer, fileName, contentType) => {
   try {
     // Generate unique filename
@@ -58,7 +52,6 @@ const uploadToBunny = async (fileBuffer, fileName, contentType) => {
       contentType,
     });
 
-    // Upload to Bunny.net Storage API
     const uploadUrl = `https://${BUNNY_STORAGE_HOSTNAME}/${BUNNY_STORAGE_ZONE}/${uploadPath}`;
     
     const response = await axios.put(uploadUrl, fileBuffer, {
@@ -91,10 +84,6 @@ const uploadToBunny = async (fileBuffer, fileName, contentType) => {
     throw new Error('Failed to upload file to Bunny.net');
   }
 };
-
-/**
- * Delete file from Bunny.net Storage
- */
 const deleteFromBunny = async (uploadPath) => {
   try {
     const deleteUrl = `https://${BUNNY_STORAGE_HOSTNAME}/${BUNNY_STORAGE_ZONE}/${uploadPath}`;
@@ -113,10 +102,6 @@ const deleteFromBunny = async (uploadPath) => {
   }
 };
 
-/**
- * POST /api/files/upload
- * Upload a file to Bunny.net CDN
- */
 router.post('/upload', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
@@ -139,17 +124,6 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       req.file.mimetype
     );
 
-    // Optionally save file metadata to database
-    // await FileModel.create({
-    //   userId: req.user.id,
-    //   fileName: uploadResult.fileName,
-    //   originalName: uploadResult.originalName,
-    //   url: uploadResult.url,
-    //   size: uploadResult.size,
-    //   contentType: uploadResult.contentType,
-    //   uploadPath: uploadResult.uploadPath,
-    // });
-
     res.status(200).json({
       success: true,
       message: 'File uploaded successfully',
@@ -168,28 +142,12 @@ router.post('/upload', upload.single('file'), async (req, res) => {
   }
 });
 
-/**
- * DELETE /api/files/:fileName
- * Delete a file from Bunny.net CDN
- */
 router.delete('/:fileName', async (req, res) => {
   try {
     const { fileName } = req.params;
     const uploadPath = `uploads/${fileName}`;
 
-    // Optionally verify ownership from database
-    // const file = await FileModel.findOne({
-    //   fileName: fileName,
-    //   userId: req.user.id,
-    // });
-    // if (!file) {
-    //   return res.status(404).json({ message: 'File not found' });
-    // }
-
     await deleteFromBunny(uploadPath);
-
-    // Optionally delete from database
-    // await FileModel.deleteOne({ fileName: fileName });
 
     res.status(200).json({
       success: true,

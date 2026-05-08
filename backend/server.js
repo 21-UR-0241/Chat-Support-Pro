@@ -418,14 +418,6 @@ app.use('/api/ai/training', aiTrainingRoutes);
 
 const DISCORD_STATS_WEBHOOK = process.env.DISCORD_STATS_WEBHOOK;
 
-// Format decimal minutes into a precise human-readable string.
-//   0.1   -> "6s"
-//   0.5   -> "30s"
-//   1.0   -> "1m"
-//   1.25  -> "1m 15s"
-//   18.6  -> "18m 36s"
-//   65.5  -> "1h 5m"
-//   null  -> "n/a"
 function formatDuration(minutes) {
   if (minutes == null) return 'n/a';
   const totalSeconds = Math.round(minutes * 60);
@@ -956,8 +948,7 @@ app.get('/api/conversations/linked/:email', authenticateToken, async (req, res) 
   } catch (error) { console.error('❌ [linked-conversations] Error:', error); return res.status(500).json({ error: 'Failed to fetch linked conversations' }); }
 });
 
-// NOTE: /api/conversations/archived must be declared BEFORE /api/conversations/:id
-// so Express doesn't treat "archived" as an :id param.
+
 app.get('/api/conversations/archived', authenticateToken, async (req, res) => {
   try {
     const page            = Math.max(1, parseInt(req.query.page)  || 1);
@@ -1386,13 +1377,7 @@ app.get('/api/blacklist', authenticateToken, async (req, res) => {
   }
 });
 
-/**
- * DELETE /api/blacklist/:id
- * Soft-delete (un-blacklist) by row ID.
- *
- * UPDATED: also restores conversations.status → 'open' and broadcasts
- * 'conversation_unblacklisted' WS event so the inbox re-shows them live.
- */
+
 app.delete('/api/blacklist/:id', authenticateToken, async (req, res) => {
   try {
     // 1. Fetch entry first so we have the email + store scope
@@ -1416,9 +1401,6 @@ app.delete('/api/blacklist/:id', authenticateToken, async (req, res) => {
       [parseInt(req.params.id)]
     );
 
-    // 3. Restore conversations back to 'open'.
-    //    store_identifier = NULL  → was a network-wide block, restore all stores.
-    //    conversations table uses shop_domain (NOT store_identifier).
     let restored;
     if (store_identifier) {
       restored = await db.pool.query(
@@ -1443,8 +1425,7 @@ app.delete('/api/blacklist/:id', authenticateToken, async (req, res) => {
       );
     }
 
-    // 4. Broadcast so every agent's inbox re-shows the conversations live.
-    //    This fires regardless of which UI path triggered the removal.
+
     restored.rows.forEach(row => {
       broadcastToAgents({
         type:           'conversation_unblacklisted',
@@ -1465,11 +1446,7 @@ app.delete('/api/blacklist/:id', authenticateToken, async (req, res) => {
   }
 });
 
-/**
- * GET /api/blacklist/check
- * Query: email (required), storeIdentifier (optional)
- * UNCHANGED
- */
+
 app.get('/api/blacklist/check', authenticateToken, async (req, res) => {
   const { email, storeIdentifier } = req.query;
   if (!email) return res.status(400).json({ error: 'email query param is required' });
@@ -2148,8 +2125,6 @@ app.get('/api/employees', authenticateToken, async (req, res) => {
       };
     }
 
-    // ── Per-agent, per-customer response time breakdown (for CSV export) ──
-    // Same 4-hour cap applied for consistency with overall stats above.
     const customerResponseStats = await db.pool.query(`
       WITH real_messages AS (
         SELECT m.id, m.conversation_id, m.sender_id, m.sender_type, m.sent_at,
@@ -2751,16 +2726,6 @@ const AUTO_REPLY_TEXT = 'We received your message and will answer you ASAP! We a
 
 setInterval(async () => {
   try {
-    // LAYER 1: Select candidate conversations.
-    // Three conditions must hold:
-    //   (a) Status is open (not closed/archived)
-    //   (b) 8-hour rate limit not currently active
-    //   (c) The single latest message in the conversation IS a customer message
-    //       AND that message is at least 9 minutes old
-    // Condition (c) uses MAX(sent_at) which inherently excludes ANY non-customer
-    // reply — whether from agent, admin, or any other sender_type — because if
-    // a non-customer message existed after the customer's, MAX(sent_at) would
-    // point to THAT message and the EXISTS clause would fail.
     const { rows } = await db.pool.query(`
       SELECT c.id, c.shop_id
       FROM conversations c
