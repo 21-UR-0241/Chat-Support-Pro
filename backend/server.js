@@ -550,11 +550,11 @@ async function sendHourlyResponseTimeStats() {
 // ============ DAILY DISCORD ACTIVITY REPORT ============
 
 async function sendDailyActivityStats() {
-  const webhook = process.env.DISCORD_DAILY_WEBHOOK || DISCORD_STATS_WEBHOOK;
-  if (!webhook) {
-    console.log('📊 [Discord Daily] No webhook configured — skipping');
-    return;
-  }
+  const webhook = process.env.DISCORD_DAILY_WEBHOOK;
+if (!webhook) {
+  console.log('📊 [Discord Daily] No DISCORD_DAILY_WEBHOOK configured — skipping');
+  return;
+}
 
   try {
     // Conversations: new vs active (any message) in the past 24h
@@ -2485,10 +2485,10 @@ app.post('/api/stats/discord-daily-report/trigger', authenticateToken, async (re
     if (req.user.role !== 'admin') {
       return res.status(403).json({ error: 'Admin access required' });
     }
-    const webhook = process.env.DISCORD_DAILY_WEBHOOK || process.env.DISCORD_STATS_WEBHOOK;
-    if (!webhook) {
-      return res.status(400).json({ error: 'No Discord webhook configured' });
-    }
+    
+if (!process.env.DISCORD_DAILY_WEBHOOK) {
+  return res.status(400).json({ error: 'DISCORD_DAILY_WEBHOOK not configured' });
+}
     sendDailyActivityStats().catch(err =>
       console.error('📊 [Discord Daily] Manual trigger failed:', err.message)
     );
