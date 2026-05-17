@@ -393,6 +393,22 @@ class ApiService {
     });
   }
 
+
+  // ============ AI Training / Brain ============
+
+  async getBrain() {
+    return this.fetch('/api/ai/training/brain');
+  }
+
+  async searchBrain(query, { perCategory = 8, totalCap = 30 } = {}) {
+    const params = new URLSearchParams({ q: query, perCategory, totalCap });
+    return this.fetch(`/api/ai/training/brain-search?${params}`);
+  }
+
+  async clearBrainCache() {
+    return this.fetch('/api/ai/brain-cache/clear', { method: 'POST' });
+  }
+  
   // ============ Health Check ============
 
   async healthCheck() {
