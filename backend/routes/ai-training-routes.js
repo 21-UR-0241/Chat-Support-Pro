@@ -875,9 +875,7 @@ RESPONSE FORMAT — valid JSON only, no markdown:
 
     const response = await callAnthropicAPI(requestBody, ANTHROPIC_API_KEY);
     const raw = response.content?.[0]?.text || '{}';
-    let parsed;
-    try { parsed = JSON.parse(raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim()); }
-    catch { parsed = { rules: [], summary: 'Could not parse extraction.' }; }
+    const parsed = parseAIResponse(raw) || { rules: [], summary: 'Could not parse extraction.' };
 
     const rules = (parsed.rules || [])
       .filter(r => r.text && r.category)
@@ -1062,9 +1060,7 @@ RESPONSE FORMAT — valid JSON only, no markdown:
 
         const response = await callAnthropicAPI(requestBody, ANTHROPIC_API_KEY);
         const raw = response.content?.[0]?.text || '{}';
-        let parsed;
-        try { parsed = JSON.parse(raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim()); }
-        catch { parsed = { rules: [], gaps: [] }; }
+        const parsed = parseAIResponse(raw) || { rules: [], gaps: [] };
 
         (parsed.rules || []).forEach(r => {
           if (!r.text || !r.category) return;
@@ -1166,17 +1162,13 @@ Generate the interview.`;
 
     const response = await callAnthropicAPI(requestBody, ANTHROPIC_API_KEY);
     const raw = response.content?.[0]?.text || '{}';
-    let parsed;
-    try { parsed = JSON.parse(raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim()); }
-    catch {
-      parsed = {
-        intro: "I found some gaps in your conversations — let me ask a few questions.",
-        questions: gaps.slice(0, 6).map((g, i) => ({
-          id: `q${i + 1}`, text: g.question, hint: `Observed in conversations: ${g.topic}`,
-          category: g.category || 'product', quickReplies: [],
-        })),
-      };
-    }
+    const parsed = parseAIResponse(raw) || {
+      intro: "I found some gaps in your conversations — let me ask a few questions.",
+      questions: gaps.slice(0, 6).map((g, i) => ({
+        id: `q${i + 1}`, text: g.question, hint: `Observed in conversations: ${g.topic}`,
+        category: g.category || 'product', quickReplies: [],
+      })),
+    };
 
     res.json(parsed);
   } catch (err) {
@@ -1370,9 +1362,12 @@ RESPONSE FORMAT — valid JSON only, no markdown fences:
     const anthropicResponse = await callAnthropicAPI(requestBody, ANTHROPIC_API_KEY);
     const rawContent = anthropicResponse.content?.[0]?.text || '{}';
 
-    let parsed;
-    try { parsed = JSON.parse(rawContent.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim()); }
-    catch { parsed = { message: rawContent, isQuestion: rawContent.includes('?'), ruleUpdates: [], type: 'answer' }; }
+const parsed = parseAIResponse(rawContent) || {
+      message: rawContent,
+      isQuestion: rawContent.includes('?'),
+      ruleUpdates: [],
+      type: 'answer'
+    };
 
     const ruleUpdates = Array.isArray(parsed.ruleUpdates) ? parsed.ruleUpdates : [];
 
@@ -1586,6 +1581,19 @@ router.post('/consolidate-restore', authenticateToken, async (req, res) => {
 // ═════════════════════════════════════════════════════════════════════════════
 // Helpers
 // ═════════════════════════════════════════════════════════════════════════════
+
+function parseAIResponse(raw) {
+  if (!raw) return null;
+  const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+  // Strict parse first
+  try { return JSON.parse(cleaned); } catch {}
+  // Fallback: find the last { ... } block in the text
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}\s*$/);
+  if (jsonMatch) {
+    try { return JSON.parse(jsonMatch[0]); } catch {}
+  }
+  return null;
+}
 
 async function loadBrainFromDB() {
   try {
@@ -1985,10 +1993,12 @@ RESPONSE FORMAT — valid JSON only, no markdown fences:
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
     });
+
     const response = await callAnthropicAPI(requestBody, apiKey);
     const raw = response.content?.[0]?.text || '{}';
-    const parsed = JSON.parse(raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim());
-    if (!Array.isArray(parsed.rules)) return null;
+    const parsed = parseAIResponse(raw);
+    if (!parsed || !Array.isArray(parsed.rules)) return null;
+
     const cleaned = parsed.rules
       .map(r => (typeof r === 'string' ? r.trim() : r?.text?.trim()))
       .filter(Boolean);
@@ -2035,10 +2045,12 @@ What concrete details from ORIGINAL are missing in CONSOLIDATED?`;
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
     });
+    
     const response = await callAnthropicAPI(requestBody, apiKey);
     const raw = response.content?.[0]?.text || '{}';
-    const parsed = JSON.parse(raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim());
-    if (!Array.isArray(parsed.lost)) return [];
+    const parsed = parseAIResponse(raw);
+    if (!parsed || !Array.isArray(parsed.lost)) return [];
+
     return parsed.lost.map(item => item.rule).filter(Boolean);
   } catch (err) {
     console.error(`[AI Training] findDroppedInfo ${category}/${topic} error:`, err.message);
