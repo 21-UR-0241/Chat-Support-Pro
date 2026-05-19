@@ -2824,6 +2824,30 @@ setInterval(async () => {
 }, 60 * 1000);
 // ============ END AUTO-REPLY ============
 
+// ============ AI BRAIN BACKUP CLEANUP (runs daily) ============
+async function pruneOldBackups() {
+  try {
+    const result = await db.pool.query(`
+      DELETE FROM ai_training_brain_backups
+      WHERE backed_up_at < NOW() - INTERVAL '30 days'
+      RETURNING id
+    `);
+    if (result.rowCount > 0) {
+      console.log(`🧹 [Brain Backups] Pruned ${result.rowCount} backup(s) older than 30 days`);
+    }
+  } catch (err) {
+    // Table may not exist yet if consolidate / backupBrain hasn't run — that's fine
+    if (!err.message.includes('does not exist')) {
+      console.error('🧹 [Brain Backups] Prune error:', err.message);
+    }
+  }
+}
+
+// Run once 5 min after boot, then every 24h
+setTimeout(() => pruneOldBackups(), 5 * 60 * 1000);
+setInterval(() => pruneOldBackups(), 24 * 60 * 60 * 1000);
+// ============ END BRAIN BACKUP CLEANUP ============
+
     });
   } catch (error) {
     console.error('❌ FATAL: Failed to start server:', error.message);

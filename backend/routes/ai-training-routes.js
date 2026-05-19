@@ -721,26 +721,6 @@
 
 
 
-
-// ============================================================================
-// AI TRAINING ROUTES — patched
-//
-// Changes vs. previous version:
-//   1. callAnthropicAPI retries on HTTP 429/500/502/503/529 with exp backoff
-//      (previously only retried on timeouts — Anthropic 500s went straight
-//      through as "Training chat failed")
-//   2. Chat handler uses a BUDGETED brain summary (~20KB cap) instead of
-//      dumping the full 800+ rules into every request's system prompt
-//   3. Chat handler runs searchBrainRules() against the admin's message and
-//      surfaces the most relevant rules from across the entire brain, so the
-//      model still has accurate context for specific questions
-//   4. Chat history is byte-budgeted, not just count-capped — a single huge
-//      message (e.g. a previous AI response that dumped JSON) won't blow the
-//      request size on follow-ups like "keep going"
-//   5. System prompt has explicit rule-output discipline (no JSON in message,
-//      ruleUpdates only)
-// ============================================================================
-
 const express = require('express');
 const multer  = require('multer');
 const router  = express.Router();
@@ -777,6 +757,7 @@ router.put('/brain', authenticateToken, async (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
     const { brain } = req.body;
     if (!brain || typeof brain !== 'object') return res.status(400).json({ error: 'brain object required' });
+    await backupBrain('pre-manual-edit', req.user.email);
 
     await db.pool.query(`
       INSERT INTO ai_training_brain (id, brain_data, updated_at, updated_by)
@@ -842,7 +823,6 @@ router.post('/upload-doc', authenticateToken, upload.single('file'), async (req,
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/ai/training/extract-rules
-// Brain intentionally NOT passed — dedup happens at DB level
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/extract-rules', authenticateToken, async (req, res) => {
   try {
@@ -925,6 +905,10 @@ RESPONSE FORMAT — valid JSON only, no markdown:
             newRulesAdded++;
           }
         });
+
+        await backupBrain('pre-doc-extract', req.user.email);
+
+
         await db.pool.query(`
           INSERT INTO ai_training_brain (id, brain_data, updated_at, updated_by)
           VALUES (1, $1, NOW(), $2)
@@ -1135,8 +1119,9 @@ router.post('/proactive-questions', authenticateToken, async (req, res) => {
     const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
     if (!ANTHROPIC_API_KEY) return res.status(400).json({ error: 'No ANTHROPIC_API_KEY' });
 
-    const { gaps = [], rules = [], brain = {} } = req.body;
-    // Budgeted brain summary — full rule set would balloon this prompt
+    const { gaps = [], rules = [] } = req.body;
+
+    const brain = await loadBrainFromDB();
     const brainSummary = formatBrainForPromptBudgeted(brain, 8000);
     const gapLines = gaps.map((g, i) => `${i + 1}. [${g.category}] ${g.topic}: ${g.question}`).join('\n');
 
@@ -1205,15 +1190,7 @@ Generate the interview.`;
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/chat', authenticateToken, async (req, res) => {
   try {
-    const {
-      message,
-      images = [],
-      history = [],
-      brain: _brainFromFrontend,
-      currentBrain: _legacyBrain,
-      interviewContext = null,
-    } = req.body;
-    const frontendBrain = _brainFromFrontend || _legacyBrain || null;
+    const { message, images = [], history = [], interviewContext = null } = req.body;
 
     if (!message && images.length === 0) return res.status(400).json({ error: 'message or images required' });
 
@@ -1222,31 +1199,30 @@ router.post('/chat', authenticateToken, async (req, res) => {
       return res.json({ message: "No ANTHROPIC_API_KEY configured.", type: 'answer', isQuestion: false, ruleUpdates: [] });
     }
 
-    // Pull brain from DB as source of truth — frontend payload is optional fallback
-    let currentBrain = frontendBrain;
-    if (!currentBrain) {
-      try {
-        const r = await db.pool.query(
-          `SELECT brain_data FROM ai_training_brain ORDER BY updated_at DESC LIMIT 1`
-        );
-        currentBrain = r.rows[0]?.brain_data || {};
-      } catch {
-        currentBrain = {};
-      }
-    }
+    // SOURCE OF TRUTH: always pull brain from DB. Never trust frontend payload —
+    // a stale or empty brain from frontend used to short-circuit this fetch and
+    // make the AI claim "I don't have access to the rules".
+    const currentBrain = await loadBrainFromDB();
+    const brainCounts = countBrainRules(currentBrain);
+    const totalRules = Object.values(brainCounts).reduce((s, n) => s + n, 0);
 
-    // BUDGETED BRAIN SUMMARY — caps system prompt at ~20KB regardless of total rule count
-    const brainSummary = formatBrainForPromptBudgeted(currentBrain, 20000);
+    // Detect meta-queries that want a wide view ("what rules do you know",
+    // "list all", "show me everything", etc). For these, raise the per-category
+    // recency cap so the AI sees as much as the budget allows.
+    const userText = `${message || ''}`;
+    const isMetaQuery = /\b(all|every|everything|entire|full|list|show|know)\b.*\b(rules?|brain|memory|saved|have|stored)\b/i.test(userText)
+                     || /\b(rules?|brain|memory)\b.*\b(all|every|everything|list)\b/i.test(userText)
+                     || /^(what.*you.*know|what.*your.*brain|do you have rules)/i.test(userText.trim());
+
+    const recencyPerCategory = isMetaQuery ? 100 : 30;
+    const brainSummary = formatBrainForPromptBudgeted(currentBrain, 20000, recencyPerCategory);
 
     // RELEVANCE PASS — surface rules matching the admin's current question.
-    // Falls back to the last admin message for follow-ups like "keep going" or "yes".
     const lastUserHistory = [...history].reverse().find(h => h.role === 'user')?.content || '';
     const searchQuery = `${message || ''} ${lastUserHistory}`.slice(0, 1500);
-    const relevantRules = searchBrainRules(currentBrain, searchQuery, { perCategory: 8, totalCap: 30 });
+    const relevantRules = searchBrainRules(currentBrain, searchQuery, { perCategory: 10, totalCap: 40 });
     const relevantBlock = formatRelevantRules(relevantRules);
-    if (Object.keys(relevantRules).length) {
-      console.log(`[AI Training] Surfaced ${Object.values(relevantRules).flat().length} relevant rules for chat`);
-    }
+    const relevantHits = Object.values(relevantRules).reduce((s, arr) => s + arr.length, 0);
 
     const settings = currentBrain.suggestionSettings || {};
     const interviewBlock = interviewContext
@@ -1261,28 +1237,30 @@ router.post('/chat', authenticateToken, async (req, res) => {
 
     const systemPrompt = `You are the Brain AI — the intelligence that powers AI suggestions for a peptide e-commerce customer support operation (400+ Shopify stores, Canada + US). You are talking privately with the admin.
 
-IMPORTANT — YOUR MEMORY IS REAL AND PERSISTENT:
-- You have a live PostgreSQL database. Every rule shown in CURRENT BRAIN below was saved there by a previous session.
-- When you return ruleUpdates in your JSON response, the system AUTOMATICALLY saves them to the database immediately — no developer needed, no copy-pasting.
-- You are NOT a stateless chatbot. You DO persist information between sessions.
-- When admin uploads a document or teaches you something, it IS being permanently saved right now.
-- Never tell the admin that rules need to be manually added by a developer. They don't. It's automatic.
-- Never suggest the admin needs to "copy-paste" rules anywhere. The pipeline is fully automated.
-- If asked "did that save?", confirm yes — rules returned in ruleUpdates are written to the DB before your response even reaches the admin.
+IMPORTANT — YOU HAVE FULL ACCESS TO YOUR BRAIN. DO NOT CLAIM OTHERWISE:
+- The brain in this prompt is the complete, current state of your knowledge. It was loaded from the live database for this exact request.
+- Total rules currently in your brain: ${totalRules} (TONE ${brainCounts.tone}, AVOID ${brainCounts.avoid}, PREFER ${brainCounts.prefer}, PRODUCT ${brainCounts.product}, POLICY ${brainCounts.policy}, EXAMPLE ${brainCounts.example}).
+- NEVER say "I don't have access to the rules", "I can't see your rules", "the rules are in a database I can't query", or anything similar. You CAN see them — they are right below.
+- If the brain is empty (0 rules), say so plainly: "Your brain is empty — no rules saved yet." Do not phrase this as access denial.
+- If admin asks about a specific topic and no matching rule appears below, say: "I don't have a rule about X yet" — not "I can't access the rules."
+
+YOUR MEMORY IS REAL AND PERSISTENT:
+- Every rule you return in ruleUpdates gets AUTOMATICALLY saved to the PostgreSQL database before this response reaches the admin. No developer, no copy-pasting.
+- You are NOT stateless. Rules persist across sessions.
+- If admin asks "did that save?", confirm yes — rules in ruleUpdates are written immediately.
 
 YOUR TWO MODES:
 1. ANSWER freely — product questions, support strategy, tone, policies, anything. Talk like a smart colleague.
 2. LEARN actively — extract rules from what admin tells you, analyze screenshots, confirm what you've learned.
 
-BE PROACTIVE — THIS IS CRITICAL:
-- After any teaching message, always ask one specific follow-up to go deeper
+BE PROACTIVE:
+- After any teaching message, ask one specific follow-up to go deeper
 - After analyzing a screenshot, ask "What would the ideal reply have been here?"
-- If you notice the brain is missing critical info (dosing, refund policy, shipping times), bring it up yourself
-- Ask ONE question at a time. Never list multiple questions.
-- When something important is missing from the brain, say "I don't have a rule for X — how should agents handle it?"
+- If a critical area is empty (dosing, refund policy, shipping times), bring it up
+- ONE question at a time. Never list multiple questions.
 
 BUSINESS CONTEXT:
-- Peptides: BPC-157, TB-500, Semaglutide, Tirzepatide, CJC-1295, Ipamorelin, HGH Fragment, NAD+, GHK-Cu, Wolverine blend
+- Peptides: BPC-157, TB-500, Semaglutide, Tirzepatide, Retatrutide, CJC-1295, Ipamorelin, HGH Fragment, NAD+, GHK-Cu, Wolverine blend
 - Customers ask about: dosing, reconstitution with BAC water, refrigerated storage, shipping times, tracking, order status
 - English + French support (Quebec customers)
 - Common issues: shipping delays, missing orders, payment failures, peptide usage questions, COA requests
@@ -1293,30 +1271,30 @@ SUGGESTION QUALITY SETTINGS (what agents get):
 - Empathy level: ${settings.empathy || 'high'}
 ${interviewBlock}
 
-CURRENT BRAIN (recency summary — full rule set lives in DB):
-${brainSummary || '⚠️ Empty — no rules yet. Priority to fill.'}
+═══════════════════════════════════════════════════════════════
+YOUR BRAIN (loaded fresh from DB for this request):
+═══════════════════════════════════════════════════════════════
+${brainSummary || '⚠️ EMPTY BRAIN — zero rules saved. Tell admin plainly: "Your brain is empty — no rules saved yet. Let\'s fix that."'}
 
-${relevantBlock ? `${relevantBlock}\n\nIMPORTANT: The "RULES RELEVANT TO..." block above is the AUTHORITATIVE source for the admin's current question. Quote it accurately, follow its constraints, and don't contradict it. The recency summary is general context; the relevant rules are answer-the-question context.\n` : ''}
+${relevantBlock ? `═══════════════════════════════════════════════════════════════\n${relevantBlock}\n═══════════════════════════════════════════════════════════════\n\nThe "RULES RELEVANT" block above is the AUTHORITATIVE source for the admin's current question. Quote it accurately, follow its constraints, and don't contradict it.\n` : ''}
 
-RULE EXTRACTION — CRITICAL, DO THIS EVERY MESSAGE:
-- Read EVERY admin message for extractable facts, preferences, corrections, or instructions
-- If admin states ANYTHING about how agents should behave, what products are, or what policies exist → extract it as a rule
-- NEVER return empty ruleUpdates for a teaching message — if admin taught you something, it MUST appear in ruleUpdates
-- type="training" → extracted rules only | type="mixed" → rules + conversational answer | type="answer" → genuinely no new info (rare)
-- Tone/style instruction → "tone" | Forbidden phrases/actions → "avoid" | Must-do actions → "prefer"
-- Product facts, dosing, ingredients, storage → "product" | Refunds, shipping, timelines → "policy" | Gold replies → "example"
-- Short messages like "always include tracking link" or "never say sorry" are valid rules — extract them
-- Extract silently — don't ask permission, just confirm: "Got it, saved as a rule."
+RULE EXTRACTION — DO THIS EVERY MESSAGE:
+- Read EVERY admin message for extractable facts, preferences, corrections, instructions
+- If admin states ANYTHING about how agents should behave, what products are, what policies exist → extract as a rule
+- NEVER return empty ruleUpdates for a teaching message
+- type="training" → extracted rules only | "mixed" → rules + answer | "answer" → no new info (rare)
+- Tone/style → "tone" | Forbidden → "avoid" | Must-do → "prefer"
+- Product/dosing/storage → "product" | Refunds/shipping/timelines → "policy" | Gold replies → "example"
+- Short messages like "always include tracking link" are valid rules — extract them
+- Extract silently: "Got it, saved as a rule."
 
 ═══════════════════════════════════════════════════════════════
-RULE OUTPUT DISCIPLINE — STRICT, NO EXCEPTIONS:
+RULE OUTPUT DISCIPLINE — STRICT:
 ═══════════════════════════════════════════════════════════════
 - Rules go ONLY in the ruleUpdates array. NEVER show rule JSON, "MASTER RULE" blocks, or raw { "category": ..., "text": ... } syntax inside the message field.
-- The message field is conversational prose for the admin. It's what they read in chat. Keep it human and brief.
-- If you've extracted 6 rules, the message says something like: "Got it — saved 6 rules covering refunds and tracking. Want me to lock in the BAC-water defaults too?" — NOT a JSON dump of the rules themselves.
-- The admin sees ruleUpdates rendered as cards in the UI automatically. Listing them inside message is duplicate noise.
-- NEVER include consolidated/MASTER RULE summaries in the message. If you consolidate rules, put the new ones in ruleUpdates and say "Consolidated 12 conflicting rules into 4 master rules" in message — that's it.
-- Hard cap: message field stays under 1500 characters unless the admin explicitly asked for a long explanation.
+- The message field is conversational prose. The admin sees ruleUpdates rendered as cards in the UI automatically.
+- If you've extracted 6 rules, message says: "Got it — saved 6 rules covering refunds and tracking. Want me to lock in the BAC-water defaults too?"
+- Hard cap: message field stays under 1500 characters unless admin explicitly asks for a long explanation.
 ═══════════════════════════════════════════════════════════════
 
 SCREENSHOT ANALYSIS:
@@ -1327,7 +1305,7 @@ SCREENSHOT ANALYSIS:
 
 RESPONSE FORMAT — valid JSON only, no markdown fences:
 {
-  "message": "Your response. Warm, direct, specific. Use **bold** sparingly. Stays under 1500 chars unless admin asked for detail.",
+  "message": "Warm, direct, specific. **Bold** sparingly. Under 1500 chars unless admin asked for detail.",
   "type": "answer|training|mixed|question",
   "isQuestion": true/false,
   "ruleUpdates": [
@@ -1336,7 +1314,7 @@ RESPONSE FORMAT — valid JSON only, no markdown fences:
   "nextQuestion": "One follow-up question string, or null"
 }`;
 
-    // BYTE-BUDGETED HISTORY — skip messages that would blow the budget, newest-first
+    // BYTE-BUDGETED HISTORY
     const MAX_HISTORY_CHARS = 25000;
     let historyBudget = MAX_HISTORY_CHARS;
     let droppedCount = 0;
@@ -1351,7 +1329,7 @@ RESPONSE FORMAT — valid JSON only, no markdown fences:
       historyBudget -= content.length;
     }
     if (droppedCount > 0) {
-      console.log(`[AI Training] Dropped ${droppedCount} oversized history message(s) to stay within budget`);
+      console.log(`[AI Training] Dropped ${droppedCount} oversized history message(s)`);
     }
 
     // Collapse consecutive same-role messages
@@ -1380,7 +1358,7 @@ RESPONSE FORMAT — valid JSON only, no markdown fences:
     if (userContent.length === 0) userContent.push({ type: 'text', text: '(shared an image)' });
     chatMessages.push({ role: 'user', content: userContent });
 
-    console.log(`[AI Training] Sending ${chatMessages.length} messages, brain summary ${brainSummary.length}c, relevant ${relevantBlock.length}c`);
+    console.log(`[AI Training] chat: brain=${totalRules}r (${JSON.stringify(brainCounts)}) summary=${brainSummary.length}c relevant=${relevantHits}r/${relevantBlock.length}c meta=${isMetaQuery} msgs=${chatMessages.length}`);
 
     const requestBody = JSON.stringify({
       model: 'claude-sonnet-4-6',
@@ -1399,7 +1377,7 @@ RESPONSE FORMAT — valid JSON only, no markdown fences:
     const ruleUpdates = Array.isArray(parsed.ruleUpdates) ? parsed.ruleUpdates : [];
 
     // Auto-save chat-extracted rules to DB immediately
-    if (ruleUpdates.length > 0) {
+if (ruleUpdates.length > 0) {
       console.log(`[AI Training] Extracted ${ruleUpdates.length} rule(s) — auto-saving to DB`);
       try {
         const currentResult = await db.pool.query(
@@ -1411,13 +1389,24 @@ RESPONSE FORMAT — valid JSON only, no markdown fences:
           product: 'productKnowledge', policy: 'customPolicies', example: 'responseExamples',
         };
         const updatedBrain = { ...currentBrainDB };
+        let actuallyAdded = 0;
         ruleUpdates.forEach(rule => {
           const key = BRAIN_KEYS[rule.category];
           if (!key) return;
           if (!updatedBrain[key]) updatedBrain[key] = [];
           const exists = updatedBrain[key].some(r => (r.text || r) === rule.text);
-          if (!exists) updatedBrain[key].push({ text: rule.text, source: rule.source || 'admin-chat' });
+          if (!exists) {
+            updatedBrain[key].push({ text: rule.text, source: rule.source || 'admin-chat' });
+            actuallyAdded++;
+          }
         });
+
+        // Backup before writing — skip if nothing new actually added (all dupes),
+        // skip if just 1-2 trickle rules, OR if a backup ran in the last 10 min.
+        if (actuallyAdded >= 3) {
+          await backupBrain('pre-chat-save', req.user?.email || 'chat-auto', { minIntervalMinutes: 10 });
+        }
+
         await db.pool.query(`
           INSERT INTO ai_training_brain (id, brain_data, updated_at, updated_by)
           VALUES (1, $1, NOW(), $2)
@@ -1456,18 +1445,16 @@ router.get('/brain-search', authenticateToken, async (req, res) => {
     const q = req.query.q || '';
     if (!q.trim()) return res.status(400).json({ error: 'q query param required' });
 
-    const r = await db.pool.query(
-      `SELECT brain_data FROM ai_training_brain ORDER BY updated_at DESC LIMIT 1`
-    );
-    const brain = r.rows[0]?.brain_data || {};
-    const perCategory = Math.min(parseInt(req.query.perCategory) || 8, 25);
-    const totalCap    = Math.min(parseInt(req.query.totalCap)    || 30, 100);
+    const brain = await loadBrainFromDB();
+    const perCategory = Math.min(parseInt(req.query.perCategory) || 10, 25);
+    const totalCap    = Math.min(parseInt(req.query.totalCap)    || 40, 100);
 
     const tokens   = tokenizeQuery(q);
     const matched  = searchBrainRules(brain, q, { perCategory, totalCap });
     const totalHits = Object.values(matched).reduce((s, arr) => s + arr.length, 0);
+    const counts   = countBrainRules(brain);
 
-    res.json({ query: q, tokens, totalHits, perCategory, totalCap, matched });
+    res.json({ query: q, tokens, brainCounts: counts, totalHits, perCategory, totalCap, matched });
   } catch (err) {
     console.error('[AI Training] brain-search error:', err);
     res.status(500).json({ error: 'Search failed', message: err.message });
@@ -1475,11 +1462,190 @@ router.get('/brain-search', authenticateToken, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helpers
+// POST /api/ai/training/consolidate
+// Body: { categories?: ['product','policy',...], dryRun?: boolean, verify?: boolean }
+// Default: all categories, no dryRun, no verify (verify adds ~2x API cost).
+// Topic-clusters first, then consolidates within each cluster. Backs up brain.
 // ─────────────────────────────────────────────────────────────────────────────
+router.post('/consolidate', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+    const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+    if (!ANTHROPIC_API_KEY) return res.status(400).json({ error: 'No ANTHROPIC_API_KEY' });
 
-// Full brain dump — kept for any caller that wants the entire rule set.
-// NOTE: chat handler does NOT use this anymore; it uses the budgeted variant.
+    const { categories = null, dryRun = false, verify = false } = req.body;
+    const ALL_KEYS = {
+      tone: 'toneRules', avoid: 'avoidPatterns', prefer: 'preferPatterns',
+      product: 'productKnowledge', policy: 'customPolicies', example: 'responseExamples',
+    };
+    const target = Array.isArray(categories) && categories.length
+      ? categories.filter(c => ALL_KEYS[c])
+      : Object.keys(ALL_KEYS);
+
+    const brain = await loadBrainFromDB();
+    const newBrain = { ...brain };
+    const report = {};
+
+    for (const cat of target) {
+      const key = ALL_KEYS[cat];
+      const arr = (brain[key] || []).map(r => (typeof r === 'string' ? { text: r } : r));
+      if (arr.length < 2) {
+        report[cat] = { before: arr.length, after: arr.length, action: 'skipped (< 2 rules)' };
+        continue;
+      }
+      const result = await consolidateCategoryDeep(cat, arr, ANTHROPIC_API_KEY, { verify });
+      if (!result || !result.rules.length || result.rules.length >= arr.length) {
+        report[cat] = { before: arr.length, after: arr.length, action: 'no merge possible', clusters: result?.clusters };
+        continue;
+      }
+      newBrain[key] = result.rules.map(text => ({ text, source: 'consolidated' }));
+      report[cat] = {
+        before: arr.length,
+        after: result.rules.length,
+        saved: arr.length - result.rules.length,
+        clusters: result.clusters,
+        recoveredDetails: result.lostInfo || [],
+      };
+    }
+
+    if (dryRun) {
+      return res.json({ dryRun: true, report, proposedCounts: countBrainRules(newBrain) });
+    }
+
+    // Backup before replacing
+    try {
+      await db.pool.query(`
+        CREATE TABLE IF NOT EXISTS ai_training_brain_backups (
+          id SERIAL PRIMARY KEY,
+          brain_data JSONB NOT NULL,
+          backed_up_at TIMESTAMPTZ DEFAULT NOW(),
+          reason TEXT,
+          backed_up_by TEXT
+        )
+      `);
+      await db.pool.query(
+        `INSERT INTO ai_training_brain_backups (brain_data, reason, backed_up_by) VALUES ($1, $2, $3)`,
+        [JSON.stringify(brain), 'pre-consolidate', req.user.email]
+      );
+    } catch (bErr) {
+      console.error('[AI Training] consolidate backup failed:', bErr.message);
+    }
+
+    await db.pool.query(`
+      INSERT INTO ai_training_brain (id, brain_data, updated_at, updated_by)
+      VALUES (1, $1, NOW(), $2)
+      ON CONFLICT (id) DO UPDATE
+        SET brain_data = EXCLUDED.brain_data,
+            updated_at = EXCLUDED.updated_at,
+            updated_by = EXCLUDED.updated_by
+    `, [JSON.stringify(newBrain), `consolidate-${req.user.email}`]);
+
+    try { const { refreshBrainCache } = require('../brain-context'); refreshBrainCache(); } catch {}
+
+    console.log(`[AI Training] Consolidate by ${req.user.email}:`, JSON.stringify(report));
+    res.json({ ok: true, report, brainCounts: countBrainRules(newBrain) });
+
+  } catch (err) {
+    console.error('[AI Training] consolidate error:', err);
+    res.status(500).json({ error: 'Consolidation failed', message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/ai/training/consolidate-restore — undo the most recent consolidate
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/consolidate-restore', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+    const r = await db.pool.query(
+      `SELECT brain_data, backed_up_at FROM ai_training_brain_backups ORDER BY backed_up_at DESC LIMIT 1`
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'No backup found' });
+
+    await db.pool.query(`
+      INSERT INTO ai_training_brain (id, brain_data, updated_at, updated_by)
+      VALUES (1, $1, NOW(), $2)
+      ON CONFLICT (id) DO UPDATE
+        SET brain_data = EXCLUDED.brain_data,
+            updated_at = EXCLUDED.updated_at,
+            updated_by = EXCLUDED.updated_by
+    `, [JSON.stringify(r.rows[0].brain_data), `restore-${req.user.email}`]);
+
+    try { const { refreshBrainCache } = require('../brain-context'); refreshBrainCache(); } catch {}
+    res.json({
+      ok: true,
+      restoredFrom: r.rows[0].backed_up_at,
+      brainCounts: countBrainRules(r.rows[0].brain_data),
+    });
+  } catch (err) {
+    console.error('[AI Training] consolidate-restore error:', err);
+    res.status(500).json({ error: 'Restore failed', message: err.message });
+  }
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Helpers
+// ═════════════════════════════════════════════════════════════════════════════
+
+async function loadBrainFromDB() {
+  try {
+    const r = await db.pool.query(
+      `SELECT brain_data FROM ai_training_brain ORDER BY updated_at DESC LIMIT 1`
+    );
+    return r.rows[0]?.brain_data || {};
+  } catch (err) {
+    console.error('[AI Training] loadBrainFromDB error:', err.message);
+    return {};
+  }
+}
+
+async function backupBrain(reason, userEmail, { minIntervalMinutes = 0 } = {}) {
+  try {
+    await db.pool.query(`
+      CREATE TABLE IF NOT EXISTS ai_training_brain_backups (
+        id SERIAL PRIMARY KEY,
+        brain_data JSONB NOT NULL,
+        backed_up_at TIMESTAMPTZ DEFAULT NOW(),
+        reason TEXT,
+        backed_up_by TEXT
+      )
+    `);
+
+    if (minIntervalMinutes > 0) {
+      const recent = await db.pool.query(
+        `SELECT 1 FROM ai_training_brain_backups
+         WHERE backed_up_at > NOW() - INTERVAL '1 minute' * $1
+         LIMIT 1`,
+        [minIntervalMinutes]
+      );
+      if (recent.rows.length > 0) return;
+    }
+
+    const current = await db.pool.query(
+      `SELECT brain_data FROM ai_training_brain ORDER BY updated_at DESC LIMIT 1`
+    );
+    if (current.rows[0]?.brain_data) {
+      await db.pool.query(
+        `INSERT INTO ai_training_brain_backups (brain_data, reason, backed_up_by) VALUES ($1, $2, $3)`,
+        [JSON.stringify(current.rows[0].brain_data), reason, userEmail]
+      );
+    }
+  } catch (err) {
+    console.error('[AI Training] backupBrain error:', err.message);
+  }
+}
+
+function countBrainRules(brain) {
+  return {
+    tone:    (brain?.toneRules        || []).length,
+    avoid:   (brain?.avoidPatterns    || []).length,
+    prefer:  (brain?.preferPatterns   || []).length,
+    product: (brain?.productKnowledge || []).length,
+    policy:  (brain?.customPolicies   || []).length,
+    example: (brain?.responseExamples || []).length,
+  };
+}
+
 function formatBrainForPrompt(brain) {
   if (!brain) return '';
   const txt = r => typeof r === 'string' ? r : r.text;
@@ -1493,9 +1659,7 @@ function formatBrainForPrompt(brain) {
   return sections.join('\n\n');
 }
 
-// Budgeted brain summary — counts per category + most-recent N per category,
-// truncated to a max character budget. Used by chat + proactive-questions.
-function formatBrainForPromptBudgeted(brain, maxChars = 20000) {
+function formatBrainForPromptBudgeted(brain, maxChars = 20000, perCategory = 30) {
   if (!brain) return '';
   const txt = r => typeof r === 'string' ? r : r.text;
   const KEYS = [
@@ -1508,15 +1672,22 @@ function formatBrainForPromptBudgeted(brain, maxChars = 20000) {
   ];
   const counts = KEYS.map(([label, key]) =>
     `${label} ${(brain[key] || []).length}`).join(' · ');
-  const header = `BRAIN TOTALS: ${counts}\n(Full rules in DB. Showing most recent per category for context.)\n\n`;
+  const total = KEYS.reduce((s, [, k]) => s + (brain[k] || []).length, 0);
+  if (total === 0) return '';
+
+  const header = `TOTALS: ${counts}\n(Showing ${perCategory}+ most recent per category. Additional matching rules surface in the RELEVANT block via keyword search.)\n\n`;
   let budget = maxChars - header.length;
   const sections = [];
   for (const [label, key] of KEYS) {
     const arr = brain[key] || [];
     if (!arr.length) continue;
-    const recent = arr.slice(-15);
+    const recent = arr.slice(-perCategory);
     const section = `${label}:\n${recent.map(r => `  - ${txt(r)}`).join('\n')}`;
-    if (section.length > budget) break;
+    if (section.length > budget) {
+      const partial = `${label}:\n${recent.map(r => `  - ${txt(r)}`).join('\n').slice(0, Math.max(0, budget - label.length - 20))}\n  - [... truncated, ${arr.length} total]`;
+      sections.push(partial);
+      break;
+    }
     sections.push(section);
     budget -= section.length + 2;
   }
@@ -1524,8 +1695,7 @@ function formatBrainForPromptBudgeted(brain, maxChars = 20000) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// searchBrainRules — keyword relevance search over the in-memory brain.
-// Surfaces rules matching the admin's current message regardless of recency.
+// Keyword relevance search
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SEARCH_STOPWORDS = new Set([
@@ -1538,12 +1708,11 @@ const SEARCH_STOPWORDS = new Set([
   'he','him','his','she','her','it','its','they','them','their',
   'just','also','still','really','very','quite','pretty','always','never',
   'hi','hey','hello','thanks','please','okay','ok','yes','no','yeah','nope',
-  'rule','rules','tell','show','give','want','need','know','think','make',
+  'tell','show','give','want','need','think','make',
   'something','anything','everything','nothing','keep','going','more','some',
-  'say','says','said','one','two','three','first','last','our','brain',
+  'say','says','said','one','two','three','first','last',
 ]);
 
-// Short forms expand to full names so a search for "reta" hits rules about "retatrutide"
 const PEPTIDE_ALIASES = {
   reta: 'retatrutide', tirz: 'tirzepatide', sema: 'semaglutide',
   bpc: 'bpc-157', tb: 'tb-500', cjc: 'cjc-1295', ipa: 'ipamorelin',
@@ -1627,16 +1796,262 @@ function formatRelevantRules(results) {
   const sections = entries.map(([cat, rules]) =>
     `${labels[cat]}:\n${rules.map(r => `  - ${txt(r)}`).join('\n')}`
   );
-  return `RULES RELEVANT TO ADMIN'S CURRENT MESSAGE (${total} matched via keyword search across the full brain):\n${sections.join('\n\n')}`;
+  return `RULES RELEVANT TO ADMIN'S CURRENT MESSAGE (${total} matched via keyword search across full brain):\n${sections.join('\n\n')}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// callAnthropicAPI — retries on HTTP 429/500/502/503/529 and on transient
-// network errors. Exponential backoff (1.5s → 3s → 6s).
+// Deep consolidation — topic clustering + within-cluster merge + optional verify
+// ─────────────────────────────────────────────────────────────────────────────
+
+const CONSOLIDATE_HINTS = {
+  tone:    'how agents communicate — voice, register, style',
+  avoid:   'what agents must NEVER say or do',
+  prefer:  'what agents must ALWAYS say or do',
+  product: 'peptide product facts — dosing, storage, reconstitution, BAC water ratios, vial sizes, concentrations, ingredients, cycle lengths, stacks',
+  policy:  'business policies — refunds, shipping, payment, returns, timelines, guarantees',
+  example: 'gold-standard reply examples',
+};
+
+const TOPIC_VOCAB = {
+  peptide: [
+    'bpc-157','bpc157','bpc 157',
+    'tb-500','tb500','tb 500',
+    'semaglutide','sema ',
+    'tirzepatide','tirz','tirze',
+    'retatrutide','reta ',
+    'cjc-1295','cjc1295','cjc ',
+    'ipamorelin','ipa ',
+    'hgh fragment','aod-9604','aod9604','aod ',
+    'hgh','growth hormone',
+    'nad+','nad ',
+    'ghk-cu','ghk ','copper peptide',
+    'melanotan','mt-2','mt2','pt-141','pt141','bremelanotide',
+    'tesamorelin','tesa ',
+    'mots-c','motsc',
+    'epitalon','pinealon','dsip','selank','semax',
+    'kisspeptin','gonadorelin','triptorelin',
+    'wolverine','klow','glow stack',
+  ],
+  ops: [
+    'reconstitut','bac water','bacteriostatic',
+    'dose','dosing','mcg','iu',
+    'injection','subcutaneous','intramuscular','inject',
+    'storage','refrigerat','fridge','freezer','room temperature',
+    'cycle','stack','protocol',
+    'coa','certificate of analysis','purity',
+    'vial','syringe','needle','insulin pin',
+  ],
+  policy: [
+    'refund','return','cancel',
+    'shipping','tracking','delivery','delivered','transit',
+    'customs','duty','border','hold',
+    'payment','card decline','chargeback',
+    'stripe','helcim','interac','crypto','zelle',
+    'lost','missing','late','delay',
+    'discount','coupon','promo','first time customer',
+    'guarantee','warranty','satisfaction',
+    'french','francais','quebec',
+  ],
+  meta: [
+    'apology','sorry','compensation','escalate',
+    'greeting','sign-off','signature','closing',
+  ],
+};
+
+function primaryTopic(text) {
+  const lower = (text || '').toLowerCase();
+  for (const bucket of ['peptide','ops','policy','meta']) {
+    for (const term of TOPIC_VOCAB[bucket]) {
+      if (lower.includes(term)) return `${bucket}:${term.trim()}`;
+    }
+  }
+  return 'general';
+}
+
+function clusterRulesByTopic(rules) {
+  const txt = r => (typeof r === 'string' ? r : r.text);
+  const buckets = new Map();
+  for (const r of rules) {
+    const key = primaryTopic(txt(r));
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(r);
+  }
+  return [...buckets.entries()]
+    .map(([topic, members]) => ({ topic, members }))
+    .sort((a, b) => b.members.length - a.members.length);
+}
+
+function areSimilar(a, b) {
+  const sig = s => new Set(s.toLowerCase().split(/[^a-z0-9-]+/).filter(w => w.length >= 4));
+  const A = sig(a), B = sig(b);
+  if (!A.size || !B.size) return false;
+  let shared = 0;
+  for (const w of A) if (B.has(w)) shared++;
+  return shared / Math.min(A.size, B.size) >= 0.5;
+}
+
+async function consolidateCategoryDeep(category, rules, apiKey, { verify = false } = {}) {
+  const txt = r => (typeof r === 'string' ? r : r.text);
+  const clusters = clusterRulesByTopic(rules);
+  console.log(`[AI Training] ${category}: ${rules.length} rules → ${clusters.length} topic clusters`);
+
+  const finalRules = [];
+  const lostInfo = [];
+
+  for (const { topic, members } of clusters) {
+    if (members.length === 1) {
+      finalRules.push(txt(members[0]));
+      continue;
+    }
+    if (members.length === 2) {
+      if (areSimilar(txt(members[0]), txt(members[1]))) {
+        const merged = await consolidateOneCluster(category, topic, members.map(txt), apiKey);
+        finalRules.push(...(merged && merged.length < 2 ? merged : members.map(txt)));
+      } else {
+        finalRules.push(...members.map(txt));
+      }
+      continue;
+    }
+
+    let working = members.map(txt);
+    const CLUSTER_CHUNK = 30;
+
+    if (working.length <= CLUSTER_CHUNK) {
+      const out = await consolidateOneCluster(category, topic, working, apiKey);
+      if (out && out.length && out.length < working.length) working = out;
+    } else {
+      const consolidated = [];
+      for (let i = 0; i < working.length; i += CLUSTER_CHUNK) {
+        const sub = working.slice(i, i + CLUSTER_CHUNK);
+        const out = await consolidateOneCluster(category, topic, sub, apiKey);
+        consolidated.push(...(out && out.length < sub.length ? out : sub));
+        await new Promise(r => setTimeout(r, 350));
+      }
+      if (consolidated.length > CLUSTER_CHUNK) {
+        const cap = Math.floor(CLUSTER_CHUNK * 1.5);
+        const merged = await consolidateOneCluster(category, topic, consolidated.slice(0, cap), apiKey);
+        working = merged && merged.length ? merged.concat(consolidated.slice(cap)) : consolidated;
+      } else {
+        working = consolidated;
+      }
+    }
+
+    if (verify && members.length >= 3) {
+      const dropped = await findDroppedInfo(category, topic, members.map(txt), working, apiKey);
+      if (dropped && dropped.length) {
+        console.log(`[AI Training] ${category}/${topic}: ${dropped.length} dropped detail(s) re-added`);
+        working.push(...dropped);
+        lostInfo.push({ topic, count: dropped.length });
+      }
+    }
+
+    finalRules.push(...working);
+  }
+
+  return { rules: finalRules, clusters: clusters.length, lostInfo };
+}
+
+async function consolidateOneCluster(category, topic, rules, apiKey) {
+  const systemPrompt = `You are consolidating customer-support training rules for a peptide e-commerce operation (400+ Shopify stores, Canada + US).
+
+Category: ${category} — ${CONSOLIDATE_HINTS[category] || ''}
+Cluster topic: ${topic}
+
+All rules below are already pre-grouped by topic — they relate to the same peptide, the same policy, or the same operation. Many are duplicates, near-duplicates, or fragments of the same idea worded differently. Produce a tight consolidated set.
+
+HARD REQUIREMENTS:
+1. PRESERVE EVERY NUMERIC DETAIL — dosages (mcg, mg, iu), ratios (e.g. 2ml BAC water per 5mg vial), prices, vial sizes, day counts, temperatures, percentages, cycle lengths. If three input rules each contain a different dose for the same use case, the consolidated rule must list all three with their use case.
+2. PRESERVE EVERY NAMED ENTITY — peptide names, brand names, processor names (Stripe/Helcim/Interac), currency names, product SKUs.
+3. MERGE duplicates and near-duplicates into ONE self-contained rule containing the union of their information.
+4. CONFLICTS: if two rules give incompatible facts (e.g. different BAC water ratios for the same peptide), KEEP BOTH as separate output rules and prefix the secondary with "ALT: " so admin can review. Never silently pick one.
+5. DO NOT invent or extrapolate. If a fact wasn't in any input rule, it doesn't go in any output rule.
+6. Output count MUST be strictly lower than input count. If genuinely nothing can be merged, return all inputs unchanged.
+7. Each output rule must be plain text, agent-readable, self-contained. No numbering, no category labels, no "MASTER RULE:" prefixes.
+8. Each output rule under 600 chars. If a merge would exceed that, split into two related rules instead.
+
+RESPONSE FORMAT — valid JSON only, no markdown fences:
+{
+  "rules": ["rule 1", "rule 2"],
+  "merged_from": <int — how many input rules were absorbed>,
+  "conflicts_kept": <int — how many ALT-prefixed conflict rules>
+}`;
+
+  const userPrompt = `Consolidate these ${rules.length} ${category} rules (topic: ${topic}):\n\n${rules.map((r, i) => `${i + 1}. ${r}`).join('\n')}`;
+
+  try {
+    const requestBody = JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 8000,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
+    });
+    const response = await callAnthropicAPI(requestBody, apiKey);
+    const raw = response.content?.[0]?.text || '{}';
+    const parsed = JSON.parse(raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim());
+    if (!Array.isArray(parsed.rules)) return null;
+    const cleaned = parsed.rules
+      .map(r => (typeof r === 'string' ? r.trim() : r?.text?.trim()))
+      .filter(Boolean);
+    console.log(`[AI Training] cluster ${category}/${topic}: ${rules.length} → ${cleaned.length} (merged ${parsed.merged_from ?? '?'}, alt ${parsed.conflicts_kept ?? 0})`);
+    return cleaned;
+  } catch (err) {
+    console.error(`[AI Training] cluster ${category}/${topic} error:`, err.message);
+    return null;
+  }
+}
+
+async function findDroppedInfo(category, topic, originals, consolidated, apiKey) {
+  const systemPrompt = `You audit rule consolidation for information loss.
+
+Below are ORIGINAL rules (before consolidation) and CONSOLIDATED rules (after). Find every concrete detail present in originals but missing from consolidated.
+
+Concrete detail = specific number, ratio, peptide name, brand name, price, vial size, temperature, day count, dose, route of administration, currency, or named exception.
+
+Tone preferences, generic phrasing differences, and stylistic variation DO NOT count as lost information. Only flag concrete facts that disappeared.
+
+For each lost detail, write ONE recovery rule capturing it. If nothing material is lost, return an empty array.
+
+RESPONSE FORMAT — valid JSON only, no markdown fences:
+{
+  "lost": [
+    { "detail": "what specifically was missing", "rule": "self-contained rule restoring this fact" }
+  ]
+}`;
+
+  const userPrompt = `Category: ${category} | Topic: ${topic}
+
+ORIGINAL (${originals.length}):
+${originals.map((r, i) => `${i + 1}. ${r}`).join('\n')}
+
+CONSOLIDATED (${consolidated.length}):
+${consolidated.map((r, i) => `${i + 1}. ${r}`).join('\n')}
+
+What concrete details from ORIGINAL are missing in CONSOLIDATED?`;
+
+  try {
+    const requestBody = JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 4000,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
+    });
+    const response = await callAnthropicAPI(requestBody, apiKey);
+    const raw = response.content?.[0]?.text || '{}';
+    const parsed = JSON.parse(raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim());
+    if (!Array.isArray(parsed.lost)) return [];
+    return parsed.lost.map(item => item.rule).filter(Boolean);
+  } catch (err) {
+    console.error(`[AI Training] findDroppedInfo ${category}/${topic} error:`, err.message);
+    return [];
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// callAnthropicAPI — retries on 429/500/502/503/529 and transient network errors
 // ─────────────────────────────────────────────────────────────────────────────
 async function callAnthropicAPI(requestBody, apiKey) {
   const RETRYABLE_STATUS = [429, 500, 502, 503, 529];
-  const MAX_ATTEMPTS = 4; // initial + 3 retries
+  const MAX_ATTEMPTS = 4;
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     try {
