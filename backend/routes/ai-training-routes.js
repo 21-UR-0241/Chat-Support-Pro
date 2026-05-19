@@ -1295,9 +1295,24 @@ SCREENSHOT ANALYSIS:
 - Extract specific learnable patterns as rules
 - Always ask what the ideal response should have been
 
-RESPONSE FORMAT — valid JSON only, no markdown fences:
+═══════════════════════════════════════════════════════════════
+OUTPUT FORMAT — CRITICAL:
+═══════════════════════════════════════════════════════════════
+Your ENTIRE response is ONE JSON object. The admin sees ONLY the "message" field — everything else is invisible to them. There is no preamble, no postamble, no prose before or after the JSON. The first character of your response is "{" and the last character is "}".
+
+Wrong (what NOT to do):
+  Here's everything I know about BPC-157:
+  Reconstitution: 1mL BAC water...
+  {"message": "Here's everything about BPC-157", ...}
+
+Right:
+  {"message": "Here's everything I know about BPC-157:\\n\\nReconstitution: 1mL BAC water...", ...}
+
+The "message" field holds the FULL response shown to admin. If admin asks for a detailed dump (BPC-157 protocol, list all rules, etc.), the full detail goes INSIDE "message" — use \\n for line breaks. Length is whatever the admin needs: short for casual chat, long for info dumps. The 1500-char cap from rule output discipline does NOT apply to genuine info requests where admin asked for detail.
+
+JSON SHAPE — no markdown fences, no code blocks, just the object:
 {
-  "message": "Warm, direct, specific. **Bold** sparingly. Under 1500 chars unless admin asked for detail.",
+  "message": "The complete response admin sees. Can be one sentence or many paragraphs. Use \\n for line breaks within the string.",
   "type": "answer|training|mixed|question",
   "isQuestion": true/false,
   "ruleUpdates": [
@@ -2045,7 +2060,7 @@ What concrete details from ORIGINAL are missing in CONSOLIDATED?`;
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
     });
-    
+
     const response = await callAnthropicAPI(requestBody, apiKey);
     const raw = response.content?.[0]?.text || '{}';
     const parsed = parseAIResponse(raw);
