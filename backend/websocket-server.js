@@ -492,12 +492,13 @@ async function handleHeartbeat(ws, connectionId, message) {
 
 function sendToConversation(conversationId, message) {
   const data = JSON.stringify(message);
+  const target = String(conversationId);
   let sent = 0;
 
   console.log(`📤 Sending to conversation ${conversationId}:`, message.type);
 
   for (const conn of connections.values()) {
-    if (conn.conversationId === conversationId && conn.ws.readyState === WebSocket.OPEN) {
+    if (String(conn.conversationId) === target && conn.ws.readyState === WebSocket.OPEN) {
       try {
         conn.ws.send(data);
         sent++;
@@ -508,8 +509,6 @@ function sendToConversation(conversationId, message) {
   }
 
   console.log(`✅ Message sent to ${sent} connection(s) in conversation ${conversationId}`);
-
-  // Publish to Redis for multi-server setups
   redisManager.publishMessage(`conversation:${conversationId}`, message);
 }
 
