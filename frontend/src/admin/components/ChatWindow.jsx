@@ -2117,7 +2117,7 @@
 // export default ChatWindow;
 
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import heic2any from 'heic2any';
 import api from "../services/api";
@@ -2415,7 +2415,6 @@ function BlacklistModal({ conversation, storeName, onClose, onConfirm }) {
   const customerEmail = conversation?.customerEmail || '';
   const customerName = conversation?.customerName || 'Customer';
 
-  // 'store' = current store only | 'all' = all stores
   const [scope, setScope] = useState('store');
   const [reason, setReason] = useState('');
   const [confirming, setConfirming] = useState(false);
@@ -2521,7 +2520,6 @@ function BlacklistModal({ conversation, storeName, onClose, onConfirm }) {
           </div>
         ) : (
           <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
-
             <div style={{
               background: '#fff5f5', border: '1px solid #fed7d7',
               borderRadius: '10px', padding: '12px 14px',
@@ -2788,20 +2786,18 @@ function ArchiveModal({ conversation, storeName, onClose, onConfirm }) {
   );
 }
 
-// ============ HELPER: parse fileData safely ============
+// ============ HELPERS ============
 const parseFileData = (raw) => {
   if (!raw) return null;
   if (typeof raw === 'object') return raw;
   try { return JSON.parse(raw); } catch { return null; }
 };
 
-// ============ HELPER: normalize messages from server ============
 const normalizeMessage = (msg) => ({
   ...msg,
   fileData: parseFileData(msg.fileData || msg.file_data),
 });
 
-// ============ SHARED INPUT STYLE ============
 const INPUT_STYLE = {
   fontSize:     '14px',
   lineHeight:   '1.5',
@@ -2811,7 +2807,6 @@ const INPUT_STYLE = {
   wordBreak:    'break-word',
   overflowWrap: 'break-word',
 };
-
 
 function ActionsDropdown({
   conversation, onSendEmail, onMarkAsUnread,
@@ -2934,77 +2929,59 @@ function ChatWindow({
   onArchive,
   onBlacklist,
 }) {
-  const [messages, setMessages] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [messageText, setMessageText] = useState('');
-  const [sending, setSending] = useState(false);
-  const [typingUsers, setTypingUsers] = useState(new Set());
-  const [showCustomerInfo, setShowCustomerInfo] = useState(false);
-  const [wsConnected, setWsConnected] = useState(false);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+  const [messages,          setMessages]          = useState([]);
+  const [loading,           setLoading]           = useState(true);
+  // FIX: boolean state instead of full string — only re-renders on empty↔non-empty transition
+  const [hasText,           setHasText]           = useState(false);
+  const hasTextRef                                = useRef(false);
+  const [sending,           setSending]           = useState(false);
+  const [typingUsers,       setTypingUsers]       = useState(new Set());
+  const [showCustomerInfo,  setShowCustomerInfo]  = useState(false);
+  const [wsConnected,       setWsConnected]       = useState(false);
+  const [showDeleteModal,   setShowDeleteModal]   = useState(false);
+  const [deleting,          setDeleting]          = useState(false);
   const [showAISuggestions, setShowAISuggestions] = useState(true);
 
-  // Mark as unread toast
-  const [unreadToast, setUnreadToast] = useState(false);
-  const unreadToastTimerRef = useRef(null);
+  const [unreadToast,       setUnreadToast]       = useState(false);
+  const unreadToastTimerRef                       = useRef(null);
 
-  // Message delete state
-  const [messageToDelete, setMessageToDelete] = useState(null);
-  const [deletingMessage, setDeletingMessage] = useState(false);
+  const [messageToDelete,   setMessageToDelete]   = useState(null);
+  const [deletingMessage,   setDeletingMessage]   = useState(false);
 
-  // File upload states
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [filePreview, setFilePreview] = useState(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
+  const [selectedFile,      setSelectedFile]      = useState(null);
+  const [filePreview,       setFilePreview]       = useState(null);
+  const [uploading,         setUploading]         = useState(false);
+  const [uploadProgress,    setUploadProgress]    = useState(0);
 
-  // Emoji picker state
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showEmojiPicker,   setShowEmojiPicker]   = useState(false);
 
-  // Template / Quick Reply states
-  const [templates, setTemplates] = useState([]);
-  const [templateLoading, setTemplateLoading] = useState(false);
-  const [showQuickReplies, setShowQuickReplies] = useState(false);
+  const [templates,         setTemplates]         = useState([]);
+  const [templateLoading,   setTemplateLoading]   = useState(false);
+  const [showQuickReplies,  setShowQuickReplies]  = useState(false);
 
-  // Send email state
-  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [showEmailModal,    setShowEmailModal]    = useState(false);
+  const [showBlacklistModal,setShowBlacklistModal]= useState(false);
+  const [showArchiveModal,  setShowArchiveModal]  = useState(false);
 
-  // Blacklist + Archive state
-  const [showBlacklistModal, setShowBlacklistModal] = useState(false);
-  const [showArchiveModal, setShowArchiveModal]     = useState(false);
-
-  // Legal threat state
-  const [legalAlert, setLegalAlert] = useState(null);
+  const [legalAlert,        setLegalAlert]        = useState(null);
   const legalDismissTimerRef = useRef(null);
 
-  // ─────────────────────────────────────────────────────────────
-  // AUTO-REPLY NOTE:
-  // The frontend setTimeout-based auto-reply has been removed.
-  // Auto-replies are now sent exclusively by the backend cron in
-  // server.js (see "AUTO-REPLY 3-minute no-response rule" block),
-  // rate-limited in database.js to once per 8 hours per conversation.
-  // This prevents duplicate sends and keeps per-agent response-time
-  // stats accurate (no fake instant "replies" attributed to the
-  // viewing agent).
-  // ─────────────────────────────────────────────────────────────
-
-  const messagesEndRef = useRef(null);
-  const editableRef = useRef(null);
-  const fileInputRef = useRef(null);
-  const typingTimeoutRef = useRef(null);
-  const wsRef = useRef(null);
-  const displayedMessageIds = useRef(new Set());
-  const reconnectTimeoutRef = useRef(null);
-  const reconnectAttempts = useRef(0);
+  const messagesEndRef       = useRef(null);
+  const editableRef          = useRef(null);
+  const fileInputRef         = useRef(null);
+  const typingTimeoutRef     = useRef(null);
+  const wsRef                = useRef(null);
+  const displayedMessageIds  = useRef(new Set());
+  const reconnectTimeoutRef  = useRef(null);
+  const reconnectAttempts    = useRef(0);
   const maxReconnectAttempts = 5;
-  const hasAuthenticated = useRef(false);
-  const hasJoined = useRef(false);
+  const hasAuthenticated     = useRef(false);
+  const hasJoined            = useRef(false);
   const activeNotificationsRef = useRef(new Map());
-  const pollIntervalRef = useRef(null);
+  const pollIntervalRef      = useRef(null);
 
-  const conversationRef = useRef(conversation);
-  const employeeNameRef = useRef(employeeName);
+  const conversationRef    = useRef(conversation);
+  const employeeNameRef    = useRef(employeeName);
   const handleWsMessageRef = useRef(null);
 
   useEffect(() => { loadTemplates(); }, []);
@@ -3014,7 +2991,7 @@ function ChatWindow({
   useEffect(() => {
     return () => {
       if (legalDismissTimerRef.current) clearTimeout(legalDismissTimerRef.current);
-      if (unreadToastTimerRef.current) clearTimeout(unreadToastTimerRef.current);
+      if (unreadToastTimerRef.current)  clearTimeout(unreadToastTimerRef.current);
     };
   }, []);
 
@@ -3041,22 +3018,28 @@ function ChatWindow({
 
   const clearInput = () => {
     if (editableRef.current) editableRef.current.innerHTML = '';
-    setMessageText('');
+    hasTextRef.current = false;
+    setHasText(false);
   };
 
-  const setInputContent = (text) => {
+  // FIX: useCallback so handleSelectSuggestion can depend on it without
+  // creating a new reference on every render
+  const setInputContent = useCallback((text) => {
     if (editableRef.current) {
       editableRef.current.innerHTML = parseMarkdown(text);
       const range = document.createRange();
-      const sel = window.getSelection();
+      const sel   = window.getSelection();
       range.selectNodeContents(editableRef.current);
       range.collapse(false);
       sel.removeAllRanges();
       sel.addRange(range);
       editableRef.current.focus();
     }
-    setMessageText(text);
-  };
+    // FIX: was setMessageText(text) — now uses the ref+boolean pattern
+    const nowHasText = text.length > 0;
+    hasTextRef.current = nowHasText;
+    setHasText(nowHasText);
+  }, []);
 
   // ============ TEMPLATE / SUGGESTION HANDLERS ============
   const loadTemplates = async () => {
@@ -3075,7 +3058,7 @@ function ChatWindow({
       subject,
       body,
       conversationId: conversation?.id,
-      customerName: conversation?.customerName,
+      customerName:   conversation?.customerName,
     });
   };
 
@@ -3104,14 +3087,22 @@ function ChatWindow({
     setTemplates(prev => prev.filter(t => t.id !== templateId));
   };
 
-  const handleSelectSuggestion = (suggestion) => { setInputContent(suggestion); };
+  // FIX: stable reference — AISuggestions no longer re-renders on every keystroke
+  const handleSelectSuggestion = useCallback((suggestion) => {
+    setInputContent(suggestion);
+  }, [setInputContent]);
 
   // ============ EMOJI HANDLER ============
+  // FIX: was setMessageText(innerText) — now uses ref+boolean
   const handleEmojiSelect = (emoji) => {
     if (editableRef.current) {
       editableRef.current.focus();
       document.execCommand('insertText', false, emoji);
-      setMessageText(editableRef.current.innerText);
+      const nowHasText = (editableRef.current.innerText || '').trim().length > 0;
+      if (nowHasText !== hasTextRef.current) {
+        hasTextRef.current = nowHasText;
+        setHasText(nowHasText);
+      }
     }
   };
 
@@ -3215,7 +3206,7 @@ function ChatWindow({
           return;
         }
       }
-      const ext = file.type.split('/')[1] || 'png';
+      const ext      = file.type.split('/')[1] || 'png';
       const namedFile = new File([file], `screenshot-${Date.now()}.${ext}`, { type: file.type });
       setSelectedFile(namedFile);
       const reader = new FileReader();
@@ -3233,9 +3224,9 @@ function ChatWindow({
 
   const formatFileSize = (bytes) => {
     if (bytes === 0) return '0 Bytes';
-    const k = 1024;
+    const k     = 1024;
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    const i     = Math.floor(Math.log(bytes) / Math.log(k));
     return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
   };
 
@@ -3291,8 +3282,8 @@ function ChatWindow({
       ws.onclose = (event) => {
         setWsConnected(false);
         hasAuthenticated.current = false;
-        hasJoined.current = false;
-        wsRef.current = null;
+        hasJoined.current        = false;
+        wsRef.current            = null;
         if (event.code !== 1000 && reconnectAttempts.current < maxReconnectAttempts && conversationRef.current?.id) {
           reconnectAttempts.current++;
           const delay = Math.min(2000 * reconnectAttempts.current, 10000);
@@ -3308,11 +3299,12 @@ function ChatWindow({
   const disconnectWebSocket = () => {
     if (reconnectTimeoutRef.current) { clearTimeout(reconnectTimeoutRef.current); reconnectTimeoutRef.current = null; }
     if (wsRef.current) {
-      const ws = wsRef.current;
+      const ws      = wsRef.current;
       wsRef.current = null;
       hasAuthenticated.current = false;
-      hasJoined.current = false;
-      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close(1000, 'Component unmounting');
+      hasJoined.current        = false;
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)
+        ws.close(1000, 'Component unmounting');
     }
     setWsConnected(false);
   };
@@ -3330,7 +3322,7 @@ function ChatWindow({
   };
 
   const handleWebSocketMessage = (data) => {
-    const currentConv = conversationRef.current;
+    const currentConv         = conversationRef.current;
     const currentEmployeeName = employeeNameRef.current;
 
     switch (data.type) {
@@ -3340,10 +3332,10 @@ function ChatWindow({
         hasAuthenticated.current = true;
         if (currentConv?.id && wsRef.current?.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify({
-            type: 'join_conversation',
+            type:           'join_conversation',
             conversationId: parseInt(currentConv.id),
-            role: 'agent',
-            employeeName: currentEmployeeName || 'Agent'
+            role:           'agent',
+            employeeName:   currentEmployeeName || 'Agent',
           }));
         }
         break;
@@ -3399,10 +3391,10 @@ function ChatWindow({
             const emoji = alert.severity === 'critical' ? '🚨' : alert.severity === 'high' ? '⚠️' : '🔔';
             try {
               const n = new Notification(`${emoji} Legal Threat — Conv #${alert.conversationId}`, {
-                body: `${alert.severity?.toUpperCase()}: "${alert.matchedTerm}" from ${alert.senderName}`,
-                icon: '/favicon.ico',
+                body:               `${alert.severity?.toUpperCase()}: "${alert.matchedTerm}" from ${alert.senderName}`,
+                icon:               '/favicon.ico',
                 requireInteraction: alert.severity === 'critical',
-                tag: `legal-${alert.conversationId}`,
+                tag:                `legal-${alert.conversationId}`,
               });
               n.onclick = () => { window.focus(); n.close(); };
               if (alert.severity !== 'critical') setTimeout(() => n.close(), 8000);
@@ -3412,14 +3404,14 @@ function ChatWindow({
         break;
       }
 
-      case 'typing': handleTypingIndicator(data); break;
-      case 'customer_left': setTypingUsers(new Set()); break;
+      case 'typing':        handleTypingIndicator(data); break;
+      case 'customer_left': setTypingUsers(new Set());   break;
 
       case 'error':
         console.error('❌ [WS] Server error:', data.message);
         if (data.message?.includes('token') || data.message?.includes('auth')) {
           hasAuthenticated.current = false;
-          hasJoined.current = false;
+          hasJoined.current        = false;
           setWsConnected(false);
         }
         break;
@@ -3430,10 +3422,9 @@ function ChatWindow({
 
   handleWsMessageRef.current = handleWebSocketMessage;
 
-const handleIncomingMessage = (message, currentConv, currentEmployeeName) => {
-    const msgId = message.id;
+  const handleIncomingMessage = (message, currentConv, currentEmployeeName) => {
+    const msgId  = message.id;
     const convId = message.conversationId || message.conversation_id;
-    // Notifications for other conversations are owned by ConversationList — don't double-notify.
     if (!convId || String(convId) !== String(currentConv?.id)) return;
     if (msgId && displayedMessageIds.current.has(String(msgId))) return;
     if (message.senderType === 'agent' && currentEmployeeName && message.senderName === currentEmployeeName) {
@@ -3446,29 +3437,26 @@ const handleIncomingMessage = (message, currentConv, currentEmployeeName) => {
       if (prev.some(m => String(m.id) === String(msgId))) return prev;
       return [...prev, { ...normalized, sending: false, _optimistic: false }];
     });
-
-    if (message.senderType === 'customer') {
-      showNotification(message);
-    }
+    if (message.senderType === 'customer') showNotification(message);
   };
-
 
   const showNotification = (message) => {
     if (!message || message.senderType === 'agent') return;
     playNotificationSound();
     if (Notification.permission === 'granted') createNotification(message);
-    else if (Notification.permission !== 'denied') Notification.requestPermission().then(p => { if (p === 'granted') createNotification(message); });
+    else if (Notification.permission !== 'denied')
+      Notification.requestPermission().then(p => { if (p === 'granted') createNotification(message); });
   };
 
   const createNotification = (message) => {
     try {
       const senderName = message.senderName || message.customerName || 'Customer';
-      const content = message.content || (message.fileData ? '📎 Sent a file' : 'New message');
+      const content    = message.content || (message.fileData ? '📎 Sent a file' : 'New message');
       const notification = new Notification(`New message from ${senderName}`, {
-        body: content.substring(0, 100),
-        icon: '/favicon.ico',
-        tag: `msg-${message.id || Date.now()}`,
-        requireInteraction: false
+        body:               content.substring(0, 100),
+        icon:               '/favicon.ico',
+        tag:                `msg-${message.id || Date.now()}`,
+        requireInteraction: false,
       });
       notification.onclick = () => { window.focus(); notification.close(); };
       setTimeout(() => notification.close(), 5000);
@@ -3486,13 +3474,13 @@ const handleIncomingMessage = (message, currentConv, currentEmployeeName) => {
   const playNotificationSound = () => {
     try {
       const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
+      const oscillator   = audioContext.createOscillator();
+      const gainNode     = audioContext.createGain();
       oscillator.connect(gainNode);
       gainNode.connect(audioContext.destination);
       oscillator.frequency.value = 800;
-      oscillator.type = 'sine';
-      gainNode.gain.value = 0.1;
+      oscillator.type            = 'sine';
+      gainNode.gain.value        = 0.1;
       oscillator.start();
       gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.3);
       oscillator.stop(audioContext.currentTime + 0.3);
@@ -3515,11 +3503,11 @@ const handleIncomingMessage = (message, currentConv, currentEmployeeName) => {
   const sendTypingIndicator = (isTyping) => {
     if (wsRef.current?.readyState === WebSocket.OPEN && conversationRef.current?.id && hasJoined.current) {
       wsRef.current.send(JSON.stringify({
-        type: 'typing',
+        type:           'typing',
         conversationId: parseInt(conversationRef.current.id),
         isTyping,
-        senderType: 'agent',
-        senderName: employeeNameRef.current || 'Agent'
+        senderType:     'agent',
+        senderName:     employeeNameRef.current || 'Agent',
       }));
     }
   };
@@ -3550,51 +3538,51 @@ const handleIncomingMessage = (message, currentConv, currentEmployeeName) => {
 
   useEffect(() => {
     const pingInterval = setInterval(() => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
+      if (wsRef.current?.readyState === WebSocket.OPEN)
         wsRef.current.send(JSON.stringify({ type: 'ping' }));
-      }
     }, 30000);
     return () => clearInterval(pingInterval);
   }, []);
 
   useEffect(() => {
-    if (!conversation?.id) { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current); return; }
-
-
+    if (!conversation?.id) {
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+      return;
+    }
     pollIntervalRef.current = setInterval(async () => {
-  try {
-    const data = await api.getMessages(conversation.id); // no limit arg
-    const serverMessages = (Array.isArray(data) ? data : []).map(normalizeMessage); 
-    setMessages(prev => {
-      const existingIds = new Set(prev.map(m => String(m.id)));
-      const newMessages = serverMessages.filter(m => m.id && !existingIds.has(String(m.id)) && !displayedMessageIds.current.has(String(m.id)));
-      if (newMessages.length === 0) return prev;
-      newMessages.forEach(m => { if (m.id) displayedMessageIds.current.add(String(m.id)); });
-      let updated = prev.map(existing => {
-        if (!String(existing.id).startsWith('temp-')) return existing;
-        const confirmed = serverMessages.find(s =>
-          s.content === existing.content &&
-          s.senderType === existing.senderType &&
-          !existingIds.has(String(s.id))
-        );
-        if (confirmed) {
-          displayedMessageIds.current.add(String(confirmed.id));
-          return { ...confirmed, sending: false, _optimistic: false };
-        }
-        return existing;
-      });
-      return [...updated, ...newMessages.map(m => ({ ...m, sending: false, _optimistic: false }))];
-    });
-  } catch (error) {}
-}, 5000);
-
-
+      try {
+        const data           = await api.getMessages(conversation.id);
+        const serverMessages = (Array.isArray(data) ? data : []).map(normalizeMessage);
+        setMessages(prev => {
+          const existingIds  = new Set(prev.map(m => String(m.id)));
+          const newMessages  = serverMessages.filter(m =>
+            m.id && !existingIds.has(String(m.id)) && !displayedMessageIds.current.has(String(m.id))
+          );
+          if (newMessages.length === 0) return prev;
+          newMessages.forEach(m => { if (m.id) displayedMessageIds.current.add(String(m.id)); });
+          const updated = prev.map(existing => {
+            if (!String(existing.id).startsWith('temp-')) return existing;
+            const confirmed = serverMessages.find(s =>
+              s.content === existing.content &&
+              s.senderType === existing.senderType &&
+              !existingIds.has(String(s.id))
+            );
+            if (confirmed) {
+              displayedMessageIds.current.add(String(confirmed.id));
+              return { ...confirmed, sending: false, _optimistic: false };
+            }
+            return existing;
+          });
+          return [...updated, ...newMessages.map(m => ({ ...m, sending: false, _optimistic: false }))];
+        });
+      } catch (error) {}
+    }, 5000);
     return () => { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current); };
   }, [conversation?.id]);
 
   useEffect(() => {
     const handleGlobalPaste = (e) => {
-      const tag = document.activeElement?.tagName;
+      const tag        = document.activeElement?.tagName;
       const isEditable = document.activeElement?.contentEditable === 'true';
       if (tag === 'INPUT' || tag === 'TEXTAREA' || isEditable) return;
       handlePaste(e);
@@ -3604,38 +3592,39 @@ const handleIncomingMessage = (message, currentConv, currentEmployeeName) => {
   }, [selectedFile]);
 
   const loadMessages = async () => {
-  try {
-    setLoading(true);
-    const data = await api.getMessages(conversation.id); // no limit arg
-    const messageArray = (Array.isArray(data) ? data : []).map(normalizeMessage);
-    messageArray.forEach(msg => { if (msg.id) displayedMessageIds.current.add(String(msg.id)); });
-    setMessages(messageArray);
-  } catch (error) {
-    console.error('Failed to load messages:', error);
-    setMessages([]);
-  } finally {
-    setLoading(false);
-  }
-};
+    try {
+      setLoading(true);
+      const data         = await api.getMessages(conversation.id);
+      const messageArray = (Array.isArray(data) ? data : []).map(normalizeMessage);
+      messageArray.forEach(msg => { if (msg.id) displayedMessageIds.current.add(String(msg.id)); });
+      setMessages(messageArray);
+    } catch (error) {
+      console.error('Failed to load messages:', error);
+      setMessages([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const scrollToBottom = () => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); };
 
   // ============ SEND ============
   const handleSend = async (e) => {
     if (e) { e.preventDefault(); e.stopPropagation(); }
-    const text = getMessageContent();
-    const hasText = text.length > 0;
-    const hasFile = selectedFile;
-    if ((!hasText && !hasFile) || sending || uploading) return;
+    const text       = getMessageContent();
+    // FIX: renamed from hasText to hasContent — avoids shadowing the state variable
+    const hasContent = text.length > 0;
+    const hasFile    = selectedFile;
+    if ((!hasContent && !hasFile) || sending || uploading) return;
 
     try {
       setSending(true);
 
-      let fileUrl = null;
+      let fileUrl  = null;
       let fileData = null;
       if (selectedFile) {
         const uploadResult = await uploadFileToBunny(selectedFile);
-        fileUrl = uploadResult.url;
+        fileUrl  = uploadResult.url;
         fileData = { url: uploadResult.url, name: selectedFile.name, type: selectedFile.type, size: selectedFile.size };
       }
 
@@ -3645,16 +3634,16 @@ const handleIncomingMessage = (message, currentConv, currentEmployeeName) => {
       sendTypingIndicator(false);
 
       const optimisticMessage = {
-        id: `temp-${Date.now()}`,
+        id:             `temp-${Date.now()}`,
         conversationId: conversation.id,
-        senderType: 'agent',
-        senderName: employeeName || 'Agent',
-        content: text || '',
+        senderType:     'agent',
+        senderName:     employeeName || 'Agent',
+        content:        text || '',
         fileUrl,
         fileData,
-        createdAt: new Date().toISOString(),
-        _optimistic: true,
-        sending: true,
+        createdAt:      new Date().toISOString(),
+        _optimistic:    true,
+        sending:        true,
       };
       setMessages(prev => [...prev, optimisticMessage]);
       clearAllNotifications(conversation.id);
@@ -3662,13 +3651,15 @@ const handleIncomingMessage = (message, currentConv, currentEmployeeName) => {
       const sentMessage = await onSendMessage(conversation, text, fileData);
       if (sentMessage.id) displayedMessageIds.current.add(String(sentMessage.id));
       const normalizedSent = normalizeMessage(sentMessage);
-      const mergedMessage = {
+      const mergedMessage  = {
         ...normalizedSent,
-        fileUrl: normalizedSent.fileUrl || fileUrl,
+        fileUrl:  normalizedSent.fileUrl  || fileUrl,
         fileData: normalizedSent.fileData || fileData,
-        sending: false,
+        sending:  false,
       };
-      setMessages(prev => prev.map(msg => msg._optimistic && msg.id === optimisticMessage.id ? mergedMessage : msg));
+      setMessages(prev => prev.map(msg =>
+        msg._optimistic && msg.id === optimisticMessage.id ? mergedMessage : msg
+      ));
     } catch (error) {
       console.error('❌ Failed to send message:', error);
       setMessages(prev => prev.filter(msg => !msg._optimistic));
@@ -3679,8 +3670,8 @@ const handleIncomingMessage = (message, currentConv, currentEmployeeName) => {
     }
   };
 
-  const handleDeleteClick = () => setShowDeleteModal(true);
-  const handleCancelDelete = () => setShowDeleteModal(false);
+  const handleDeleteClick    = () => setShowDeleteModal(true);
+  const handleCancelDelete   = () => setShowDeleteModal(false);
 
   const handleConfirmDelete = async () => {
     try {
@@ -3703,7 +3694,8 @@ const handleIncomingMessage = (message, currentConv, currentEmployeeName) => {
     return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
   };
 
-  const getGroupedMessages = () => {
+  // FIX: useMemo — only recalculates when messages change, not on every keystroke
+  const groupedMessages = useMemo(() => {
     if (!messages || messages.length === 0) return [];
     return messages.map((message, index) => {
       const prevMessage = index > 0 ? messages[index - 1] : null;
@@ -3711,12 +3703,13 @@ const handleIncomingMessage = (message, currentConv, currentEmployeeName) => {
       return {
         ...message,
         isFirstInGroup: !prevMessage || prevMessage.senderType !== message.senderType,
-        isLastInGroup: !nextMessage || nextMessage.senderType !== message.senderType,
+        isLastInGroup:  !nextMessage || nextMessage.senderType !== message.senderType,
       };
     });
-  };
+  }, [messages]);
 
-  const getStoreDetails = () => {
+  // FIX: useMemo — only recalculates when stores/conversation change
+  const storeDetails = useMemo(() => {
     if (!stores || !conversation) return null;
     return stores.find(s =>
       s.storeIdentifier === conversation.storeIdentifier ||
@@ -3724,7 +3717,7 @@ const handleIncomingMessage = (message, currentConv, currentEmployeeName) => {
       s.id === conversation.shop_id ||
       s.storeIdentifier === conversation.store_identifier
     ) || null;
-  };
+  }, [stores, conversation]);
 
   if (!conversation) {
     return (
@@ -3738,17 +3731,11 @@ const handleIncomingMessage = (message, currentConv, currentEmployeeName) => {
     );
   }
 
-  const storeDetails = getStoreDetails();
-  const storeName = storeDetails?.brandName || conversation.storeName || conversation.storeIdentifier;
+  const storeName   = storeDetails?.brandName || conversation.storeName || conversation.storeIdentifier;
   const storeDomain = storeDetails?.domain || storeDetails?.url || storeDetails?.storeDomain || storeDetails?.shopDomain || storeDetails?.myshopify_domain || conversation.domain || conversation.storeDomain || null;
-  const groupedMessages = getGroupedMessages();
 
-  const legalBannerBg = legalAlert?.severity === 'critical' ? '#dc2626'
-    : legalAlert?.severity === 'high' ? '#d97706'
-    : '#2563eb';
-  const legalBannerEmoji = legalAlert?.severity === 'critical' ? '🚨'
-    : legalAlert?.severity === 'high' ? '⚠️'
-    : '🔔';
+  const legalBannerBg    = legalAlert?.severity === 'critical' ? '#dc2626' : legalAlert?.severity === 'high' ? '#d97706' : '#2563eb';
+  const legalBannerEmoji = legalAlert?.severity === 'critical' ? '🚨'      : legalAlert?.severity === 'high' ? '⚠️'      : '🔔';
 
   return (
     <div className="chat-window" style={{ position: 'relative' }}>
@@ -3942,63 +3929,56 @@ const handleIncomingMessage = (message, currentConv, currentEmployeeName) => {
               </div>
             ) : (
               <>
-{groupedMessages.map((message, index) => {
-  const msgKey = message.id || `msg-${index}`;
-  // "Replied by" indicator — shown below each agent message group to all
-  // logged-in employees (admins and agents). Customer widget never renders this.
-const showRepliedBy = message.senderType === 'agent'
-  && message.isLastInGroup
-  && !message._optimistic
-  && message.senderEmployeeName;
+                {groupedMessages.map((message, index) => {
+                  const msgKey       = message.id || `msg-${index}`;
+                  const showRepliedBy = message.senderType === 'agent'
+                    && message.isLastInGroup
+                    && !message._optimistic
+                    && message.senderEmployeeName;
 
-
-  return (
-    <React.Fragment key={msgKey}>
-      <MessageBubble
-        message={message}
-        nextMessage={index < groupedMessages.length - 1 ? groupedMessages[index + 1] : null}
-        isAgent={message.senderType === 'agent'}
-        isCustomer={message.senderType === 'customer'}
-        showAvatar={true}
-        isFirstInGroup={message.isFirstInGroup}
-        isLastInGroup={message.isLastInGroup}
-        sending={message.sending || message._optimistic}
-        actionButton={
-          isAdmin && !message._optimistic && message.senderType === 'agent' ? (
-            <button
-              type="button"
-              onClick={() => handleDeleteMessageClick(message)}
-              title="Delete message"
-              style={{
-                background: 'none', border: 'none', cursor: 'pointer',
-                fontSize: 13, color: '#ccc', padding: 0, lineHeight: 1,
-                transition: 'color 0.15s',
-              }}
-              onMouseEnter={e => e.currentTarget.style.color = '#e53e3e'}
-              onMouseLeave={e => e.currentTarget.style.color = '#ccc'}
-            >🗑️</button>
-          ) : null
-        }
-      />
-{showRepliedBy && (
-  <div
-    style={{
-      textAlign: 'right',
-      fontSize: '11px',
-      color: '#8696a0',
-      margin: '-2px 60px 8px 0',
-      fontStyle: 'italic',
-      fontWeight: 500,
-      letterSpacing: '0.2px',
-    }}
-    title="Who actually sent this message (internal — not visible to the customer)"
-  >
-    Replied by {message.senderEmployeeName}
-  </div>
-)}
-    </React.Fragment>
-  );
-})}
+                  return (
+                    <React.Fragment key={msgKey}>
+                      <MessageBubble
+                        message={message}
+                        nextMessage={index < groupedMessages.length - 1 ? groupedMessages[index + 1] : null}
+                        isAgent={message.senderType === 'agent'}
+                        isCustomer={message.senderType === 'customer'}
+                        showAvatar={true}
+                        isFirstInGroup={message.isFirstInGroup}
+                        isLastInGroup={message.isLastInGroup}
+                        sending={message.sending || message._optimistic}
+                        actionButton={
+                          isAdmin && !message._optimistic && message.senderType === 'agent' ? (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteMessageClick(message)}
+                              title="Delete message"
+                              style={{
+                                background: 'none', border: 'none', cursor: 'pointer',
+                                fontSize: 13, color: '#ccc', padding: 0, lineHeight: 1,
+                                transition: 'color 0.15s',
+                              }}
+                              onMouseEnter={e => e.currentTarget.style.color = '#e53e3e'}
+                              onMouseLeave={e => e.currentTarget.style.color = '#ccc'}
+                            >🗑️</button>
+                          ) : null
+                        }
+                      />
+                      {showRepliedBy && (
+                        <div
+                          style={{
+                            textAlign: 'right', fontSize: '11px', color: '#8696a0',
+                            margin: '-2px 60px 8px 0', fontStyle: 'italic',
+                            fontWeight: 500, letterSpacing: '0.2px',
+                          }}
+                          title="Who actually sent this message (internal — not visible to the customer)"
+                        >
+                          Replied by {message.senderEmployeeName}
+                        </div>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
                 {typingUsers.size > 0 && (
                   <div className="typing-indicator">
                     <div className="typing-indicator-avatar">{getInitials(Array.from(typingUsers)[0])}</div>
@@ -4084,7 +4064,8 @@ const showRepliedBy = message.senderType === 'agent'
         >⚡</button>
 
         <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
-          {!messageText && (
+          {/* FIX: was !messageText — now uses boolean hasText state */}
+          {!hasText && (
             <div style={{
               position: 'absolute', top: 0, left: 0, right: 0,
               padding: '9px 12px', fontSize: '14px', lineHeight: '1.5',
@@ -4099,8 +4080,13 @@ const showRepliedBy = message.senderType === 'agent'
             contentEditable={!sending && !uploading}
             suppressContentEditableWarning
             onInput={() => {
-              const text = editableRef.current?.innerText || '';
-              setMessageText(text);
+              const text        = editableRef.current?.innerText || '';
+              const nowHasText  = text.trim().length > 0;
+              // FIX: only triggers re-render on empty↔non-empty transition
+              if (nowHasText !== hasTextRef.current) {
+                hasTextRef.current = nowHasText;
+                setHasText(nowHasText);
+              }
               sendTypingIndicator(true);
               if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
               typingTimeoutRef.current = setTimeout(() => sendTypingIndicator(false), 2000);
@@ -4109,7 +4095,7 @@ const showRepliedBy = message.senderType === 'agent'
               if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); }
             }}
             onPaste={(e) => {
-              const items = Array.from(e.clipboardData?.items || []);
+              const items    = Array.from(e.clipboardData?.items || []);
               const hasImage = items.some(i => i.type.startsWith('image/'));
               if (hasImage) { e.preventDefault(); handlePaste(e); return; }
               e.preventDefault();
@@ -4118,18 +4104,18 @@ const showRepliedBy = message.senderType === 'agent'
             }}
             style={{
               ...INPUT_STYLE,
-              display: 'block',
-              minHeight: '38px',
-              maxHeight: '120px',
-              overflowY: 'auto',
-              outline: 'none',
-              color: '#111b21',
+              display:    'block',
+              minHeight:  '38px',
+              maxHeight:  '120px',
+              overflowY:  'auto',
+              outline:    'none',
+              color:      '#111b21',
               borderRadius: '8px',
-              border: '1px solid #e9edef',
+              border:     '1px solid #e9edef',
               background: '#fff',
-              boxSizing: 'border-box',
-              cursor: sending || uploading ? 'not-allowed' : 'text',
-              opacity: sending || uploading ? 0.6 : 1,
+              boxSizing:  'border-box',
+              cursor:     sending || uploading ? 'not-allowed' : 'text',
+              opacity:    sending || uploading ? 0.6 : 1,
             }}
           />
 
@@ -4171,16 +4157,17 @@ const showRepliedBy = message.senderType === 'agent'
           }}
         >{uploading ? '⏳' : '📎'}</button>
 
+        {/* FIX: was !messageText.trim() — now uses boolean hasText */}
         <button
           type="button" title="Send message (Enter)"
           onClick={handleSend}
-          disabled={(!messageText.trim() && !selectedFile) || sending || uploading}
+          disabled={(!hasText && !selectedFile) || sending || uploading}
           style={{
             width: '44px', height: '44px', minWidth: '44px', flexShrink: 0,
             border: 'none', borderRadius: '50%',
-            background: (!messageText.trim() && !selectedFile) || sending || uploading
+            background: (!hasText && !selectedFile) || sending || uploading
               ? 'rgba(0,168,132,0.4)' : '#00a884',
-            cursor: (!messageText.trim() && !selectedFile) || sending || uploading
+            cursor: (!hasText && !selectedFile) || sending || uploading
               ? 'not-allowed' : 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontSize: '20px', padding: 0, color: 'white',
