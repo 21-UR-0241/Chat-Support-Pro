@@ -3211,7 +3211,10 @@ if (process.env.NODE_ENV === 'production') {
     else next();
   });
 }
-app.use((req, res, next) => { console.log(`${req.method} ${req.path}`); next(); });
+
+if (process.env.NODE_ENV !== 'production') {
+  app.use((req, res, next) => { console.log(`${req.method} ${req.path}`); next(); });
+}
 
 app.get('/health', async (req, res) => {
   try {
@@ -3653,9 +3656,17 @@ app.get('/api/customers/lookup', async (req, res) => {
   try {
     const { store: storeIdentifier, email } = req.query;
     if (!storeIdentifier || !email) return res.status(400).json({ error: 'store and email parameters required' });
-    const store = await getCachedStore(storeIdentifier);                          // OPTIMISED
+    const store = await getCachedStore(storeIdentifier);
     if (!store || !store.is_active) return res.status(404).json({ error: 'Store not found or inactive' });
-    const customerContext = await shopify.getCustomerContext(store, email);
+    const cacheKey = `shopify:${store.id}:${email}`;
+    let customerContext = appCache.get(cacheKey);
+    if (!customerContext) {
+      customerContext = await shopify.getCustomerContext(store, email);
+      if (customerContext) {
+        appCache.set(cacheKey, customerContext);
+        setTimeout(() => appCache.invalidate(cacheKey), 5 * 60 * 1000);
+      }
+    }
     if (!customerContext?.customer) return res.status(404).json({ error: 'Customer not found' });
     const customer = customerContext.customer;
     res.json({ id: customer.id, name: customer.name || `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
@@ -3665,13 +3676,23 @@ app.get('/api/customers/lookup', async (req, res) => {
   } catch (error) { console.error('Customer lookup error:', error); res.status(500).json({ error: 'Failed to fetch customer data', message: error.message }); }
 });
 
+
+
 app.get('/api/customers/orders', async (req, res) => {
   try {
     const { store: storeIdentifier, email } = req.query;
     if (!storeIdentifier || !email) return res.status(400).json({ error: 'store and email parameters required' });
-    const store = await getCachedStore(storeIdentifier);                          // OPTIMISED
+    const store = await getCachedStore(storeIdentifier);
     if (!store || !store.is_active) return res.status(404).json({ error: 'Store not found or inactive' });
-    const customerContext = await shopify.getCustomerContext(store, email);
+    const cacheKey = `shopify:${store.id}:${email}`;
+    let customerContext = appCache.get(cacheKey);
+    if (!customerContext) {
+      customerContext = await shopify.getCustomerContext(store, email);
+      if (customerContext) {
+        appCache.set(cacheKey, customerContext);
+        setTimeout(() => appCache.invalidate(cacheKey), 5 * 60 * 1000);
+      }
+    }
     if (!customerContext?.orders) return res.json([]);
     const formattedOrders = customerContext.orders.map(order => ({
       id: order.id, orderNumber: order.order_number || order.name, status: order.financial_status || 'pending',
@@ -3683,6 +3704,7 @@ app.get('/api/customers/orders', async (req, res) => {
     res.json(formattedOrders);
   } catch (error) { console.error('Customer orders error:', error); res.status(500).json({ error: 'Failed to fetch orders', message: error.message }); }
 });
+
 
 app.get('/api/customers/cart', async (req, res) => {
   try {
@@ -4027,8 +4049,12 @@ app.post('/api/widget/messages', async (req, res) => {
     const { conversationId, customerEmail, customerName, content, storeIdentifier, fileData } = req.body;
     if (!conversationId) return res.status(400).json({ error: 'Missing required fields' });
     if (!content && !fileData) return res.status(400).json({ error: 'Message must have text or a file attachment' });
-    const store = await getCachedStore(storeIdentifier);                          // OPTIMISED
+    const [store, conversation] = await Promise.all([
+      getCachedStore(storeIdentifier),
+      db.getConversation(conversationId),
+    ]);
     if (!store) return res.status(404).json({ error: 'Store not found' });
+    if (!conversation) return res.status(404).json({ error: 'conversation_not_found', message: 'This conversation no longer exists' });
     const blCheck = await db.pool.query(
       `SELECT id FROM blacklist WHERE email = $1 AND removed_at IS NULL AND (store_identifier IS NULL OR store_identifier = $2) LIMIT 1`,
       [customerEmail.toLowerCase().trim(), store.store_identifier]
@@ -4037,8 +4063,6 @@ app.post('/api/widget/messages', async (req, res) => {
       console.log(`🚫 [Blacklist] Blocked message from ${customerEmail} on ${store.store_identifier}`);
       return res.status(403).json({ error: 'blocked', message: 'Unable to send messages at this time.' });
     }
-    const conversation = await db.getConversation(conversationId);
-    if (!conversation) return res.status(404).json({ error: 'conversation_not_found', message: 'This conversation no longer exists' });
     const timestamp = new Date();
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const tempMessage = { id: tempId, conversationId, storeId: store.id, senderType: 'customer', senderName: customerName || customerEmail, content: content || '', fileData, createdAt: timestamp, pending: true };
@@ -4058,6 +4082,8 @@ app.post('/api/widget/messages', async (req, res) => {
     });
   } catch (error) { console.error('Widget message error:', error); res.status(500).json({ error: 'Failed to send message', message: error.message }); }
 });
+
+
 
 app.delete('/api/messages/:id', authenticateToken, async (req, res) => {
   try {
@@ -4081,12 +4107,14 @@ app.post('/api/widget/presence', async (req, res) => {
     if (!conversationId || !customerEmail) return res.status(400).json({ error: 'conversationId and customerEmail required' });
     const validStatuses = ['online', 'away', 'offline'];
     const safeStatus = validStatuses.includes(status) ? status : 'offline';
-    const exists = await db.pool.query('SELECT id FROM conversations WHERE id = $1 LIMIT 1', [conversationId]);
-    if (exists.rowCount === 0) return res.status(410).json({ error: 'conversation_not_found', message: 'Conversation no longer exists' });
     await db.pool.query(`INSERT INTO customer_presence (conversation_id, customer_email, store_id, status, last_activity_at, last_heartbeat_at, ws_connected, updated_at) VALUES ($1, $2, $3, $4, $5, NOW(), FALSE, NOW()) ON CONFLICT (conversation_id) DO UPDATE SET status = $4, last_activity_at = $5, last_heartbeat_at = NOW(), updated_at = NOW()`, [conversationId, customerEmail, storeId || null, safeStatus, lastActivityAt || new Date()]);
     if (safeStatus === 'online') cancelPendingEmail(conversationId);
     res.json({ ok: true });
-  } catch (error) { console.error('[Presence REST] Error:', error); res.status(500).json({ error: 'Failed to update presence' }); }
+  } catch (error) {
+    if (error.code === '23503') return res.status(410).json({ error: 'conversation_not_found', message: 'Conversation no longer exists' });
+    console.error('[Presence REST] Error:', error);
+    res.status(500).json({ error: 'Failed to update presence' });
+  }
 });
 
 // ============ BLACKLIST ============
@@ -5104,29 +5132,20 @@ function setupKeepAlive() {
 
 async function createPerformanceIndexes() {
   const indexes = [
-    // Conversations inbox — status filter + sort
     `CREATE INDEX IF NOT EXISTS idx_conv_status_updated ON conversations (status, updated_at DESC)`,
-    // Message fetching — most-used query in the app
     `CREATE INDEX IF NOT EXISTS idx_messages_conv_sent ON messages (conversation_id, sent_at DESC)`,
-    // Response time queries — agent messages
     `CREATE INDEX IF NOT EXISTS idx_messages_agent_sent ON messages (sender_id, sent_at DESC) WHERE sender_type = 'agent' AND sender_id IS NOT NULL`,
-    // Widget/customer lookup
     `CREATE INDEX IF NOT EXISTS idx_conv_email_shop ON conversations (customer_email, shop_id)`,
-    // Employee lookup
     `CREATE INDEX IF NOT EXISTS idx_employees_active ON employees (email) WHERE is_active = true`,
-    // Blacklist check
     `CREATE INDEX IF NOT EXISTS idx_blacklist_email ON blacklist (email) WHERE removed_at IS NULL`,
-    // Customer presence
     `CREATE INDEX IF NOT EXISTS idx_presence_conv ON customer_presence (conversation_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_conv_archived_at ON conversations (archived_at DESC NULLS LAST) WHERE status = 'archived'`,
   ];
-  let created = 0;
-  for (const sql of indexes) {
-    try { await db.pool.query(sql); created++; }
-    catch (err) { console.warn(`⚠️ [Indexes] Skipped: ${err.message.substring(0, 80)}`); }
-  }
+  const results = await Promise.allSettled(indexes.map(sql => db.pool.query(sql)));
+  const created = results.filter(r => r.status === 'fulfilled').length;
+  results.forEach((r) => { if (r.status === 'rejected') console.warn(`⚠️ [Indexes] Skipped: ${r.reason.message.substring(0, 80)}`); });
   console.log(`✅ [Indexes] ${created}/${indexes.length} performance indexes ensured`);
 }
-
 // ============ START SERVER ============
 
 const PORT = process.env.PORT || 3000;
@@ -5134,8 +5153,12 @@ const PORT = process.env.PORT || 3000;
 async function startServer() {
   try {
     await db.testConnection(); console.log('✅ Database connection successful\n');
-    await db.initDatabase(); console.log('✅ Database tables initialized\n');
-    await db.runMigrations(); console.log('✅ Database migrations completed\n');
+
+    // CHANGE 1 — run initDatabase + runMigrations in parallel (saves ~1-2s on cold start)
+    await Promise.all([
+      db.initDatabase().then(() => console.log('✅ Database tables initialized\n')),
+      db.runMigrations().then(() => console.log('✅ Database migrations completed\n')),
+    ]);
 
     server.listen(PORT, async () => {
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -5147,11 +5170,9 @@ async function startServer() {
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
       // ── Safety: ensure auto_replied_at exists before cron starts ──
-      try {
+    try {
         await db.pool.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS auto_replied_at TIMESTAMPTZ DEFAULT NULL`);
-        const check = await db.pool.query(`SELECT column_name FROM information_schema.columns WHERE table_name = 'conversations' AND column_name = 'auto_replied_at'`);
-        if (check.rows.length > 0) { console.log('✅ [Startup] auto_replied_at column confirmed'); }
-        else { console.error('❌ [Startup] auto_replied_at column STILL missing — auto-reply will not start'); return; }
+        console.log('✅ [Startup] auto_replied_at column confirmed');
       } catch (err) { console.error('❌ [Startup] Failed to ensure auto_replied_at:', err.message); return; }
 
       // Create performance indexes in background — non-blocking
@@ -5174,7 +5195,8 @@ async function startServer() {
         }, msUntilNextHour);
       }
       if (process.env.NODE_ENV === 'production') {
-        setTimeout(() => { console.log('📊 [Discord Stats] Sending startup report (then aligning to top-of-hour)'); sendHourlyResponseTimeStats().catch(err => console.error('📊 [Discord Stats] Startup report failed:', err.message)); }, 30 * 1000);
+        // CHANGE 3 — delay startup Discord report from 30s to 5min so boot DB traffic settles first
+        setTimeout(() => { console.log('📊 [Discord Stats] Sending startup report (then aligning to top-of-hour)'); sendHourlyResponseTimeStats().catch(err => console.error('📊 [Discord Stats] Startup report failed:', err.message)); }, 5 * 60 * 1000);
       } else { console.log('📊 [Discord Stats] Skipping startup report (dev mode) — next report at top of hour'); }
       scheduleNextHourlyReport();
 
