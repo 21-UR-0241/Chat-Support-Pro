@@ -1094,7 +1094,7 @@
 
 
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 
 const API_BASE = (import.meta.env.PROD 
   ? import.meta.env.VITE_API_URL || 'https://chat-support-pro.onrender.com'
@@ -1216,16 +1216,17 @@ const PRODUCT_NAMES = [
   'wolverine','glow blend',
 ];
 
+// Pre-sorted once at module load — longest names first so "hgh fragment"
+// beats "hgh" on every lookup without re-sorting on each call.
+const PRODUCT_NAMES_SORTED = [...PRODUCT_NAMES].sort((a, b) => b.length - a.length);
+
 /**
  * Extracts the product name mentioned at the start of a rule, if any.
- * Returns the matched name (lowercased) or null if none found.
+ * Uses the pre-sorted list so this is a single linear scan.
  */
 function extractProductName(text) {
   const lower = (text || '').toLowerCase();
-  // Check longest names first so "hgh fragment" beats "hgh"
-  const sorted = [...PRODUCT_NAMES].sort((a, b) => b.length - a.length);
-  for (const name of sorted) {
-    // Must appear in the first 60 characters (i.e. the opening noun phrase)
+  for (const name of PRODUCT_NAMES_SORTED) {
     if (lower.slice(0, 120).includes(name)) return name;
   }
   return null;
@@ -1240,19 +1241,20 @@ function tokenize(text) {
   );
 }
 
-function jaccardSim(a, b) {
-  // If both rules name a product and those products differ → never a duplicate
-  const prodA = extractProductName(a);
-  const prodB = extractProductName(b);
+// Low-level similarity using pre-computed token sets and product names.
+// Avoids re-tokenizing the same rule text O(n) times in the inner loop.
+function jaccardSimFast(prodA, prodB, setA, setB) {
   if (prodA && prodB && prodA !== prodB) return 0;
-
-  const setA = tokenize(a);
-  const setB = tokenize(b);
   if (!setA.size && !setB.size) return 1;
   if (!setA.size || !setB.size) return 0;
   let inter = 0;
   for (const t of setA) if (setB.has(t)) inter++;
   return inter / (setA.size + setB.size - inter);
+}
+
+// String-based wrapper kept for any call sites outside detectDuplicates.
+function jaccardSim(a, b) {
+  return jaccardSimFast(extractProductName(a), extractProductName(b), tokenize(a), tokenize(b));
 }
 
 /**
@@ -1280,13 +1282,22 @@ function isMasterRule(rule) {
  *   brainKey, cat, color, icon, label,
  *   groups: [{ indexes, texts, rules }]
  * }
- * `rules` carries raw rule objects so callers can inspect .source / isMasterRule.
+ *
+ * Performance: pre-tokenizes every rule once (O(n)) before doing pairwise
+ * comparisons (O(n²) calls to jaccardSimFast) so tokenize() is never called
+ * more than once per rule regardless of how many pairs it participates in.
  */
 function detectDuplicates(brain) {
   const result = [];
   for (const [cat, meta] of Object.entries(CATEGORY_META)) {
     const rules = brain[meta.brainKey] || [];
     const texts = rules.map(r => (typeof r === 'string' ? r : r.text) || '');
+    if (texts.length < 2) continue;
+
+    // Pre-compute once per rule — O(n)
+    const tokenSets    = texts.map(t => tokenize(t));
+    const productNames = texts.map(t => extractProductName(t));
+
     const visited = new Set();
     const groups = [];
     for (let i = 0; i < texts.length; i++) {
@@ -1294,7 +1305,7 @@ function detectDuplicates(brain) {
       const group = [i];
       for (let j = i + 1; j < texts.length; j++) {
         if (visited.has(j)) continue;
-        if (jaccardSim(texts[i], texts[j]) >= DUPE_THRESHOLD) {
+        if (jaccardSimFast(productNames[i], productNames[j], tokenSets[i], tokenSets[j]) >= DUPE_THRESHOLD) {
           group.push(j);
           visited.add(j);
         }
@@ -1500,8 +1511,9 @@ function SettingsPanel({ settings, onChange }) {
 // Step 1 "review"  → admin sees all groups, checks rules to delete
 // Step 2 "confirm" → summary card + explicit confirmation before any writes
 // Step 3 "done"    → success state
-function DuplicatesModal({ brain, onDeleteIndexes, onClose }) {
-  const groups = detectDuplicates(brain);
+function DuplicatesModal({ brain, dupeGroups, onDeleteIndexes, onClose }) {
+  // Use pre-computed groups from parent useMemo — no duplicate scan on open.
+  const groups = dupeGroups;
   const [step, setStep] = useState('review'); // 'review' | 'confirm' | 'done'
 
   // ── Per-group keeper state (for multi-master conflicts) ──────────────────
@@ -2189,9 +2201,9 @@ function ReconsolidateModal({ onClose, onDone, showToast }) {
 }
 
 // ─── Brain Drawer ──────────────────────────────────────────────────────────
-function BrainDrawer({ brain, open, onClose, onRemoveRule, dirty, onSave, saving, onReconsolidate, onFindDupes }) {
+function BrainDrawer({ brain, open, onClose, onRemoveRule, dirty, onSave, saving, onReconsolidate, onFindDupes, dupeCount }) {
+  // dupeCount is pre-computed by the parent with useMemo — no recalculation here.
   const totalRules = Object.values(CATEGORY_META).reduce((sum, meta) => sum + (brain[meta.brainKey] || []).length, 0);
-  const dupeCount  = detectDuplicates(brain).reduce((s, c) => s + c.groups.reduce((ss, g) => ss + g.indexes.length - 1, 0), 0);
 
   return (
     <>
@@ -2432,6 +2444,14 @@ export default function AITraining({ onBrainUpdate }) {
 
   const brainRef = useRef(brain);
   useEffect(() => { brainRef.current = brain; }, [brain]);
+
+  // Memoized duplicate scan — only recalculates when brain object changes,
+  // not on every typing keystroke, message, or other state update.
+  const dupeGroups = useMemo(() => detectDuplicates(brain), [brain]);
+  const dupeCount  = useMemo(
+    () => dupeGroups.reduce((s, c) => s + c.groups.reduce((ss, g) => ss + g.indexes.length - 1, 0), 0),
+    [dupeGroups]
+  );
 
   const showToast = useCallback((msg, duration = 3500) => {
     setSaveToast(msg);
@@ -2884,7 +2904,7 @@ export default function AITraining({ onBrainUpdate }) {
               onClick={() => setShowDuplicatesModal(true)}
               title="Scan for duplicate rules and delete them"
               style={{
-                background: (() => { const d = Object.values(CATEGORY_META).reduce((s, m) => s + (brain[m.brainKey] || []).length, 0); return d > 0 && detectDuplicates(brain).length > 0 ? '#f8717112' : '#0f172a'; })(),
+                background: dupeCount > 0 ? '#f8717112' : '#0f172a',
                 border: '1px solid #1e293b', color: '#64748b',
                 borderRadius: 7, padding: '5px 12px', fontSize: 12, cursor: 'pointer', transition: 'all 0.15s',
               }}
@@ -3119,6 +3139,7 @@ export default function AITraining({ onBrainUpdate }) {
         dirty={dirty}
         onSave={saveBrain}
         saving={saving}
+        dupeCount={dupeCount}
         onReconsolidate={() => { setDrawerOpen(false); setShowReconsolidateModal(true); }}
         onFindDupes={() => { setDrawerOpen(false); setShowDuplicatesModal(true); }}
       />
@@ -3142,6 +3163,7 @@ export default function AITraining({ onBrainUpdate }) {
       {showDuplicatesModal && (
         <DuplicatesModal
           brain={brain}
+          dupeGroups={dupeGroups}
           onDeleteIndexes={bulkDeleteByKey}
           onClose={() => setShowDuplicatesModal(false)}
         />
