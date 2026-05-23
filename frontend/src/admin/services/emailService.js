@@ -9,7 +9,7 @@ const DEBOUNCE_MS         = parseInt(process.env.EMAIL_DEBOUNCE_MS      || '3000
 const SWEEP_INTERVAL_MS   = parseInt(process.env.EMAIL_SWEEP_INTERVAL_MS || '300000', 10);
 const HEARTBEAT_STALE_MS  = 90000;
 
-const FALLBACK_FROM_ADDRESS = 'support@pepshelp.com';
+const FALLBACK_FROM_ADDRESS = 'support@pepscustomercare.com';
 const FALLBACK_BRAND_COLOR  = '#1a5632';
 
 const pendingSends = new Map();

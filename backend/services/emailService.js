@@ -11,7 +11,7 @@ const SWEEP_INTERVAL_MS = parseInt(process.env.EMAIL_SWEEP_INTERVAL_MS || '30000
 const HEARTBEAT_STALE_MS = 90000; // 90 seconds — customer considered offline if heartbeat older than this
 
 // Fallbacks if database has no values
-const FALLBACK_FROM_ADDRESS = 'support@pepshelp.com';
+const FALLBACK_FROM_ADDRESS = 'support@pepscustomercare.com';
 const FALLBACK_BRAND_COLOR = '#1a5632';
 
 // In-memory lock to prevent overlapping debounced sends for the same conversation
