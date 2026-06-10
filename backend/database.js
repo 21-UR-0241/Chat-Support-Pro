@@ -1,6 +1,3 @@
-
-
-
 const { Pool } = require('pg');
 require('dotenv').config();
 
@@ -168,7 +165,7 @@ async function initDatabase() {
     `);
     
     // ============================================
-    // BLACKLIST TABLE (created upfront for fresh installs)
+    // BLACKLIST TABLE
     // ============================================
     await client.query(`
       CREATE TABLE IF NOT EXISTS blacklist (
@@ -326,6 +323,7 @@ async function initDatabase() {
     client.release();
   }
 }
+
 async function runMigrations() {
   console.log('🔄 Running database migrations...');
   
@@ -346,6 +344,7 @@ async function runMigrations() {
     await migration_014_add_auto_replied_at();
     await migration_015_add_notes_order();
     await migration_016_add_employee_name();
+    await migration_017_add_promo_tables();        // ← NEW
 
     // ── Verify critical columns exist after migrations ──
     const { rows } = await pool.query(`
@@ -363,15 +362,10 @@ async function runMigrations() {
         )
       ORDER BY column_name
     `);
-    const found = rows.map(r => r.column_name);
+    const found    = rows.map(r => r.column_name);
     const expected = [
-      'agent_replied_at',
-      'archived_at',
-      'auto_replied_at',
-      'last_message',
-      'last_message_sender_type',
-      'legal_flag',
-      'unread_count',
+      'agent_replied_at', 'archived_at', 'auto_replied_at',
+      'last_message', 'last_message_sender_type', 'legal_flag', 'unread_count',
     ];
     const missing = expected.filter(col => !found.includes(col));
     if (missing.length > 0) {
@@ -387,7 +381,9 @@ async function runMigrations() {
   }
 }
 
-
+// ============================================
+// MIGRATIONS 001–016 (unchanged)
+// ============================================
 
 async function migration_001_add_message_columns() {
   const client = await pool.connect();
@@ -397,23 +393,21 @@ async function migration_001_add_message_columns() {
       SELECT column_name FROM information_schema.columns WHERE table_name = 'messages'
     `);
     const existingColumns = currentColumns.rows.map(row => row.column_name);
-    console.log('   Current columns:', existingColumns.join(', '));
     const requiredColumns = [
-      { name: 'message_type', sql: 'VARCHAR(50) DEFAULT \'text\'' },
-      { name: 'attachment_url', sql: 'TEXT' },
-      { name: 'attachment_type', sql: 'VARCHAR(50)' },
-      { name: 'sent_at', sql: 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP' },
-      { name: 'delivered_at', sql: 'TIMESTAMP' },
-      { name: 'read_at', sql: 'TIMESTAMP' },
-      { name: 'failed', sql: 'BOOLEAN DEFAULT false' },
-      { name: 'retry_count', sql: 'INTEGER DEFAULT 0' },
+      { name: 'message_type',       sql: "VARCHAR(50) DEFAULT 'text'" },
+      { name: 'attachment_url',     sql: 'TEXT' },
+      { name: 'attachment_type',    sql: 'VARCHAR(50)' },
+      { name: 'sent_at',            sql: 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP' },
+      { name: 'delivered_at',       sql: 'TIMESTAMP' },
+      { name: 'read_at',            sql: 'TIMESTAMP' },
+      { name: 'failed',             sql: 'BOOLEAN DEFAULT false' },
+      { name: 'retry_count',        sql: 'INTEGER DEFAULT 0' },
       { name: 'routed_successfully', sql: 'BOOLEAN DEFAULT true' },
-      { name: 'routing_error', sql: 'TEXT' }
+      { name: 'routing_error',      sql: 'TEXT' },
     ];
     const columnsAdded = [];
     for (const column of requiredColumns) {
       if (!existingColumns.includes(column.name)) {
-        console.log(`   Adding column: ${column.name}...`);
         await client.query(`ALTER TABLE messages ADD COLUMN ${column.name} ${column.sql};`);
         columnsAdded.push(column.name);
       }
@@ -501,7 +495,6 @@ async function migration_004_add_last_message_fields() {
       await client.query(`ALTER TABLE conversations ADD COLUMN last_message_at TIMESTAMP;`);
       columnsAdded.push('last_message_at');
     }
-    console.log('   Populating existing conversations with last messages...');
     await client.query(`
       UPDATE conversations c
       SET 
@@ -521,7 +514,6 @@ async function migration_004_add_last_message_fields() {
     } else {
       console.log('⏭️  [Migration 004] All columns already exist, skipping');
     }
-    console.log('✅ [Migration 004] Completed');
   } catch (error) {
     console.error('❌ [Migration 004] Failed:', error);
     throw error;
@@ -561,16 +553,11 @@ async function migration_005_add_message_templates() {
     await client.query(`
       CREATE OR REPLACE FUNCTION update_message_templates_updated_at()
       RETURNS TRIGGER AS $$
-      BEGIN
-        NEW.updated_at = CURRENT_TIMESTAMP;
-        RETURN NEW;
-      END;
+      BEGIN NEW.updated_at = CURRENT_TIMESTAMP; RETURN NEW; END;
       $$ language 'plpgsql';
-      
       CREATE TRIGGER trigger_message_templates_updated_at 
         BEFORE UPDATE ON message_templates 
-        FOR EACH ROW 
-        EXECUTE FUNCTION update_message_templates_updated_at();
+        FOR EACH ROW EXECUTE FUNCTION update_message_templates_updated_at();
     `);
     console.log('✅ [Migration 005] message_templates table created successfully');
   } catch (error) {
@@ -592,9 +579,7 @@ async function migration_006_add_file_data_column() {
     if (!existingColumns.includes('file_data')) {
       await client.query(`ALTER TABLE messages ADD COLUMN file_data JSONB;`);
       await client.query(`
-        CREATE INDEX IF NOT EXISTS idx_messages_file_data 
-        ON messages(file_data) 
-        WHERE file_data IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_messages_file_data ON messages(file_data) WHERE file_data IS NOT NULL;
       `);
       console.log('✅ [Migration 006] file_data column added successfully');
     } else {
@@ -629,16 +614,9 @@ async function migration_007_add_email_notifications() {
       await client.query(`ALTER TABLE stores ADD COLUMN email_brand_color VARCHAR(7)`);
       added.push('email_brand_color');
     }
-    if (added.length > 0) {
-      console.log(`   Added store columns: ${added.join(', ')}`);
-    } else {
-      console.log('   Store email columns already exist');
-    }
+    if (added.length > 0) console.log(`   Added store columns: ${added.join(', ')}`);
     const presenceExists = await client.query(`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables 
-        WHERE table_schema = 'public' AND table_name = 'customer_presence'
-      )
+      SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'customer_presence')
     `);
     if (!presenceExists.rows[0].exists) {
       await client.query(`
@@ -657,15 +635,9 @@ async function migration_007_add_email_notifications() {
       `);
       await client.query(`CREATE INDEX idx_presence_conv ON customer_presence(conversation_id)`);
       await client.query(`CREATE INDEX idx_presence_status ON customer_presence(status)`);
-      console.log('   Created customer_presence table');
-    } else {
-      console.log('   customer_presence table already exists');
     }
     const emailLogExists = await client.query(`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables 
-        WHERE table_schema = 'public' AND table_name = 'offline_email_log'
-      )
+      SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'offline_email_log')
     `);
     if (!emailLogExists.rows[0].exists) {
       await client.query(`
@@ -680,9 +652,6 @@ async function migration_007_add_email_notifications() {
         )
       `);
       await client.query(`CREATE INDEX idx_email_log_conv ON offline_email_log(conversation_id, sent_at DESC)`);
-      console.log('   Created offline_email_log table');
-    } else {
-      console.log('   offline_email_log table already exists');
     }
     console.log('✅ [Migration 007] Email notification support added');
   } catch (error) {
@@ -698,10 +667,7 @@ async function migration_008_add_conversation_notes() {
   try {
     console.log('📝 [Migration 008] Adding conversation_notes support...');
     const tableExists = await client.query(`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables 
-        WHERE table_schema = 'public' AND table_name = 'conversation_notes'
-      )
+      SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'conversation_notes')
     `);
     if (tableExists.rows[0].exists) {
       console.log('⏭️  [Migration 008] conversation_notes table already exists, skipping');
@@ -716,10 +682,8 @@ async function migration_008_add_conversation_notes() {
         content TEXT NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        CONSTRAINT fk_conversation_notes_conversation
-          FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
-        CONSTRAINT fk_conversation_notes_employee
-          FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+        CONSTRAINT fk_conversation_notes_conversation FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+        CONSTRAINT fk_conversation_notes_employee FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
       )
     `);
     await client.query(`
@@ -731,16 +695,11 @@ async function migration_008_add_conversation_notes() {
     await client.query(`
       CREATE OR REPLACE FUNCTION update_conversation_notes_updated_at()
       RETURNS TRIGGER AS $$
-      BEGIN
-        NEW.updated_at = CURRENT_TIMESTAMP;
-        RETURN NEW;
-      END;
+      BEGIN NEW.updated_at = CURRENT_TIMESTAMP; RETURN NEW; END;
       $$ language 'plpgsql';
-      
       CREATE TRIGGER trigger_conversation_notes_updated_at 
         BEFORE UPDATE ON conversation_notes 
-        FOR EACH ROW 
-        EXECUTE FUNCTION update_conversation_notes_updated_at();
+        FOR EACH ROW EXECUTE FUNCTION update_conversation_notes_updated_at();
     `);
     console.log('✅ [Migration 008] Conversation notes support added successfully');
   } catch (error) {
@@ -755,27 +714,19 @@ async function migration_009_add_employee_notes() {
   const migrationName = 'Migration 009';
   try {
     const tableCheck = await pool.query(`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables 
-        WHERE table_schema = 'public' AND table_name = 'employee_notes'
-      );
+      SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'employee_notes');
     `);
     if (tableCheck.rows[0].exists) {
       console.log(`✅ [${migrationName}] employee_notes table already exists`);
       const titleColumnCheck = await pool.query(`
-        SELECT EXISTS (
-          SELECT FROM information_schema.columns 
-          WHERE table_schema = 'public' AND table_name = 'employee_notes' AND column_name = 'title'
-        );
+        SELECT EXISTS (SELECT FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'employee_notes' AND column_name = 'title');
       `);
       if (!titleColumnCheck.rows[0].exists) {
-        console.log(`🔄 [${migrationName}] Adding title column...`);
         await pool.query(`ALTER TABLE employee_notes ADD COLUMN title VARCHAR(200) DEFAULT 'Untitled';`);
         console.log(`✅ [${migrationName}] Title column added`);
       }
       return;
     }
-    console.log(`🔄 [${migrationName}] Creating employee_notes table...`);
     await pool.query(`
       CREATE TABLE employee_notes (
         id SERIAL PRIMARY KEY,
@@ -796,16 +747,11 @@ async function migration_009_add_employee_notes() {
     await pool.query(`
       CREATE OR REPLACE FUNCTION update_employee_notes_updated_at()
       RETURNS TRIGGER AS $$
-      BEGIN
-        NEW.updated_at = CURRENT_TIMESTAMP;
-        RETURN NEW;
-      END;
+      BEGIN NEW.updated_at = CURRENT_TIMESTAMP; RETURN NEW; END;
       $$ LANGUAGE plpgsql;
-
       CREATE TRIGGER trigger_employee_notes_updated_at
         BEFORE UPDATE ON employee_notes
-        FOR EACH ROW
-        EXECUTE FUNCTION update_employee_notes_updated_at();
+        FOR EACH ROW EXECUTE FUNCTION update_employee_notes_updated_at();
     `);
     console.log(`✅ [${migrationName}] Employee notes table created with title support`);
   } catch (error) {
@@ -818,30 +764,22 @@ async function migration_010_add_ai_training_brain() {
   const migrationName = 'Migration 010';
   try {
     const tableCheck = await pool.query(`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables
-        WHERE table_schema = 'public' AND table_name = 'ai_training_brain'
-      );
+      SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'ai_training_brain');
     `);
     if (tableCheck.rows[0].exists) {
       console.log(`✅ [${migrationName}] ai_training_brain table already exists`);
       return;
     }
-    console.log(`🔄 [${migrationName}] Creating ai_training_brain table...`);
     await pool.query(`
       CREATE TABLE ai_training_brain (
-        id          INTEGER PRIMARY KEY DEFAULT 1,
-        brain_data  JSONB NOT NULL DEFAULT '{}',
-        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_by  TEXT,
+        id         INTEGER PRIMARY KEY DEFAULT 1,
+        brain_data JSONB NOT NULL DEFAULT '{}',
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_by TEXT,
         CONSTRAINT single_row CHECK (id = 1)
       );
     `);
-    await pool.query(`
-      INSERT INTO ai_training_brain (id, brain_data)
-      VALUES (1, '{}')
-      ON CONFLICT DO NOTHING;
-    `);
+    await pool.query(`INSERT INTO ai_training_brain (id, brain_data) VALUES (1, '{}') ON CONFLICT DO NOTHING;`);
     console.log(`✅ [${migrationName}] ai_training_brain table created`);
   } catch (error) {
     console.error(`❌ [${migrationName}] Failed:`, error);
@@ -861,9 +799,7 @@ async function migration_011_add_legal_flag_columns() {
         ADD COLUMN IF NOT EXISTS legal_flag_term     VARCHAR(100);
     `);
     await pool.query(`
-      CREATE INDEX IF NOT EXISTS idx_conversations_legal_flag
-        ON conversations(legal_flag)
-        WHERE legal_flag = TRUE;
+      CREATE INDEX IF NOT EXISTS idx_conversations_legal_flag ON conversations(legal_flag) WHERE legal_flag = TRUE;
     `);
     console.log(`✅ [${migrationName}] Legal flag columns added`);
   } catch (error) {
@@ -876,26 +812,19 @@ async function migration_012_add_agent_replied_at() {
   const migrationName = 'Migration 012';
   try {
     console.log(`📝 [${migrationName}] Adding agent_replied_at column to conversations...`);
+    await pool.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS agent_replied_at TIMESTAMPTZ;`);
     await pool.query(`
-      ALTER TABLE conversations
-        ADD COLUMN IF NOT EXISTS agent_replied_at TIMESTAMPTZ;
-    `);
-    await pool.query(`
-      CREATE INDEX IF NOT EXISTS idx_conversations_agent_replied
-        ON conversations(agent_replied_at)
-        WHERE agent_replied_at IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_conversations_agent_replied ON conversations(agent_replied_at) WHERE agent_replied_at IS NOT NULL;
     `);
     await pool.query(`
       UPDATE conversations c
       SET agent_replied_at = first_agent.first_reply
       FROM (
         SELECT conversation_id, MIN(timestamp) AS first_reply
-        FROM messages
-        WHERE sender_type = 'agent'
+        FROM messages WHERE sender_type = 'agent'
         GROUP BY conversation_id
       ) first_agent
-      WHERE c.id = first_agent.conversation_id
-        AND c.agent_replied_at IS NULL;
+      WHERE c.id = first_agent.conversation_id AND c.agent_replied_at IS NULL;
     `);
     console.log(`✅ [${migrationName}] agent_replied_at column added and back-filled`);
   } catch (error) {
@@ -904,24 +833,14 @@ async function migration_012_add_agent_replied_at() {
   }
 }
 
-// ── NEW ──────────────────────────────────────────────────────────────────────
 async function migration_013_add_blacklist_and_archive() {
   const migrationName = 'Migration 013';
   try {
     console.log(`📝 [${migrationName}] Adding blacklist table and archived_at column...`);
-
-    // 1. archived_at on conversations
+    await pool.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ DEFAULT NULL;`);
     await pool.query(`
-      ALTER TABLE conversations
-        ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ DEFAULT NULL;
+      CREATE INDEX IF NOT EXISTS idx_conversations_archived_at ON conversations(archived_at) WHERE archived_at IS NOT NULL;
     `);
-    await pool.query(`
-      CREATE INDEX IF NOT EXISTS idx_conversations_archived_at
-        ON conversations(archived_at)
-        WHERE archived_at IS NOT NULL;
-    `);
-
-    // 2. blacklist table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS blacklist (
         id               SERIAL PRIMARY KEY,
@@ -932,23 +851,14 @@ async function migration_013_add_blacklist_and_archive() {
         blocked_by       VARCHAR(255) DEFAULT NULL,
         created_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
         removed_at       TIMESTAMPTZ  DEFAULT NULL,
-        CONSTRAINT blacklist_unique_email_store
-          UNIQUE NULLS NOT DISTINCT (email, store_identifier)
+        CONSTRAINT blacklist_unique_email_store UNIQUE NULLS NOT DISTINCT (email, store_identifier)
       );
     `);
-
-    // 3. indexes on blacklist (IF NOT EXISTS is safe to re-run)
     await pool.query(`
-      CREATE INDEX IF NOT EXISTS idx_blacklist_email
-        ON blacklist(email);
-      CREATE INDEX IF NOT EXISTS idx_blacklist_store_identifier
-        ON blacklist(store_identifier)
-        WHERE store_identifier IS NOT NULL;
-      CREATE INDEX IF NOT EXISTS idx_blacklist_active
-        ON blacklist(email, store_identifier)
-        WHERE removed_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_blacklist_email ON blacklist(email);
+      CREATE INDEX IF NOT EXISTS idx_blacklist_store_identifier ON blacklist(store_identifier) WHERE store_identifier IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_blacklist_active ON blacklist(email, store_identifier) WHERE removed_at IS NULL;
     `);
-
     console.log(`✅ [${migrationName}] blacklist table and archived_at column ready`);
   } catch (error) {
     console.error(`❌ [${migrationName}] Failed:`, error);
@@ -960,14 +870,9 @@ async function migration_014_add_auto_replied_at() {
   const migrationName = 'Migration 014';
   try {
     console.log(`📝 [${migrationName}] Adding auto_replied_at to conversations...`);
+    await pool.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS auto_replied_at TIMESTAMPTZ DEFAULT NULL;`);
     await pool.query(`
-      ALTER TABLE conversations
-        ADD COLUMN IF NOT EXISTS auto_replied_at TIMESTAMPTZ DEFAULT NULL;
-    `);
-    await pool.query(`
-      CREATE INDEX IF NOT EXISTS idx_conversations_auto_replied_at
-        ON conversations(auto_replied_at)
-        WHERE auto_replied_at IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_conversations_auto_replied_at ON conversations(auto_replied_at) WHERE auto_replied_at IS NOT NULL;
     `);
     console.log(`✅ [${migrationName}] auto_replied_at column added`);
   } catch (error) {
@@ -980,10 +885,7 @@ async function migration_015_add_notes_order() {
   const migrationName = 'Migration 015';
   try {
     console.log(`📝 [${migrationName}] Adding notes_order column to employees...`);
-    await pool.query(`
-      ALTER TABLE employees
-        ADD COLUMN IF NOT EXISTS notes_order JSONB DEFAULT '[]';
-    `);
+    await pool.query(`ALTER TABLE employees ADD COLUMN IF NOT EXISTS notes_order JSONB DEFAULT '[]';`);
     console.log(`✅ [${migrationName}] notes_order column added`);
   } catch (error) {
     console.error(`❌ [${migrationName}] Failed:`, error);
@@ -995,17 +897,87 @@ async function migration_016_add_employee_name() {
   const migrationName = 'Migration 016';
   try {
     console.log(`📝 [${migrationName}] Adding employee_name column to employees table...`);
-    await pool.query(`
-      ALTER TABLE employees
-        ADD COLUMN IF NOT EXISTS employee_name VARCHAR(255);
-    `);
+    await pool.query(`ALTER TABLE employees ADD COLUMN IF NOT EXISTS employee_name VARCHAR(255);`);
     console.log(`✅ [${migrationName}] employee_name column added`);
   } catch (error) {
     console.error(`❌ [${migrationName}] Failed:`, error);
     throw error;
   }
 }
-// ── END NEW ───────────────────────────────────────────────────────────────────
+
+// ============================================
+// MIGRATION 017 — Promo email tables
+// ============================================
+// Creates:
+//   promo_unsubscribes  — global opt-out list (one row per email)
+//   promo_sent_emails   — per-(email, store_domain) sent log
+//     - prevents re-sending to same customer from same store
+//     - allows same customer to receive from different stores
+//     - fixes old global UNIQUE(email) constraint if upgrading
+// ============================================
+
+async function migration_017_add_promo_tables() {
+  const migrationName = 'Migration 017';
+  try {
+    console.log(`📝 [${migrationName}] Adding promo_unsubscribes and promo_sent_emails tables...`);
+
+    // ── promo_unsubscribes ──────────────────────────────────────────────────
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS promo_unsubscribes (
+        id              SERIAL PRIMARY KEY,
+        email           TEXT NOT NULL UNIQUE,
+        unsubscribed_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_promo_unsubscribes_email
+        ON promo_unsubscribes (LOWER(email))
+    `);
+    console.log(`   [${migrationName}] promo_unsubscribes ready`);
+
+    // ── promo_sent_emails ───────────────────────────────────────────────────
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS promo_sent_emails (
+        id            SERIAL PRIMARY KEY,
+        email         TEXT        NOT NULL,
+        store_domain  TEXT        NOT NULL DEFAULT '',
+        store_name    TEXT,
+        discount_code TEXT,
+        sent_at       TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    // Drop old global unique constraint if upgrading from an earlier version
+    // that had UNIQUE(email) — silently ignored if it doesn't exist
+    await pool.query(`
+      ALTER TABLE promo_sent_emails
+        DROP CONSTRAINT IF EXISTS promo_sent_emails_email_key
+    `).catch(() => {});
+
+    // Correct composite unique: one send per (email, store_domain)
+    // so the same customer can still receive from other stores
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS promo_sent_emails_email_store_uidx
+        ON promo_sent_emails (LOWER(email), store_domain)
+    `);
+
+    // Supporting indexes for the recipients query
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_promo_sent_emails_email
+        ON promo_sent_emails (LOWER(email));
+      CREATE INDEX IF NOT EXISTS idx_promo_sent_emails_store_domain
+        ON promo_sent_emails (store_domain);
+      CREATE INDEX IF NOT EXISTS idx_promo_sent_emails_sent_at
+        ON promo_sent_emails (sent_at DESC);
+    `);
+
+    console.log(`   [${migrationName}] promo_sent_emails ready`);
+    console.log(`✅ [${migrationName}] Promo tables created successfully`);
+  } catch (error) {
+    console.error(`❌ [${migrationName}] Failed:`, error);
+    throw error;
+  }
+}
 
 // ============================================
 // STORE FUNCTIONS
@@ -1047,8 +1019,7 @@ async function registerStore(storeData) {
 async function getStoreByIdentifier(identifier) {
   try {
     const result = await pool.query(
-      'SELECT * FROM stores WHERE store_identifier = $1 AND is_active = true',
-      [identifier]
+      'SELECT * FROM stores WHERE store_identifier = $1 AND is_active = true', [identifier]
     );
     return result.rows[0] || null;
   } catch (error) {
@@ -1060,8 +1031,7 @@ async function getStoreByIdentifier(identifier) {
 async function getStoreByDomain(domain) {
   try {
     const result = await pool.query(
-      'SELECT * FROM stores WHERE shop_domain = $1 AND is_active = true',
-      [domain]
+      'SELECT * FROM stores WHERE shop_domain = $1 AND is_active = true', [domain]
     );
     return result.rows[0] || null;
   } catch (error) {
@@ -1073,8 +1043,7 @@ async function getStoreByDomain(domain) {
 async function getStoreById(id) {
   try {
     const result = await pool.query(
-      'SELECT * FROM stores WHERE id = $1 AND is_active = true',
-      [id]
+      'SELECT * FROM stores WHERE id = $1 AND is_active = true', [id]
     );
     return result.rows[0] || null;
   } catch (error) {
@@ -1119,8 +1088,7 @@ async function updateStoreSettings(storeId, settings) {
     fields.push(`updated_at = NOW()`);
     values.push(storeId);
     const result = await pool.query(
-      `UPDATE stores SET ${fields.join(', ')} WHERE id = $${paramCount} RETURNING *`,
-      values
+      `UPDATE stores SET ${fields.join(', ')} WHERE id = $${paramCount} RETURNING *`, values
     );
     return result.rows[0];
   } catch (error) {
@@ -1163,10 +1131,7 @@ async function getConversation(conversationId, storeId = null) {
   try {
     let query = 'SELECT c.*, s.brand_name, s.logo_url FROM conversations c JOIN stores s ON c.shop_id = s.id WHERE c.id = $1';
     const params = [conversationId];
-    if (storeId) {
-      query += ' AND c.shop_id = $2';
-      params.push(storeId);
-    }
+    if (storeId) { query += ' AND c.shop_id = $2'; params.push(storeId); }
     const result = await pool.query(query, params);
     return result.rows[0] || null;
   } catch (error) {
@@ -1177,59 +1142,25 @@ async function getConversation(conversationId, storeId = null) {
 
 async function getConversations(filters = {}) {
   try {
-let query = `
-  SELECT c.*, s.brand_name, s.logo_url, s.primary_color, s.store_identifier,
-    (SELECT content FROM messages 
-     WHERE conversation_id = c.id 
-       AND sender_type = 'customer'
-     ORDER BY id DESC LIMIT 1) AS last_customer_message
-  FROM conversations c 
-  JOIN stores s ON c.shop_id = s.id 
-  WHERE 1=1
-`;
+    let query = `
+      SELECT c.*, s.brand_name, s.logo_url, s.primary_color, s.store_identifier,
+        (SELECT content FROM messages WHERE conversation_id = c.id AND sender_type = 'customer' ORDER BY id DESC LIMIT 1) AS last_customer_message
+      FROM conversations c JOIN stores s ON c.shop_id = s.id WHERE 1=1
+    `;
     const params = [];
     let paramCount = 1;
-    
-    if (filters.storeId) {
-      query += ` AND c.shop_id = $${paramCount}`;
-      params.push(filters.storeId);
-      paramCount++;
-    }
-    if (filters.storeIdentifier) {
-      query += ` AND c.shop_domain = $${paramCount}`;
-      params.push(filters.storeIdentifier);
-      paramCount++;
-    }
-    if (filters.customerEmail) {
-      query += ` AND c.customer_email = $${paramCount}`;
-      params.push(filters.customerEmail);
-      paramCount++;
-    }
-    if (filters.status) {
-      query += ` AND c.status = $${paramCount}`;
-      params.push(filters.status);
-      paramCount++;
-    }
-    if (!filters.status && filters.excludeArchived) {
-      query += ` AND c.status != 'archived'`;
-    }
-    if (filters.priority) {
-      query += ` AND c.priority = $${paramCount}`;
-      params.push(filters.priority);
-      paramCount++;
-    }
-    if (filters.assignedTo) {
-      query += ` AND c.assigned_to = $${paramCount}`;
-      params.push(filters.assignedTo);
-      paramCount++;
-    }
+    if (filters.storeId)       { query += ` AND c.shop_id = $${paramCount}`; params.push(filters.storeId); paramCount++; }
+    if (filters.storeIdentifier) { query += ` AND c.shop_domain = $${paramCount}`; params.push(filters.storeIdentifier); paramCount++; }
+    if (filters.customerEmail) { query += ` AND c.customer_email = $${paramCount}`; params.push(filters.customerEmail); paramCount++; }
+    if (filters.status)        { query += ` AND c.status = $${paramCount}`; params.push(filters.status); paramCount++; }
+    if (!filters.status && filters.excludeArchived) query += ` AND c.status != 'archived'`;
+    if (filters.priority)      { query += ` AND c.priority = $${paramCount}`; params.push(filters.priority); paramCount++; }
+    if (filters.assignedTo)    { query += ` AND c.assigned_to = $${paramCount}`; params.push(filters.assignedTo); paramCount++; }
     if (filters.search) {
       query += ` AND (c.customer_email ILIKE $${paramCount} OR c.customer_name ILIKE $${paramCount})`;
-      params.push(`%${filters.search}%`);
-      paramCount++;
+      params.push(`%${filters.search}%`); paramCount++;
     }
-    
-    const limit = filters.limit;
+    const limit  = filters.limit;
     const offset = filters.offset || 0;
     if (limit) {
       query += ` ORDER BY c.updated_at DESC LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
@@ -1237,7 +1168,6 @@ let query = `
     } else {
       query += ` ORDER BY c.updated_at DESC`;
     }
-    
     const result = await pool.query(query, params);
     return result.rows;
   } catch (error) {
@@ -1251,16 +1181,8 @@ async function getConversationCount(filters = {}) {
     let query = 'SELECT COUNT(*) FROM conversations WHERE 1=1';
     const params = [];
     let paramCount = 1;
-    if (filters.storeId) {
-      query += ` AND shop_id = $${paramCount}`;
-      params.push(filters.storeId);
-      paramCount++;
-    }
-    if (filters.status) {
-      query += ` AND status = $${paramCount}`;
-      params.push(filters.status);
-      paramCount++;
-    }
+    if (filters.storeId) { query += ` AND shop_id = $${paramCount}`; params.push(filters.storeId); paramCount++; }
+    if (filters.status)  { query += ` AND status = $${paramCount}`;  params.push(filters.status);  paramCount++; }
     const result = await pool.query(query, params);
     return parseInt(result.rows[0].count);
   } catch (error) {
@@ -1282,8 +1204,7 @@ async function updateConversation(conversationId, updates) {
     fields.push(`updated_at = NOW()`);
     values.push(conversationId);
     const result = await pool.query(
-      `UPDATE conversations SET ${fields.join(', ')} WHERE id = $${paramCount} RETURNING *`,
-      values
+      `UPDATE conversations SET ${fields.join(', ')} WHERE id = $${paramCount} RETURNING *`, values
     );
     return result.rows[0];
   } catch (error) {
@@ -1295,9 +1216,7 @@ async function updateConversation(conversationId, updates) {
 async function closeConversation(conversationId) {
   try {
     const result = await pool.query(`
-      UPDATE conversations 
-      SET status = 'closed', closed_at = NOW(), updated_at = NOW() 
-      WHERE id = $1 RETURNING *
+      UPDATE conversations SET status = 'closed', closed_at = NOW(), updated_at = NOW() WHERE id = $1 RETURNING *
     `, [conversationId]);
     return result.rows[0];
   } catch (error) {
@@ -1318,29 +1237,19 @@ async function assignConversation(conversationId, employeeEmail) {
   }
 }
 
-
 async function markConversationRead(conversationId) {
   try {
-    // Reset the conversation-level unread state
     await pool.query(`
-      UPDATE conversations
-      SET unread_count = 0, last_read_at = NOW(), updated_at = NOW()
-      WHERE id = $1
+      UPDATE conversations SET unread_count = 0, last_read_at = NOW(), updated_at = NOW() WHERE id = $1
     `, [conversationId]);
-
     await pool.query(`
-      UPDATE messages
-         SET read_at = NOW()
-       WHERE conversation_id = $1
-         AND sender_type = 'customer'
-         AND read_at IS NULL
+      UPDATE messages SET read_at = NOW() WHERE conversation_id = $1 AND sender_type = 'customer' AND read_at IS NULL
     `, [conversationId]);
   } catch (error) {
     console.error('Error marking conversation read:', error);
     throw error;
   }
 }
-
 
 // ============================================
 // MESSAGE FUNCTIONS
@@ -1358,10 +1267,8 @@ async function saveMessage(data) {
   });
   
   const client = await pool.connect();
-  
   try {
     await client.query('BEGIN');
-    
     const messageResult = await client.query(`
       INSERT INTO messages (
         conversation_id, shop_id, sender_type, sender_name, sender_id,
@@ -1374,53 +1281,30 @@ async function saveMessage(data) {
       conversation_id, store_id, sender_type, sender_name, sender_id,
       content, message_type, attachment_url, attachment_type, file_data
     ]);
-    
     const message = messageResult.rows[0];
-    console.log('✅ [saveMessage] Message inserted, id:', message.id);
-    
     const updateFields = [
       'total_message_count = total_message_count + 1',
       'last_message_at = NOW()',
       'updated_at = NOW()',
       'last_message = $2',
-      'last_message_sender_type = $3'
+      'last_message_sender_type = $3',
     ];
-    
     if (sender_type === 'customer') {
       updateFields.push('customer_message_count = customer_message_count + 1');
       updateFields.push('last_customer_message_at = NOW()');
       updateFields.push('unread_count = unread_count + 1');
-      updateFields.push(`
-        auto_replied_at = CASE
-          WHEN auto_replied_at IS NULL
-            OR auto_replied_at < NOW() - INTERVAL '8 hours'
-          THEN NULL
-          ELSE auto_replied_at
-        END
-      `);
+      updateFields.push(`auto_replied_at = CASE WHEN auto_replied_at IS NULL OR auto_replied_at < NOW() - INTERVAL '8 hours' THEN NULL ELSE auto_replied_at END`);
     } else if (sender_type === 'agent') {
       updateFields.push('agent_message_count = agent_message_count + 1');
       updateFields.push('last_agent_message_at = NOW()');
       updateFields.push('agent_replied_at = COALESCE(agent_replied_at, NOW())');
-      updateFields.push(`
-        response_time_seconds = CASE 
-          WHEN last_agent_message_at IS NULL AND first_message_at IS NOT NULL
-          THEN EXTRACT(EPOCH FROM (NOW() - first_message_at))::INTEGER
-          ELSE response_time_seconds
-        END
-      `);
+      updateFields.push(`response_time_seconds = CASE WHEN last_agent_message_at IS NULL AND first_message_at IS NOT NULL THEN EXTRACT(EPOCH FROM (NOW() - first_message_at))::INTEGER ELSE response_time_seconds END`);
     }
-    
     updateFields.push(`first_message_at = COALESCE(first_message_at, NOW())`);
-    
-    await client.query(`
-      UPDATE conversations 
-      SET ${updateFields.join(', ')}
-      WHERE id = $1
-    `, [conversation_id, content, sender_type]);
-    
-    console.log('✅ [saveMessage] Conversation updated successfully');
-    
+    await client.query(
+      `UPDATE conversations SET ${updateFields.join(', ')} WHERE id = $1`,
+      [conversation_id, content, sender_type]
+    );
     await client.query('COMMIT');
     return parseMessageFileData(message);
   } catch (error) {
@@ -1457,19 +1341,13 @@ async function getMessages(conversationId) {
 }
 
 async function markMessageDelivered(messageId) {
-  try {
-    await pool.query('UPDATE messages SET delivered_at = NOW() WHERE id = $1', [messageId]);
-  } catch (error) {
-    console.error('Error marking message delivered:', error);
-  }
+  try { await pool.query('UPDATE messages SET delivered_at = NOW() WHERE id = $1', [messageId]); }
+  catch (error) { console.error('Error marking message delivered:', error); }
 }
 
 async function markMessageRead(messageId) {
-  try {
-    await pool.query('UPDATE messages SET read_at = NOW() WHERE id = $1', [messageId]);
-  } catch (error) {
-    console.error('Error marking message read:', error);
-  }
+  try { await pool.query('UPDATE messages SET read_at = NOW() WHERE id = $1', [messageId]); }
+  catch (error) { console.error('Error marking message read:', error); }
 }
 
 async function markMessageFailed(messageId, error) {
@@ -1478,10 +1356,9 @@ async function markMessageFailed(messageId, error) {
       'UPDATE messages SET failed = true, routing_error = $1, retry_count = retry_count + 1 WHERE id = $2',
       [error, messageId]
     );
-  } catch (err) {
-    console.error('Error marking message failed:', err);
-  }
+  } catch (err) { console.error('Error marking message failed:', err); }
 }
+
 // ============================================
 // EMPLOYEE FUNCTIONS
 // ============================================
@@ -1495,12 +1372,8 @@ async function createEmployee(data) {
     if (!email || !name) throw new Error('Email and name are required');
     if (!password_hash) throw new Error('password_hash is required');
     const result = await pool.query(`
-      INSERT INTO employees (
-        email, name, employee_name, password_hash, role, can_view_all_stores, 
-        assigned_stores, created_at, updated_at
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
-      RETURNING *
+      INSERT INTO employees (email, name, employee_name, password_hash, role, can_view_all_stores, assigned_stores, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW()) RETURNING *
     `, [email, name, employee_name, password_hash, role, can_view_all_stores, assigned_stores]);
     return result.rows[0];
   } catch (error) {
@@ -1509,39 +1382,25 @@ async function createEmployee(data) {
   }
 }
 
-
 async function getEmployeeByEmail(email) {
   try {
-    const result = await pool.query(
-      'SELECT * FROM employees WHERE email = $1 AND is_active = true', [email]
-    );
+    const result = await pool.query('SELECT * FROM employees WHERE email = $1 AND is_active = true', [email]);
     return result.rows[0] || null;
-  } catch (error) {
-    console.error('Error fetching employee:', error);
-    throw error;
-  }
+  } catch (error) { console.error('Error fetching employee:', error); throw error; }
 }
 
 async function getEmployeeById(id) {
   try {
-    const result = await pool.query(
-      'SELECT * FROM employees WHERE id = $1 AND is_active = true', [id]
-    );
+    const result = await pool.query('SELECT * FROM employees WHERE id = $1 AND is_active = true', [id]);
     return result.rows[0] || null;
-  } catch (error) {
-    console.error('Error fetching employee:', error);
-    throw error;
-  }
+  } catch (error) { console.error('Error fetching employee:', error); throw error; }
 }
 
 async function getAllEmployees() {
   try {
     const result = await pool.query('SELECT * FROM employees ORDER BY created_at DESC');
     return result.rows;
-  } catch (error) {
-    console.error('Error fetching all employees:', error);
-    throw error;
-  }
+  } catch (error) { console.error('Error fetching all employees:', error); throw error; }
 }
 
 async function updateEmployee(employeeId, updates) {
@@ -1549,40 +1408,28 @@ async function updateEmployee(employeeId, updates) {
     const fields = [];
     const values = [];
     let paramCount = 1;
-    const allowedFields = ['name', 'employee_name', 'email', 'role', 'password_hash', 'is_active', 
+    const allowedFields = ['name', 'employee_name', 'email', 'role', 'password_hash', 'is_active',
                           'can_view_all_stores', 'assigned_stores', 'last_login', 'is_online'];
     Object.entries(updates).forEach(([key, value]) => {
-      if (allowedFields.includes(key)) {
-        fields.push(`${key} = $${paramCount}`);
-        values.push(value);
-        paramCount++;
-      }
+      if (allowedFields.includes(key)) { fields.push(`${key} = $${paramCount}`); values.push(value); paramCount++; }
     });
     if (fields.length === 0) throw new Error('No valid fields to update');
     fields.push(`updated_at = NOW()`);
     values.push(employeeId);
     const result = await pool.query(
-      `UPDATE employees SET ${fields.join(', ')} WHERE id = $${paramCount} RETURNING *`,
-      values
+      `UPDATE employees SET ${fields.join(', ')} WHERE id = $${paramCount} RETURNING *`, values
     );
     return result.rows[0];
-  } catch (error) {
-    console.error('Error updating employee:', error);
-    throw error;
-  }
+  } catch (error) { console.error('Error updating employee:', error); throw error; }
 }
 
 async function deleteEmployee(employeeId) {
   try {
     const result = await pool.query(
-      'UPDATE employees SET is_active = false, updated_at = NOW() WHERE id = $1 RETURNING *',
-      [employeeId]
+      'UPDATE employees SET is_active = false, updated_at = NOW() WHERE id = $1 RETURNING *', [employeeId]
     );
     return result.rows[0];
-  } catch (error) {
-    console.error('Error deleting employee:', error);
-    throw error;
-  }
+  } catch (error) { console.error('Error deleting employee:', error); throw error; }
 }
 
 async function updateEmployeeStatus(employeeId, status) {
@@ -1599,9 +1446,7 @@ async function updateEmployeeStatus(employeeId, status) {
         [status, status === 'online', employeeId]
       );
     }
-  } catch (error) {
-    console.error('Error updating employee status:', error);
-  }
+  } catch (error) { console.error('Error updating employee status:', error); }
 }
 
 async function updateEmployeeNotesOrder(employeeId, order) {
@@ -1611,10 +1456,7 @@ async function updateEmployeeNotesOrder(employeeId, order) {
       [JSON.stringify(order), employeeId]
     );
     return result.rows[0];
-  } catch (error) {
-    console.error('Error updating employee notes order:', error);
-    throw error;
-  }
+  } catch (error) { console.error('Error updating employee notes order:', error); throw error; }
 }
 
 async function logAgentActivity(data) {
@@ -1624,9 +1466,7 @@ async function logAgentActivity(data) {
       INSERT INTO agent_activity (employee_id, conversation_id, shop_id, action, action_data, created_at)
       VALUES ($1, $2, $3, $4, $5, NOW())
     `, [employee_id, conversation_id, store_id, action, action_data]);
-  } catch (error) {
-    console.error('Error logging agent activity:', error);
-  }
+  } catch (error) { console.error('Error logging agent activity:', error); }
 }
 
 // ============================================
@@ -1637,12 +1477,9 @@ async function logWebhook(data) {
   const { store_id, topic, payload, headers } = data;
   try {
     await pool.query(`
-      INSERT INTO webhook_logs (shop_id, topic, payload, headers, received_at)
-      VALUES ($1, $2, $3, $4, NOW())
+      INSERT INTO webhook_logs (shop_id, topic, payload, headers, received_at) VALUES ($1, $2, $3, $4, NOW())
     `, [store_id, topic, payload, headers]);
-  } catch (error) {
-    console.error('Error logging webhook:', error);
-  }
+  } catch (error) { console.error('Error logging webhook:', error); }
 }
 
 // ============================================
@@ -1655,10 +1492,7 @@ async function getCannedResponses(storeId) {
       'SELECT * FROM canned_responses WHERE shop_id = $1 ORDER BY category, title', [storeId]
     );
     return result.rows;
-  } catch (error) {
-    console.error('Error fetching canned responses:', error);
-    throw error;
-  }
+  } catch (error) { console.error('Error fetching canned responses:', error); throw error; }
 }
 
 async function createCannedResponse(data) {
@@ -1669,10 +1503,7 @@ async function createCannedResponse(data) {
       VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW()) RETURNING *
     `, [store_id, title, content, shortcut, category, created_by]);
     return result.rows[0];
-  } catch (error) {
-    console.error('Error creating canned response:', error);
-    throw error;
-  }
+  } catch (error) { console.error('Error creating canned response:', error); throw error; }
 }
 
 // ============================================
@@ -1682,15 +1513,11 @@ async function createCannedResponse(data) {
 async function getTemplatesByUserId(userId) {
   try {
     const result = await pool.query(
-      `SELECT id, user_id, name, content, created_at, updated_at 
-       FROM message_templates WHERE user_id = $1 ORDER BY created_at DESC`,
+      `SELECT id, user_id, name, content, created_at, updated_at FROM message_templates WHERE user_id = $1 ORDER BY created_at DESC`,
       [userId]
     );
     return result.rows;
-  } catch (error) {
-    console.error('Error fetching templates:', error);
-    throw error;
-  }
+  } catch (error) { console.error('Error fetching templates:', error); throw error; }
 }
 
 async function getTemplateById(templateId) {
@@ -1700,49 +1527,34 @@ async function getTemplateById(templateId) {
       [templateId]
     );
     return result.rows[0] || null;
-  } catch (error) {
-    console.error('Error fetching template:', error);
-    throw error;
-  }
+  } catch (error) { console.error('Error fetching template:', error); throw error; }
 }
 
 async function createTemplate({ user_id, name, content }) {
   try {
     const result = await pool.query(
-      `INSERT INTO message_templates (user_id, name, content) 
-       VALUES ($1, $2, $3) 
-       RETURNING id, user_id, name, content, created_at, updated_at`,
+      `INSERT INTO message_templates (user_id, name, content) VALUES ($1, $2, $3) RETURNING id, user_id, name, content, created_at, updated_at`,
       [user_id, name, content]
     );
     return result.rows[0];
-  } catch (error) {
-    console.error('Error creating template:', error);
-    throw error;
-  }
+  } catch (error) { console.error('Error creating template:', error); throw error; }
 }
 
 async function updateTemplate(templateId, { name, content }) {
   try {
     const result = await pool.query(
-      `UPDATE message_templates SET name = $1, content = $2, updated_at = CURRENT_TIMESTAMP 
-       WHERE id = $3 RETURNING id, user_id, name, content, created_at, updated_at`,
+      `UPDATE message_templates SET name = $1, content = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3 RETURNING id, user_id, name, content, created_at, updated_at`,
       [name, content, templateId]
     );
     return result.rows[0];
-  } catch (error) {
-    console.error('Error updating template:', error);
-    throw error;
-  }
+  } catch (error) { console.error('Error updating template:', error); throw error; }
 }
 
 async function deleteTemplate(templateId) {
   try {
     await pool.query('DELETE FROM message_templates WHERE id = $1', [templateId]);
     return { success: true };
-  } catch (error) {
-    console.error('Error deleting template:', error);
-    throw error;
-  }
+  } catch (error) { console.error('Error deleting template:', error); throw error; }
 }
 
 // ============================================
@@ -1753,10 +1565,7 @@ async function getDashboardStats(filters = {}) {
   try {
     let storeFilter = '';
     const params = [];
-    if (filters.storeId) {
-      storeFilter = 'AND c.shop_id = $1';
-      params.push(filters.storeId);
-    }
+    if (filters.storeId) { storeFilter = 'AND c.shop_id = $1'; params.push(filters.storeId); }
     const result = await pool.query(`
       SELECT 
         COUNT(DISTINCT c.id) as total_conversations,
@@ -1767,15 +1576,11 @@ async function getDashboardStats(filters = {}) {
         COUNT(DISTINCT m.id) FILTER (WHERE DATE(m.timestamp) = CURRENT_DATE) as messages_today,
         AVG(c.response_time_seconds) FILTER (WHERE c.response_time_seconds IS NOT NULL) as avg_response_time,
         COUNT(DISTINCT c.customer_email) as unique_customers
-      FROM conversations c
-      LEFT JOIN messages m ON m.conversation_id = c.id
+      FROM conversations c LEFT JOIN messages m ON m.conversation_id = c.id
       WHERE c.status != 'archived' ${storeFilter}
     `, params);
     return result.rows[0];
-  } catch (error) {
-    console.error('Error fetching dashboard stats:', error);
-    throw error;
-  }
+  } catch (error) { console.error('Error fetching dashboard stats:', error); throw error; }
 }
 
 async function getStoreMetrics(storeId, days = 30) {
@@ -1788,10 +1593,7 @@ async function getStoreMetrics(storeId, days = 30) {
       ORDER BY date DESC
     `, [storeId]);
     return result.rows;
-  } catch (error) {
-    console.error('Error fetching store metrics:', error);
-    throw error;
-  }
+  } catch (error) { console.error('Error fetching store metrics:', error); throw error; }
 }
 
 // ============================================
@@ -1809,9 +1611,7 @@ async function testConnection() {
   }
 }
 
-async function closePool() {
-  await pool.end();
-}
+async function closePool() { await pool.end(); }
 
 // ============================================
 // EXPORTS

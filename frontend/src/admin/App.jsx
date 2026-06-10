@@ -709,6 +709,7 @@ import AITraining from './components/AITraining';
 import StoreManagement from './components/StoreManagement';
 import ArchivedConversations from './components/Archivedconversations';
 import BlacklistManager from './components/Blacklistmanager';
+import PromoEmailBlast from './components/PromoEmailBlast';
 
 function App() {
   const [employee, setEmployee] = useState(null);
@@ -860,7 +861,8 @@ const getEmployeeName = (emp) => emp.employeeName || emp.name || 'Unknown';
   }, [profileDropdownOpen]);
 
   useEffect(() => {
-    if (['employees','stores','blacklist','training'].includes(activePage) && employee.role !== 'admin')
+    // if (['employees','stores','blacklist','training'].includes(activePage) && employee.role !== 'admin')
+    if (['employees','stores','blacklist','training','promo'].includes(activePage) && employee.role !== 'admin')
       setActivePage('dashboard');
   }, [activePage, employee.role]);
 
@@ -1256,6 +1258,19 @@ const getEmployeeName = (emp) => emp.employeeName || emp.name || 'Unknown';
                     <span className="dropdown-item-label">AI Training</span>
                     {activePage === 'training' && <span className="dropdown-item-check">✓</span>}
                   </button>
+
+                  <button
+                    className={`dropdown-item ${activePage === 'promo' ? 'dropdown-item--active' : ''}`}
+                    onClick={() => navigateTo('promo')}
+                    type="button"
+                    role="menuitem"
+                  >
+                    <span className="dropdown-item-icon">📣</span>
+                    <span className="dropdown-item-label">Promo Email Blast</span>
+                    {activePage === 'promo' && <span className="dropdown-item-check">✓</span>}
+                  </button>
+
+
                 </>)}
 
                 <div className="dropdown-divider" />
@@ -1394,6 +1409,14 @@ const getEmployeeName = (emp) => emp.employeeName || emp.name || 'Unknown';
           </ErrorBoundary>
         </div>
       )}
+            {activePage === 'promo' && employee.role === 'admin' && (
+        <div className="app-content full-width" style={{ height: 'calc(100vh - 60px)', overflow: 'hidden' }}>
+          <ErrorBoundary>
+            <PromoEmailBlast onBack={() => setActivePage('dashboard')} />
+          </ErrorBoundary>
+        </div>
+      )}
+
     </div>
   );
 }

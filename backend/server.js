@@ -5316,11 +5316,30 @@ const server = http.createServer(app);
 
 app.set('trust proxy', 1);
 
+// app.use((req, res, next) => {
+//   res.header('Access-Control-Allow-Origin', '*');
+//   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+//   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+//   res.header('Access-Control-Allow-Credentials', 'true');
+//   if (req.method === 'OPTIONS') return res.sendStatus(204);
+//   next();
+// });
+
+const ALLOWED_ORIGINS = [
+  'https://chat-support-pro.onrender.com',
+  'https://chat-support-pro.vercel.app',
+  'http://localhost:5173',
+  'http://localhost:3000',
+];
+
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
+  const origin = req.headers.origin;
+  if (ALLOWED_ORIGINS.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Credentials', 'true');
+  }
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-  res.header('Access-Control-Allow-Credentials', 'true');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
@@ -5624,6 +5643,9 @@ const widgetLimiter = rateLimit({ windowMs: 15*60*1000, max: 500, message: 'Too 
   standardHeaders: true, legacyHeaders: false, validate: { xForwardedForHeader: false, trustProxy: false } });
 const loginLimiter = rateLimit({ windowMs: 15*60*1000, max: 5, message: 'Too many login attempts.',
   skipSuccessfulRequests: true, validate: { xForwardedForHeader: false, trustProxy: false } });
+
+  const promoRoutes = require('./routes/promo-routes');
+app.use('/api/promo', promoRoutes);
 
 app.use('/api/widget/', widgetLimiter);
 app.use('/api/customers/', widgetLimiter);

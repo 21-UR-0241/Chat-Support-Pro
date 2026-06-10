@@ -393,6 +393,31 @@ class ApiService {
     });
   }
 
+  // ============ Promo Email Blast ============
+
+async getPromoRecipients({ storeIds = 'all' } = {}) {
+  const value  = Array.isArray(storeIds) ? storeIds.join(',') : storeIds;
+  const params = new URLSearchParams({ storeIds: value });
+  return this.fetch(`/api/promo/recipients?${params}`);
+}
+ 
+async sendPromoBlast(payload) {
+  return this.fetch('/api/promo/send', {
+    method: 'POST',
+    body:   JSON.stringify(payload),
+  });
+}
+ 
+async recordPromoSent({ emails, discountCode }) {
+  return this.fetch('/api/promo/record-sent', {
+    method: 'POST',
+    body:   JSON.stringify({ emails, discountCode }),
+  });
+}
+ 
+async getPromoSent() {
+  return this.fetch('/api/promo/sent');
+}
 
   // ============ AI Training / Brain ============
 
