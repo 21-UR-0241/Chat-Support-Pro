@@ -5316,14 +5316,6 @@ const server = http.createServer(app);
 
 app.set('trust proxy', 1);
 
-// app.use((req, res, next) => {
-//   res.header('Access-Control-Allow-Origin', '*');
-//   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-//   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-//   res.header('Access-Control-Allow-Credentials', 'true');
-//   if (req.method === 'OPTIONS') return res.sendStatus(204);
-//   next();
-// });
 
 const ALLOWED_ORIGINS = [
   'https://chat-support-pro.onrender.com',
@@ -5635,14 +5627,35 @@ app.get('/widget.html', (req, res) => {
 });
 app.use(express.static('public'));
 
-const limiter = rateLimit({ windowMs: 15*60*1000, max: 200, message: 'Too many requests from this IP.',
+
+
+const limiter = rateLimit({ windowMs: 15*60*1000, max: 500, message: 'Too many requests from this IP.',
   standardHeaders: true, legacyHeaders: false,
   skip: (req) => { const h = req.headers.authorization; if (h?.startsWith('Bearer ')) { try { const { verifyToken } = require('./auth'); return !!verifyToken(h.split(' ')[1]); } catch(e){ return false; } } return false; },
   validate: { xForwardedForHeader: false, trustProxy: false } });
+
+
 const widgetLimiter = rateLimit({ windowMs: 15*60*1000, max: 500, message: 'Too many requests.',
   standardHeaders: true, legacyHeaders: false, validate: { xForwardedForHeader: false, trustProxy: false } });
-const loginLimiter = rateLimit({ windowMs: 15*60*1000, max: 5, message: 'Too many login attempts.',
-  skipSuccessfulRequests: true, validate: { xForwardedForHeader: false, trustProxy: false } });
+
+
+// const loginLimiter = rateLimit({ windowMs: 15*60*1000, max: 5, message: 'Too many login attempts.',
+//   skipSuccessfulRequests: true, validate: { xForwardedForHeader: false, trustProxy: false } });
+
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 50,
+  skipSuccessfulRequests: true,
+  handler: (req, res) => {
+    const origin = req.headers.origin;
+    if (ALLOWED_ORIGINS.includes(origin)) {
+      res.header('Access-Control-Allow-Origin', origin);
+      res.header('Access-Control-Allow-Credentials', 'true');
+    }
+    res.status(429).json({ error: 'Too many login attempts. Please try again in 15 minutes.' });
+  },
+});
 
   const promoRoutes = require('./routes/promo-routes');
 app.use('/api/promo', promoRoutes);
