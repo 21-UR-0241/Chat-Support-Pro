@@ -3500,19 +3500,11 @@ app.post('/api/stores/:storeId/webhooks', authenticateToken, async (req, res) =>
 
 app.get('/api/employees/:employeeId/notes', authenticateToken, async (req, res) => {
   try {
-    const employeeId = parseInt(req.params.employeeId);
-    if (Number.isNaN(employeeId)) return res.status(400).json({ error: 'Invalid employee id' });
-    // agents read only their own notes; admins can read anyone's
-    if (req.user.id !== employeeId && req.user.role !== 'admin')
-      return res.status(403).json({ error: 'Forbidden' });
-
     const result = await db.pool.query(
       `SELECT id, employee_id, employee_name, title, content, created_at, updated_at
          FROM employee_notes
-        WHERE employee_id = $1
         ORDER BY created_at DESC
-        LIMIT 500`,
-      [employeeId]
+        LIMIT 500`
     );
     res.json(result.rows.map(snakeToCamel));
   } catch (error) { console.error('❌ Error fetching notes:', error); res.status(500).json({ error: 'Failed to fetch notes' }); }
