@@ -420,14 +420,25 @@ class WebSocketService {
   /**
    * Send typing indicator
    */
-  sendTyping(conversationId, isTyping, senderName) {
-    this.send({
-      type: 'typing',
-      conversationId,
-      isTyping,
-      sender: senderName,
-    });
-  }
+  // sendTyping(conversationId, isTyping, senderName) {
+  //   this.send({
+  //     type: 'typing',
+  //     conversationId,
+  //     isTyping,
+  //     sender: senderName,
+  //   });
+  // }
+
+  // websocket.js
+sendTyping(conversationId, isTyping) {
+  this.send({
+    type: 'typing',
+    conversationId,
+    isTyping,
+    senderType: 'agent',
+    senderName: 'Customer Support',  // generic — the real agent name is never sent to customers
+  });
+}
 
   /**
    * Register event listener

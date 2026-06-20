@@ -985,14 +985,16 @@ const getEmployeeName = (emp) => emp.employeeName || emp.name || 'Unknown';
     } catch (err) { refreshConversations(); throw err; }
   };
 
-  const handleTyping = (isTyping) => {
-    if (activeConversation && ws) ws.sendTyping(activeConversation.id, isTyping, getEmployeeName(employee));
-  };
+  // const handleTyping = (isTyping) => {
+  //   if (activeConversation && ws) ws.sendTyping(activeConversation.id, isTyping, getEmployeeName(employee));
+  // };
 
-  // ── WebSocket handlers ────────────────────────────────────────────────────
-  // Listeners register ONCE (deps: [ws], and ws is now a stable reference).
-  // Live callbacks are read from handlersRef.current at event time, so the
-  // socket subscriptions never tear down/rebuild when callbacks change identity.
+
+
+const handleTyping = (isTyping) => {
+  if (activeConversation && ws) ws.sendTyping(activeConversation.id, isTyping);
+};
+
   useEffect(() => {
     if (!ws) return;
 
@@ -1356,6 +1358,7 @@ const getEmployeeName = (emp) => emp.employeeName || emp.name || 'Unknown';
             <ErrorBoundary>
               <ChatWindow
                 conversation={activeConversation}
+                ws={ws}   
                 onSendMessage={handleSendMessage}
                 onClose={() => setActiveConversation(null)}
                 onTyping={handleTyping}

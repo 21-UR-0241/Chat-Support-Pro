@@ -197,9 +197,13 @@ class ApiService {
     return this.fetch(`/api/blacklist?${params}`);
   }
 
-  async removeBlacklistEntry(blacklistId) {
-    return this.fetch(`/api/blacklist/${blacklistId}`, { method: 'DELETE' });
-  }
+  async removeFromBlacklist(blacklistId) {
+  return this.fetch(`/api/blacklist/${blacklistId}`, { method: 'DELETE' });
+}
+
+  // async removeBlacklistEntry(blacklistId) {
+  //   return this.fetch(`/api/blacklist/${blacklistId}`, { method: 'DELETE' });
+  // }
 
   async checkBlacklist(email, storeIdentifier) {
     const params = new URLSearchParams({ email });
@@ -282,16 +286,16 @@ class ApiService {
     return this.fetch('/api/stats/discord-daily-report/trigger', { method: 'POST' });
   }
   
-  // ============ Analytics ============
+  // // ============ Analytics ============
 
-  async getCommonQuestions(params = {}) {
-    const queryParams = new URLSearchParams(params).toString();
-    return this.fetch(`/api/analytics/common-questions${queryParams ? '?' + queryParams : ''}`);
-  }
+  // async getCommonQuestions(params = {}) {
+  //   const queryParams = new URLSearchParams(params).toString();
+  //   return this.fetch(`/api/analytics/common-questions${queryParams ? '?' + queryParams : ''}`);
+  // }
 
-  async clearAnalyticsCache() {
-    return this.fetch('/api/analytics/clear-cache', { method: 'POST' });
-  }
+  // async clearAnalyticsCache() {
+  //   return this.fetch('/api/analytics/clear-cache', { method: 'POST' });
+  // }
 
   // ============ Employees ============
 
