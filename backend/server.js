@@ -2938,10 +2938,6 @@ const widgetLimiter = rateLimit({ windowMs: 15*60*1000, max: 500, message: 'Too 
   standardHeaders: true, legacyHeaders: false, validate: { xForwardedForHeader: false, trustProxy: false } });
 
 
-// const loginLimiter = rateLimit({ windowMs: 15*60*1000, max: 5, message: 'Too many login attempts.',
-//   skipSuccessfulRequests: true, validate: { xForwardedForHeader: false, trustProxy: false } });
-
-
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 50,
@@ -3490,13 +3486,6 @@ app.post('/api/stores/:storeId/webhooks', authenticateToken, async (req, res) =>
 });
 
 // ============ NOTES ============
-
-// app.get('/api/employees/:employeeId/notes', authenticateToken, async (req, res) => {
-//   try {
-//     const result = await db.pool.query(`SELECT id, employee_id, employee_name, title, content, created_at, updated_at FROM employee_notes ORDER BY created_at DESC`);
-//     res.json(result.rows.map(snakeToCamel));
-//   } catch (error) { console.error('❌ Error fetching notes:', error); res.status(500).json({ error: 'Failed to fetch notes' }); }
-// });
 
 app.get('/api/employees/:employeeId/notes', authenticateToken, async (req, res) => {
   try {
@@ -4452,110 +4441,6 @@ function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis, ad
 }
 
 // ============ EMPLOYEE ENDPOINTS ============
-
-// OPTIMISED — parallel queries + 90-day filter + write-invalidated cache
-// app.get('/api/employees', authenticateToken, async (req, res) => {
-//   try {
-//     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
-
-//     // Serve from cache if available (invalidated on any employee write)
-//     const cached = appCache.get('employees:list');
-//     if (cached) return res.json(cached);
-
-//     // Run all 3 queries in parallel — none depends on another
-//     const [employees, responseStats, customerResponseStats] = await Promise.all([
-//       db.getAllEmployees(),
-
-//       db.pool.query(`
-//         WITH real_messages AS (
-//           SELECT sender_id, sender_type, sent_at,
-//             LAG(sender_type) OVER (PARTITION BY conversation_id ORDER BY sent_at) AS prev_sender_type,
-//             LAG(sent_at)     OVER (PARTITION BY conversation_id ORDER BY sent_at) AS prev_sent_at
-//           FROM messages
-//           WHERE sender_type IN ('customer', 'agent')
-//             AND NOT (sender_type = 'agent' AND sender_id IS NULL)
-//             AND sent_at >= NOW() - INTERVAL '90 days'
-//         ),
-//         response_times AS (
-//           SELECT sender_id,
-//             EXTRACT(EPOCH FROM (sent_at - prev_sent_at)) / 60.0 AS response_minutes
-//           FROM real_messages
-//           WHERE sender_type = 'agent'
-//             AND sender_id IS NOT NULL
-//             AND prev_sender_type = 'customer'
-//             AND prev_sent_at IS NOT NULL
-//             AND EXTRACT(EPOCH FROM (sent_at - prev_sent_at)) / 60.0 BETWEEN 0 AND 240
-//         )
-//         SELECT sender_id,
-//           ROUND(AVG(response_minutes)::numeric, 1) AS avg_response_minutes,
-//           ROUND(MIN(response_minutes)::numeric, 1) AS fastest_minutes,
-//           COUNT(*)::int AS total_responses_counted
-//         FROM response_times GROUP BY sender_id
-//       `),
-
-//       db.pool.query(`
-//         WITH real_messages AS (
-//           SELECT m.conversation_id, m.sender_id, m.sender_type, m.sent_at,
-//             c.customer_email,
-//             LAG(m.sender_type) OVER (PARTITION BY m.conversation_id ORDER BY m.sent_at) AS prev_sender_type,
-//             LAG(m.sent_at)     OVER (PARTITION BY m.conversation_id ORDER BY m.sent_at) AS prev_sent_at
-//           FROM messages m
-//           JOIN conversations c ON c.id = m.conversation_id
-//           WHERE m.sender_type IN ('customer', 'agent')
-//             AND NOT (m.sender_type = 'agent' AND m.sender_id IS NULL)
-//             AND m.sent_at >= NOW() - INTERVAL '90 days'
-//         ),
-//         rt AS (
-//           SELECT sender_id, customer_email,
-//             EXTRACT(EPOCH FROM (sent_at - prev_sent_at)) / 60.0 AS response_minutes
-//           FROM real_messages
-//           WHERE sender_type = 'agent'
-//             AND sender_id IS NOT NULL
-//             AND prev_sender_type = 'customer'
-//             AND prev_sent_at IS NOT NULL
-//             AND EXTRACT(EPOCH FROM (sent_at - prev_sent_at)) / 60.0 BETWEEN 0 AND 240
-//             AND customer_email IS NOT NULL AND customer_email != ''
-//         )
-//         SELECT sender_id, customer_email,
-//           ROUND(AVG(response_minutes)::numeric, 1) AS avg_minutes,
-//           COUNT(*)::int AS response_count
-//         FROM rt GROUP BY sender_id, customer_email
-//         ORDER BY sender_id, response_count DESC
-//       `)
-//     ]);
-
-//     const statsById = {};
-//     for (const row of responseStats.rows) {
-//       statsById[String(row.sender_id)] = {
-//         avgResponseMinutes: row.avg_response_minutes !== null ? parseFloat(row.avg_response_minutes) : null,
-//         fastestMinutes: row.fastest_minutes !== null ? parseFloat(row.fastest_minutes) : null,
-//         totalResponsesCounted: row.total_responses_counted,
-//       };
-//     }
-
-//     const responsesByAgent = {};
-//     for (const row of customerResponseStats.rows) {
-//       const key = String(row.sender_id);
-//       if (!responsesByAgent[key]) responsesByAgent[key] = [];
-//       responsesByAgent[key].push({ customerEmail: row.customer_email, avgResponseMinutes: row.avg_minutes !== null ? parseFloat(row.avg_minutes) : null, responseCount: row.response_count });
-//     }
-
-//     const enriched = employees.map(emp => {
-//       const { password_hash, api_token, ...safe } = emp;
-//       return {
-//         ...snakeToCamel(safe),
-//         ...(statsById[String(emp.id)] || { avgResponseMinutes: null, fastestMinutes: null, totalResponsesCounted: 0 }),
-//         responsesByCustomer: responsesByAgent[String(emp.id)] || [],
-//       };
-//     });
-
-//     appCache.set('employees:list', enriched);
-//     res.json(enriched);
-//   } catch (error) {
-//     console.error('Get employees error:', error);
-//     res.status(500).json({ error: 'Failed to fetch employees' });
-//   }
-// });
 
 app.get('/api/employees', authenticateToken, async (req, res) => {
   try {

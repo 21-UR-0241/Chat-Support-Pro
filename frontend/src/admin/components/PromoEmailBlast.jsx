@@ -8,7 +8,7 @@ const FROM_EMAIL = 'support@pepscustomercare.com';
 const FROM_NAME  = 'Customer Support';
 
 // ── Daily cap (localStorage — UI only, DB is authoritative for duplicates) ───
-const DAILY_CAP    = 60;
+const DAILY_CAP    = 100;
 const LS_KEY_DATE  = 'promo_send_date';
 const LS_KEY_COUNT = 'promo_send_count';
 
@@ -41,17 +41,17 @@ First things first, thank you for being part of our valued customers!
 
 Over the past month, we've been heads-down working through some significant issues with our credit card payment processing.
 
-We've completely overhauled our processes, and credit card payments are officially back online, more secure and reliable than ever. We're committed to your satisfaction.
+We've completely overhauled the system, and secure payments are officially back online: faster, safer, and more reliable than ever.
 
 As a token of appreciation for your patience and loyalty, we'd like to offer you an exclusive one-time discount:
 
 {{discount_box}}
 
-Simply apply the code at checkout.
+Just apply it at checkout.
 
-We will also add quite a few free gifts to some of the orders randomly for the following 4 days! Until Sunday evening inclusively.
+And there's more, for the next 4 days, we'll be randomly adding free gifts to orders. That's right up until Sunday evening, so it's a great time to stock up.
 
-Our chat system on site is the best place to reach us if you have any questions!
+Got questions? Our on-site chat is the fastest way to reach us.
 
 Warm regards,
 {{store_url}}`;
