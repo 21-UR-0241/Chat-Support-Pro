@@ -3318,7 +3318,8 @@ async function refreshResponseStats() {
     SELECT sender_id,
       ROUND(AVG(m)::numeric, 1),
       ROUND(MIN(m)::numeric, 1),
-      COUNT(*)::int
+      COUNT(*)::int,
+      NOW()
     FROM rt
     GROUP BY sender_id
     ON CONFLICT (sender_id) DO UPDATE SET
