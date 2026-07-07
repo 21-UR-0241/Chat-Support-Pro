@@ -4104,11 +4104,20 @@ app.post('/api/ai/suggestions', authenticateToken, async (req, res) => {
     else console.log(`✦ [AI] No style yet — not enough agent replies`);
     const brainSearchTerms = clientMessage;
     let brainContext = '';
+    let responseExamples = [];
     try {
       brainContext = await getBrainContext(db.pool, brainSearchTerms);
       console.log(`🧠 [Brain] ${brainContext.length} chars for: "${brainSearchTerms.substring(0, 80)}"`);
       if (!brainSettings.length && !brainSettings.tone && !brainSettings.empathy) brainSettings = await getBrainSettings(db.pool);
     } catch (brainErr) { console.error('🧠 [Brain] Failed:', brainErr.message); }
+    try {
+      const exRes = await db.pool.query(
+        `SELECT brain_data -> 'responseExamples' AS examples
+           FROM ai_training_brain ORDER BY updated_at DESC LIMIT 1`
+      );
+      responseExamples = Array.isArray(exRes.rows[0]?.examples) ? exRes.rows[0].examples : [];
+      console.log(`🧠 [Brain] ${responseExamples.length} response example(s) loaded for few-shot`);
+    } catch (exErr) { console.error('🧠 [Brain] responseExamples fetch failed:', exErr.message); }
     const brainUserBlock = brainContext?.trim() ? `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nANSWER FROM BRAIN — BUILD YOUR REPLIES FROM THIS DATA FIRST\nIf the answer to the customer's question exists below, use it immediately.\nDo NOT say "let me check" or "let me get back to you" when the data is here.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${brainContext}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` : '';
     if (detailedAnswerMode) {
       const brainSystemSection = brainContext?.trim() ? `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nBRAIN RULES — READ FIRST. Override all other guidelines.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${brainContext}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nUse brain data as the ONLY source of truth for product info, protocols, dosing, and policies.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` : '';
@@ -4116,7 +4125,7 @@ app.post('/api/ai/suggestions', authenticateToken, async (req, res) => {
       const systemPrompt = `${brainSystemSection}${imageSystemSection}${adminStyleBlock ? `${adminStyleBlock}\n\n` : ''}You are ghostwriting detailed replies for a human support agent. All three styles must sound like the SAME person.\n\nWrite like a real person typing in a support chat, not like an AI. Never use em dashes or double hyphens (--) anywhere, use commas or periods instead. No essay-style transitions like "furthermore" or "moreover". Short, natural sentences.\n\nWrite three distinct, highly detailed replies (8–15 sentences each) in flowing paragraphs. No bullet points. Use real values from the conversation only.\n\n${policyBlock ? `Policies:\n${policyBlock}\n` : ''}${customerContext ? `Customer context:\n${customerContext}\n` : ''}${analysisBlock ? `Conversation analysis:\n${analysisBlock}\n` : ''}\nEmpathetic: Deep emotional validation first, then full answer with warmth.\nThorough: Every product detail, step, policy, and expectation. Nothing unanswered.\nAbove & Beyond: Everything in Thorough plus extras — tips, related products, follow-up offer.\n\nReturn ONLY valid JSON:\n{\n  "detailedAnswers": [\n    { "label": "Empathetic",     "text": "..." },\n    { "label": "Thorough",       "text": "..." },\n    { "label": "Above & Beyond", "text": "..." }\n  ]\n}`;
       const userPrompt = `${brainUserBlock}Conversation history:\n${chatHistory || '(none)'}\n\nCustomer's message:\n${clientMessage}${adminNote ? `\nAdmin note: ${adminNote}` : ''}\n\nWrite 3 detailed replies. Return only the JSON.`;
       const requestBody = JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 4000, temperature: 0.5, system: systemPrompt, messages: [{ role: 'user', content: userPrompt }] });
-      const anthropicData = await callAnthropicAPIWithRetry(requestBody, ANTHROPIC_API_KEY);
+      const anthropicData = await callAIForSuggestions(requestBody, ANTHROPIC_API_KEY);
       const rawContent = anthropicData.content?.[0]?.text || '';
       console.log(`✦ [AI] Detailed raw (first 300): ${rawContent.substring(0, 300)}`);
       let parsed;
@@ -4129,11 +4138,11 @@ app.post('/api/ai/suggestions', authenticateToken, async (req, res) => {
       detailedAnswers.forEach(a => { if (a?.text) a.text = humanizeText(a.text); });
       return res.json({ detailedAnswers });
     }
-    const systemPrompt = buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness, brainContext, brainSettings, adminStyleBlock, imageAnalysis, conversationState?.sentiment || analysis?.sentiment || 'neutral');
+    const systemPrompt = buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness, brainContext, brainSettings, adminStyleBlock, imageAnalysis, conversationState?.sentiment || analysis?.sentiment || 'neutral', responseExamples);
     const userPrompt = buildUserPrompt(chatHistory, clientMessage, messageEdited, adminNote, conversationState, recentContext, brainContext, imageAnalysis || '');
-    const requestBody = JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 2500, temperature: 0.3, system: systemPrompt, messages: [{ role: 'user', content: userPrompt }] });
-    console.log(`✦ [AI] Calling Anthropic — brain: ${brainContext.length}c, style: ${adminStyleBlock.length}c, image: ${!!imageAnalysis}`);
-    const anthropicData = await callAnthropicAPIWithRetry(requestBody, ANTHROPIC_API_KEY);
+    const requestBody = JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 2500, temperature: 0.6, system: systemPrompt, messages: [{ role: 'user', content: userPrompt }] });
+    console.log(`✦ [AI] Calling Anthropic — brain: ${brainContext.length}c, style: ${adminStyleBlock.length}c, examples: ${responseExamples.length}, image: ${!!imageAnalysis}`);
+    const anthropicData = await callAIForSuggestions(requestBody, ANTHROPIC_API_KEY);
     const rawContent = anthropicData.content?.[0]?.text || '';
     console.log(`✦ [AI] Raw (first 300): ${rawContent.substring(0, 300)}`);
     let parsed;
@@ -4178,8 +4187,48 @@ app.post('/api/ai/brain-cache/clear', authenticateToken, async (req, res) => {
 
 // ============ PROMPT BUILDER FUNCTIONS ============
 
-function buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness, brainContext = '', brainSettings = {}, adminStyleBlock = '', imageAnalysis = '', sentiment = 'neutral') {
+function buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness, brainContext = '', brainSettings = {}, adminStyleBlock = '', imageAnalysis = '', sentiment = 'neutral', responseExamples = []) {
   const hasBrain = brainContext && brainContext.trim().length > 0;
+
+  // ── HUMAN VOICE — first thing the model reads, positive framing ──
+  const humanVoiceBlock = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#1 RULE — SOUND LIKE A REAL PERSON TEXTING, NOT A SUPPORT BOT
+This matters more than everything below. A real human who already knows
+the answer, typing quickly in a chat. Not a corporate email.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DO:
+- Use contractions every time: I'll, you're, it's, we've, don't, that's.
+- Short, plain sentences. Get to the point fast.
+- Use the customer's first name naturally when you know it.
+- Just answer what you know. Only say "I'll check" for real lookups you can't do yourself.
+- Warm and direct, like a helpful person who's done this a hundred times.
+
+NEVER WRITE THESE (instant robot tell):
+"I'd like to inquire", "feel free to reach out", "thank you for your patience",
+"I apologize for any inconvenience", "rest assured", "kindly", "please be advised",
+"at your earliest convenience", "we appreciate your", "I hope this finds you well",
+"as per our policy", "that's a great question".
+
+NO fake time promises. Don't say "by end of day" or "within 2 business days"
+unless the brain data or screenshot literally states that timeframe.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+`;
+
+  // ── FEW-SHOT VOICE — real gold replies, strongest lever for matching tone ──
+  const cleanExamples = (responseExamples || [])
+    .map(r => (typeof r === 'string' ? r : r?.text))
+    .filter(t => t && t.trim().length > 15)
+    .slice(0, 4);
+  const voiceExamplesBlock = cleanExamples.length ? `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+HOW WE ACTUALLY TALK — copy this exact rhythm, word choice, and warmth.
+These are real replies our best agent has sent. Match this voice.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${cleanExamples.map(t => `  • "${t.trim()}"`).join('\n')}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+` : '';
+
   const brainBlock = hasBrain ? `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nBRAIN RULES, READ THIS BEFORE ANYTHING ELSE\nMandatory store-owner instructions. Override ALL other guidelines.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${brainContext}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCRITICAL BRAIN ENFORCEMENT:\n1. If the customer is asking about a product, protocol, dosing, or anything the brain rules cover, ANSWER IT NOW. Do NOT say "let me check".\n2. Only stall when the brain does NOT contain the answer AND you genuinely need external info (order status, tracking, account details).\n3. Do NOT cross-apply one product's rule to another.\n4. ALL 3 suggestions must use exact values from the matching brain rule.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` : '';
   const imageBlock = imageAnalysis && imageAnalysis.trim() ? `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nSCREENSHOT DATA, full analysis of the agent's uploaded image\nAll values below are CONFIRMED FACTS extracted from the screenshot.\nReference exact order numbers, statuses, amounts, dates, and names directly in replies.\nDo NOT ask for information that is already visible in this screenshot.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${imageAnalysis.trim()}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` : '';
   const styleSection = adminStyleBlock ? `${adminStyleBlock}\n` : '';
@@ -4200,9 +4249,8 @@ function buildSystemPrompt(storeName, customerContext, analysisBlock, policyBloc
   const toneRule = tone === 'formal' ? `Formal, professional. No contractions.` : tone === 'casual' ? `Casual, conversational. Contractions encouraged.` : `Friendly-professional, warm but not overly casual.`;
   const empathyRule = empathy === 'high' ? `Lead with empathy before solutions.` : empathy === 'low' ? `Skip empathy preambles. Get straight to the solution.` : `Brief empathy acknowledgment, then solution.`;
   const qualityBlock = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nREPLY QUALITY (admin-set, non-negotiable):\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nLENGTH:  ${lengthRule}\nTONE:    ${toneRule}\nEMPATHY: ${empathyRule}`;
-  return `${brainBlock}${imageBlock}${styleSection}You are ghostwriting replies for a specific human support agent at ${storeName || 'this store'}. The customer must feel like they are talking to the same knowledgeable person every time.\n\n${qualityBlock}\n\n${contextGuidance}\n\n${customerContext}\n\n${analysisBlock}\n\n${policyBlock}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCORE RULES:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n1. Every suggestion MUST reference specific details, product names, the customer's stated goal, issue described, or something they actually said. Generic replies are not acceptable.\n2. NEVER say "let me check", "let me find out", or "let me get back to you" when the brain rules already contain the answer.\n3. NEVER say "let me check" for general product/knowledge questions. Only use it for real-time lookups (order status, tracking, account balance).\n4. Never ask for information already provided. Never repeat what the agent already said.\n5. Vary the 3 suggestions, different angles, not the same reply reworded:\n   - Suggestion 1: Direct, complete answer using brain knowledge\n   - Suggestion 2: Same answer with different emphasis or additional context\n   - Suggestion 3: Answer + a natural follow-up or next step\n6. Match the customer's emotional state.\n7. Never use: "I understand your frustration", "I apologize for any inconvenience", "Please be advised", "Kindly", "As per our policy", "That\'s a great question".\n8. No promises on timeframes or amounts unless confirmed.\n9. CRITICAL, JSON LIMIT: Each suggestion string must be short enough to fit inside a JSON value. Never write a suggestion that exceeds the word limit in rule LENGTH above. If you are tempted to write more, cut it, a truncated JSON response causes a complete failure.\n10. NEVER use em dashes, en dashes, or double hyphens (--) anywhere in a reply. If you need a pause or aside, use a comma or period, or start a new sentence. Write like a real person typing in a support chat, not like an AI writing an essay.\n11. Avoid other AI writing tells: don't stack three adjectives in a row, no "I hope this message finds you well" style filler, no "furthermore/moreover/additionally" transitions. Keep sentences short and plain, like something typed quickly by someone who already knows the answer.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nRespond ONLY with valid JSON: {"suggestions": ["reply 1", "reply 2", "reply 3"]}`;
+  return `${humanVoiceBlock}${voiceExamplesBlock}${brainBlock}${imageBlock}${styleSection}You are ghostwriting replies for a specific human support agent at ${storeName || 'this store'}. The customer must feel like they are talking to the same knowledgeable person every time.\n\n${qualityBlock}\n\n${contextGuidance}\n\n${customerContext}\n\n${analysisBlock}\n\n${policyBlock}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCORE RULES:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n1. Every suggestion MUST reference specific details, product names, the customer's stated goal, issue described, or something they actually said. Generic replies are not acceptable.\n2. NEVER say "let me check", "let me find out", or "let me get back to you" when the brain rules already contain the answer.\n3. NEVER say "let me check" for general product/knowledge questions. Only use it for real-time lookups (order status, tracking, account balance).\n4. Never ask for information already provided. Never repeat what the agent already said.\n5. Vary the 3 suggestions, different angles, not the same reply reworded:\n   - Suggestion 1: Direct, complete answer using brain knowledge\n   - Suggestion 2: Same answer with different emphasis or additional context\n   - Suggestion 3: Answer + a natural follow-up or next step\n6. Match the customer's emotional state.\n7. Never use: "I understand your frustration", "I apologize for any inconvenience", "Please be advised", "Kindly", "As per our policy", "That\'s a great question".\n8. No promises on timeframes or amounts unless confirmed.\n9. CRITICAL, JSON LIMIT: Each suggestion string must be short enough to fit inside a JSON value. Never write a suggestion that exceeds the word limit in rule LENGTH above. If you are tempted to write more, cut it, a truncated JSON response causes a complete failure.\n10. NEVER use em dashes, en dashes, or double hyphens (--) anywhere in a reply. If you need a pause or aside, use a comma or period, or start a new sentence. Write like a real person typing in a support chat, not like an AI writing an essay.\n11. Avoid other AI writing tells: don't stack three adjectives in a row, no "I hope this message finds you well" style filler, no "furthermore/moreover/additionally" transitions. Keep sentences short and plain, like something typed quickly by someone who already knows the answer.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nRespond ONLY with valid JSON: {"suggestions": ["reply 1", "reply 2", "reply 3"]}`;
 }
-
 
 
 function buildUserPrompt(chatHistory, clientMessage, messageEdited, adminNote, conversationState, recentContext, brainContext = '', imageAnalysis = '') {
@@ -4396,10 +4444,25 @@ function callAnthropicAPIWithRetry(requestBody, apiKey, retries = 3) {
   return attempt(retries - 1);
 }
 
+// DeepSeek-primary — used ONLY by /api/ai/suggestions.
+async function callAIForSuggestions(requestBody, apiKey) {
+  try {
+    const { tryDeepSeekFallback } = require('./lib/deepseek-fallback');
+    const primary = await tryDeepSeekFallback(requestBody);
+    if (primary) {
+      console.log('✦ [AI] Suggestions served via DeepSeek (primary)');
+      return primary;
+    }
+    console.warn('✦ [AI] DeepSeek primary unavailable — falling back to Claude');
+  } catch (err) {
+    console.warn(`✦ [AI] DeepSeek primary error: ${err.message} — falling back to Claude`);
+  }
+  console.log('✦ [AI] Suggestions served via Claude (fallback)');
+  return callAnthropicAPIWithRetry(requestBody, apiKey);
+}
+
 // ============ SMART FALLBACK SUGGESTIONS ============
 
-// function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis, adminNote) {
-//   const lower = (customerMsg || '').toLowerCase();
 
 function generateSmartFallbackSuggestionsRaw(customerMsg, chatHistory, analysis, adminNote) {
   const lower = (customerMsg || '').toLowerCase();

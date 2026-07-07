@@ -128,8 +128,9 @@ async function tryDeepSeekFallback(anthropicRequestBodyStr) {
         'Authorization': `Bearer ${deepseekKey}`,
       },
       body: JSON.stringify({
-        model: 'deepseek-chat',
-        max_tokens: parsed.max_tokens || 2000,
+        model: process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash',   // explicit, not the deprecating 'deepseek-chat' alias
+        max_tokens: Math.min(parsed.max_tokens || 2000, 8192),
+        temperature: parsed.temperature ?? 1.0,
         messages: deepseekMessages,
       }),
       signal: AbortSignal.timeout(60000),
@@ -142,6 +143,7 @@ async function tryDeepSeekFallback(anthropicRequestBodyStr) {
     }
 
     const data = JSON.parse(text);
+    console.log(`[AI] DeepSeek model=${data.model || 'unknown'} tokens=${data.usage?.total_tokens ?? '?'}`);
     const content = data.choices?.[0]?.message?.content || '';
     if (!content) {
       console.error('[AI] DeepSeek fallback returned no content');
