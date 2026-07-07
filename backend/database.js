@@ -3278,22 +3278,6 @@ async function logAgentActivity(data) {
   } catch (error) { console.error('Error logging agent activity:', error); }
 }
 
-// ============================================
-// RESPONSE-TIME ROLLUP (for /api/employees page)
-// ============================================
-// Call refreshResponseStats() on a background interval in server.js, e.g.:
-//
-//   const { refreshResponseStats } = require('./database');
-//   setTimeout(() => refreshResponseStats().catch(e => console.error('[Stats]', e.message)), 30 * 1000);
-//   setInterval(() => refreshResponseStats().catch(e => console.error('[Stats]', e.message)), 10 * 60 * 1000);
-//
-// Then in /api/employees, replace the two inline window-function queries with:
-//
-//   const statsById        = await db.getAgentResponseStats();
-//   const responsesByAgent = await db.getAgentCustomerResponseStats();
-//
-// (Both return objects keyed by String(sender_id), matching the old shape.)
-// ============================================
 
 async function refreshResponseStats() {
   // ── per-agent rollup ──

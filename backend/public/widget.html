@@ -377,7 +377,7 @@
     let displayedMessageIds=new Set(),typingTimeout=null,typingDebounceTimer=null,messageSource=null,historyLoaded=false;
     let selectedFile=null,uploading=false,uploadProgress=0;
 
-    function parseMarkdown(text){
+function parseMarkdown(text){
       if(!text||typeof text!=='string')return'';
       const esc=text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
       return esc
@@ -387,6 +387,7 @@
         .replace(/_(?!_)(.+?)(?<!_)_/g,'<em>$1</em>')
         .replace(/~~(.+?)~~/g,'<s>$1</s>')
         .replace(/`([^`]+)`/g,'<code>$1</code>')
+        .replace(/\b(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">$1</a>')
         .replace(/\n/g,'<br>');
     }
 
