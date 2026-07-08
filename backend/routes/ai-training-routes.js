@@ -465,6 +465,7 @@ Generate the interview.`;
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/chat', authenticateToken, async (req, res) => {
   try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
     const { message, images = [], history = [], interviewContext = null } = req.body;
 
     if (!message && images.length === 0) return res.status(400).json({ error: 'message or images required' });
@@ -762,8 +763,12 @@ router.post('/consolidate', authenticateToken, async (req, res) => {
       : Object.keys(ALL_KEYS);
 
     const brain = await loadBrainFromDB();
+    if (brainRuleTotal(brain) === 0) {
+      return res.status(503).json({ error: 'Brain loaded empty or unavailable — aborting to protect existing rules. Try again in a moment.' });
+    }
     const newBrain = { ...brain };
     const report = {};
+
 
     for (const cat of target) {
       const key = ALL_KEYS[cat];
@@ -934,7 +939,7 @@ router.post('/consolidate/preview', authenticateToken, async (req, res) => {
       }
       const absorbedCount = members.length;
       const impact = absorbedCount >= 8 ? 'critical' : absorbedCount >= 4 ? 'high' : 'medium';
-      goldenRules.forEach((golden, gIdx) => {
+        goldenRules.forEach((golden, gIdx) => {
         proposalSeq++;
         proposals.push({
           id: `prop_${proposalSeq}`,
@@ -945,6 +950,13 @@ router.post('/consolidate/preview', authenticateToken, async (req, res) => {
           golden,
           absorbedTexts: gIdx === 0 ? texts : [],
           absorbedCount: gIdx === 0 ? absorbedCount : 0,
+          // ← ADDED: did this cluster contain any admin-authored rule?
+          absorbedGolden: gIdx === 0
+            ? members.some(m => {
+                const s = (m.raw && typeof m.raw === 'object' ? m.raw.source : '') || '';
+                return ['admin-feedback','admin-upload','admin-training','admin-chat','admin-consolidation-audit'].includes(s);
+              })
+            : false,
           clusterKey,
         });
       });
@@ -988,7 +1000,10 @@ router.post('/consolidate/commit', authenticateToken, async (req, res) => {
   }
 
   try {
-    const brain = await loadBrainFromDB();
+const brain = await loadBrainFromDB();
+    if (brainRuleTotal(brain) === 0) {
+      return res.status(503).json({ error: 'Brain loaded empty or unavailable — aborting commit to protect existing rules. Try again in a moment.' });
+    }
 
     // Always backup before any destructive change — no interval guard here
     await backupBrain('pre-interactive-consolidate', req.user.email, { minIntervalMinutes: 0 });
@@ -1017,13 +1032,14 @@ router.post('/consolidate/commit', authenticateToken, async (req, res) => {
     }
 
     // Append each approved golden rule to its category
-    for (const p of approvedProposals) {
+for (const p of approvedProposals) {
       if (!p.key || !p.golden?.trim()) continue;
       if (!newBrain[p.key]) newBrain[p.key] = [];
-      // Avoid adding the same golden twice (e.g. if admin approved same proposal twice)
       const alreadyThere = newBrain[p.key].some(r => (r.text || r) === p.golden.trim());
       if (!alreadyThere) {
-        newBrain[p.key].push({ text: p.golden.trim(), source: 'consolidated' });
+        // ← CHANGED: preserve admin authority through the merge
+        const outSource = p.absorbedGolden ? 'admin-consolidation-audit' : 'consolidated';
+        newBrain[p.key].push({ text: p.golden.trim(), source: outSource });
       }
     }
 
@@ -1188,16 +1204,21 @@ function parseAIResponse(raw) {
 }
 
 async function loadBrainFromDB() {
-  try {
-    const r = await db.pool.query(
-      `SELECT brain_data FROM ai_training_brain ORDER BY updated_at DESC LIMIT 1`
-    );
-    return r.rows[0]?.brain_data || {};
-  } catch (err) {
-    console.error('[AI Training] loadBrainFromDB error:', err.message);
-    return {};
-  }
+  // NOTE: intentionally NOT catching. A transient DB error must propagate so
+  // destructive callers (consolidate/commit) abort via their try/catch rather
+  // than silently treating a read failure as an empty brain and overwriting it.
+  const r = await db.pool.query(
+    `SELECT brain_data FROM ai_training_brain ORDER BY updated_at DESC LIMIT 1`
+  );
+  return r.rows[0]?.brain_data || {};
 }
+
+function brainRuleTotal(brain) {
+  if (!brain || typeof brain !== 'object') return 0;
+  const KEYS = ['toneRules','avoidPatterns','preferPatterns','productKnowledge','customPolicies','responseExamples'];
+  return KEYS.reduce((s, k) => s + (Array.isArray(brain[k]) ? brain[k].length : 0), 0);
+}
+
 
 async function backupBrain(reason, userEmail, { minIntervalMinutes = 0 } = {}) {
   try {
@@ -1219,12 +1240,15 @@ async function backupBrain(reason, userEmail, { minIntervalMinutes = 0 } = {}) {
         [minIntervalMinutes]
       );
       if (recent.rows.length > 0) return;
+
     }
 
     const current = await db.pool.query(
       `SELECT brain_data FROM ai_training_brain ORDER BY updated_at DESC LIMIT 1`
     );
-    if (current.rows[0]?.brain_data) {
+    // Don't back up an empty/missing brain — an empty backup destroys the one
+    // recovery path. Only insert when there's real data to preserve.
+    if (current.rows[0]?.brain_data && brainRuleTotal(current.rows[0].brain_data) > 0) {
       await db.pool.query(
         `INSERT INTO ai_training_brain_backups (brain_data, reason, backed_up_by) VALUES ($1, $2, $3)`,
         [JSON.stringify(current.rows[0].brain_data), reason, userEmail]

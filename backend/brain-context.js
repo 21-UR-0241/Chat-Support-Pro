@@ -71,6 +71,7 @@ function normaliseRule(raw) {
       source === 'admin-feedback'           ||
       source === 'admin-upload'             ||
       source === 'admin-training'           ||
+      source === 'admin-chat'               || 
       source === 'admin-consolidation-audit';
     return { text: String(raw.text).trim(), source, golden, confidence: raw.confidence || 'normal' };
   }

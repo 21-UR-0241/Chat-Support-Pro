@@ -124,7 +124,18 @@ function isMasterRule(rule) {
   if (!rule) return false;
   if (isExplicitMaster(rule)) return true;
   const src = (typeof rule === 'string' ? '' : rule.source || '').toLowerCase().trim();
-  return src === 'admin' || src === 'admin-chat' || src === 'manual' || src === '';
+  return [
+    // backend-golden sources (must match normaliseRule in brain-context.js)
+    'admin-feedback',
+    'admin-upload',
+    'admin-training',
+    'admin-consolidation-audit',
+    'admin-chat',
+    // frontend-only authored markers
+    'admin',
+    'manual',
+    '',
+  ].includes(src);
 }
 
 function detectDuplicates(brain) {

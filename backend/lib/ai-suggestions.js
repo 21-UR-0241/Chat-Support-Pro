@@ -1,5 +1,3 @@
-
-
 const BANNED_PHRASE_REPLACEMENTS = [
   // — patience / inconvenience —
   [/\bthank you for your patience\b[.!]?/gi, ''],
@@ -98,6 +96,87 @@ function humanizeText(text) {
   return scrubbed && scrubbed.length >= 4 ? scrubbed : dashFixed;
 }
 
+function _extractBalancedBlocks(s) {
+  const blocks = [];
+  let depth = 0, start = -1, inString = false, escape = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inString) {
+      if (escape) escape = false;
+      else if (ch === '\\') escape = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === '{' || ch === '[') { if (depth === 0) start = i; depth++; }
+    else if (ch === '}' || ch === ']') {
+      if (depth > 0 && --depth === 0 && start !== -1) { blocks.push(s.slice(start, i + 1)); start = -1; }
+    }
+  }
+  return blocks;
+}
+
+// Single string-aware pass: escape raw control chars inside strings, drop trailing commas.
+function _normalizeJSONish(s) {
+  let out = '', inString = false, escape = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inString) {
+      if (escape) { out += ch; escape = false; continue; }
+      if (ch === '\\') { out += ch; escape = true; continue; }
+      if (ch === '"') { inString = false; out += ch; continue; }
+      if (ch === '\n') { out += '\\n'; continue; }
+      if (ch === '\r') { out += '\\r'; continue; }
+      if (ch === '\t') { out += '\\t'; continue; }
+      out += ch; continue;
+    }
+    if (ch === '"') { inString = true; out += ch; continue; }
+    if (ch === ',') {
+      let j = i + 1; while (j < s.length && /\s/.test(s[j])) j++;
+      if (s[j] === '}' || s[j] === ']') continue; // trailing comma -> drop
+    }
+    out += ch;
+  }
+  return out;
+}
+
+function _robustJSONParse(s) {
+  try { return JSON.parse(s); } catch (_) {}
+  try { return JSON.parse(_normalizeJSONish(s)); } catch (_) {}
+  return undefined;
+}
+
+function parseAIResponse(rawContent, expectedKey = 'suggestions') {
+  if (!rawContent || typeof rawContent !== 'string') return null;
+
+  const normalizeShape = (v) => {
+    if (v == null || typeof v !== 'object') return null;
+    if (Array.isArray(v)) {
+      if (expectedKey === 'suggestions' && v.every(x => typeof x === 'string')) return { suggestions: v };
+      if (expectedKey === 'detailedAnswers' && v.every(x => x && typeof x === 'object' && 'text' in x)) return { detailedAnswers: v };
+      return null;
+    }
+    if (Array.isArray(v[expectedKey])) return v;
+    return null;
+  };
+
+  const fenceStripped = rawContent
+    .replace(/```(?:json|javascript|js)?/gi, '')
+    .replace(/```/g, '')
+    .trim();
+
+  // Fast path: whole thing parses and matches.
+  const wholeShaped = normalizeShape(_robustJSONParse(fenceStripped));
+  if (wholeShaped) return wholeShaped;
+
+  // Otherwise scan balanced blocks; last matching one wins.
+  let best = null;
+  for (const b of _extractBalancedBlocks(fenceStripped)) {
+    const shaped = normalizeShape(_robustJSONParse(b));
+    if (shaped) best = shaped;
+  }
+  return best;
+}
 // ============ ANTHROPIC CLIENT (with retry) ============
 
 function callAnthropicAPIWithRetry(requestBody, apiKey, retries = 1) {
@@ -252,6 +331,11 @@ Trust / "how do I know this isn't a scam" (e-transfer or crypto, no card)
   ROBOT: "Hi Mo! I completely understand your concern. Rest assured we are a legitimate business and your e-transfer is 100% safe with us. We confirm every order within a day and have thousands of happy customers. You have nothing to worry about!"
   HUMAN: "Fair thing to ask, Mo, e-transfer isn't reversible so I get the caution. Every batch has third-party COAs and you can read our reviews before you send anything."
   WHY: the ROBOT answer is everything a scammer would also say ("trust us", "you're safe", "nothing to worry about") plus an invented timeline. The HUMAN answer names the real reason the worry is fair, then hands over proof the customer can check THEMSELVES, pulled from the brain, never invented.
+
+Refund owed, repeated delay, customer's had enough (SERVICE FAILURE — do the full stack)
+  ROBOT: "Nicole, I understand. I am escalating your refund request right now. Our admin team will process it and confirm with you. I am truly sorry for the delay."
+  HUMAN: "Nicole, this dragged way too long and that's on us, sorry. Those items never actually shipped so there's no tracking to give you. I'm putting your refund through now, and if it can't go back on your original payment I'll send it by e-transfer, I'll confirm the exact timing right here, not leave you waiting again."
+  WHY: the ROBOT answer escalates and apologizes but STOPS there, it drops the alternative and gives an open-ended "will confirm" that's the exact non-answer she's already furious about. The HUMAN answer acknowledges once, answers her real question honestly (never shipped, so no tracking), commits to the refund, AND offers the brain's named alternative (e-transfer) with a promise to confirm timing in-chat. This is the ONE case where you stack acknowledge + resolution + next-step instead of sending one line.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 `;
@@ -306,9 +390,71 @@ NEVER:
 
 `;
 
+// Service-failure handling. This is the ONE case that OVERRIDES "one thing, then
+// stop." When something actually went wrong (refund owed, missed promise, the
+// same issue dragging, an escalation), a single-line reply reads as dismissive
+// and leaves the customer angry. Here the reply must carry the full resolution:
+// acknowledge once + state the action + the brain's concrete next step. The
+// honesty gates still hold — offering the brain's NAMED alternative is required,
+// inventing a timeline/number is still banned. Injected only when detected.
+const SERVICE_FAILURE_BLOCK = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SERVICE FAILURE — THIS OVERRIDES "ONE THING, THEN STOP" FOR THIS REPLY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Something actually went wrong here: a refund is owed, a promise was missed, the
+same issue keeps dragging, or the customer is escalating. This is the ONE case
+where a single line is NOT enough — the customer needs to see the whole
+resolution or they stay angry. For THIS reply the "one thing, then stop" rule and
+the "don't stack empathy + remedy + next-step" rule are LIFTED. Do all three, in
+order, fused tight, no padding, no closer:
+
+  1. ACKNOWLEDGE the specific failure once, in your own words. Name the real thing
+     (the delay, the shipment that never went out, the silence), not a generic "sorry."
+  2. STATE THE RESOLUTION you're doing right now and commit to it: the refund,
+     replacement, reship, or escalation. Not "I'll look into it" — the actual action.
+  3. GIVE THE CONCRETE NEXT STEP the brain provides. If the brain names an
+     alternative (store credit, e-transfer, replacement), OFFER IT BY NAME. If the
+     brain states a specific timeline, quote it exactly. If the brain names an
+     alternative but gives NO number, still offer the alternative and say you'll
+     confirm the exact timing right here in this chat — never invent a number.
+
+If the customer asked a direct question (e.g. "where is my package?"), answer it
+honestly first. If the brain shows the item never shipped, say so plainly — there
+is no tracking to give, so don't imply a package is in transit.
+
+DO NOT end on a bare "I'll update you when it's processed" / "as soon as it's
+done" with nothing concrete attached. That open-ended non-answer is exactly what
+the customer is already furious about. If you truly have no timeline from the
+brain, commit to WHEN you'll come back with one ("I'll have that number for you
+in my next message"), never an empty "as soon as."
+
+Honesty gates still hold: never invent a timeframe, amount, or policy the brain
+didn't give you. Offering the brain's named alternative is REQUIRED here;
+fabricating a number is still banned. 2 to 4 sentences.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+`;
+
+// Detects a service failure from the analysis block + sentiment (no route change
+// needed). Negative sentiment PLUS a concrete failure/remedy signal in the
+// analysis block. Deliberately does NOT fire on mere negative mood with no
+// failure topic (e.g. "your site is annoying"), and never on trust questions
+// (those have their own handling).
+const FAILURE_SIGNAL_RE = /refund|return|cancel|complaint|escalat|damaged|broken|wrong item|missing|not received|never (arrived|received)|replacement|reship|delay|late/i;
+function detectServiceFailure(sentiment, analysisBlock, isTrustQuestion) {
+  if (isTrustQuestion) return false;
+  if (sentiment !== 'negative' && sentiment !== 'very_negative') return false;
+  return FAILURE_SIGNAL_RE.test(analysisBlock || '');
+}
+
 function buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness, brainContext = '', brainSettings = {}, adminStyleBlock = '', imageAnalysis = '', sentiment = 'neutral', responseExamples = [], isTrustQuestion = false) {
   const hasBrain = brainContext && brainContext.trim().length > 0;
   const trustBlock = isTrustQuestion ? TRUST_QUESTION_BLOCK : '';
+
+  // Service-failure detection is derived from sentiment + the analysis block, so
+  // the route needs no change. When true, the full acknowledge+resolution+next-step
+  // stack is REQUIRED and the "one thing" compression is lifted for this reply.
+  const isServiceFailure = detectServiceFailure(sentiment, analysisBlock, isTrustQuestion);
+  const serviceFailureBlock = isServiceFailure ? SERVICE_FAILURE_BLOCK : '';
 
   // ── HUMAN VOICE — first thing the model reads, positive framing ──
   const humanVoiceBlock = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -321,6 +467,10 @@ things they didn't ask. If they asked "did it ship?", the reply is whether it
 shipped, not shipping + tracking + an apology + a timeline + an offer to help
 more. That reach for "completeness" is the single biggest reason replies read as
 a bot. Say your one thing and let them reply.
+
+(The ONE exception is a genuine SERVICE FAILURE — refund owed, missed promise,
+repeated delay, escalation. If a SERVICE FAILURE block appears above, follow it:
+there you MUST give the full acknowledge + resolution + next-step, not one line.)
 
 DO:
 - Contractions, always: I'll, you're, it's, we've, don't, that's.
@@ -342,7 +492,8 @@ DO:
 
 NEVER (these are the tells that scream AI):
 - Don't stack empathy + ownership + remedy + timeline + reassurance in one
-  message. Pick the ONE move the moment needs.
+  message. Pick the ONE move the moment needs. (Exception: a SERVICE FAILURE, where
+  acknowledge + resolution + next-step together ARE the one move.)
 - Don't tack on a closer: no "let me know if there's anything else", "happy to
   help", "don't hesitate", "feel free to reach out". Most replies just end.
 - Don't signpost: no "let me look into this", "here's what I can do", "just to
@@ -375,7 +526,7 @@ ${cleanExamples.map(t => `  • "${t.trim()}"`).join('\n')}
 
 ` : '';
 
-  const brainBlock = hasBrain ? `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nBRAIN RULES, READ THIS BEFORE ANYTHING ELSE\nMandatory store-owner instructions. Override ALL other guidelines.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${brainContext}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCRITICAL BRAIN ENFORCEMENT:\n1. If the customer asks about a product, protocol, dosing, or anything the brain covers, ANSWER IT NOW. Do NOT say "let me check".\n2. Only stall when the brain does NOT contain the answer AND you genuinely need external info (order status, tracking, account details).\n3. Do NOT cross-apply one product's rule to another.\n4. Use exact values from the matching brain rule. But say them like a person, not a spec sheet, and still ONE thing at a time.\n5. Never narrate that the brain exists or that any rules conflict. Just answer in your own voice.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` : '';
+  const brainBlock = hasBrain ? `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nBRAIN RULES, READ THIS BEFORE ANYTHING ELSE\nMandatory store-owner instructions. Override ALL other guidelines.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${brainContext}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCRITICAL BRAIN ENFORCEMENT:\n1. If the customer asks about a product, protocol, dosing, or anything the brain covers, ANSWER IT NOW. Do NOT say "let me check".\n2. Only stall when the brain does NOT contain the answer AND you genuinely need external info (order status, tracking, account details).\n3. Do NOT cross-apply one product's rule to another.\n4. Use exact values from the matching brain rule. But say them like a person, not a spec sheet, and still ONE thing at a time (unless this is a service failure, where the full resolution is required).\n5. Never narrate that the brain exists or that any rules conflict. Just answer in your own voice.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` : '';
   const imageBlock = imageAnalysis && imageAnalysis.trim() ? `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nSCREENSHOT DATA, full analysis of the agent's uploaded image\nAll values below are CONFIRMED FACTS extracted from the screenshot.\nReference exact order numbers, statuses, amounts, dates, and names directly.\nDo NOT ask for information that is already visible in this screenshot.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${imageAnalysis.trim()}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` : '';
   const styleSection = adminStyleBlock ? `${adminStyleBlock}\n` : '';
   let contextGuidance = '';
@@ -393,14 +544,18 @@ ${cleanExamples.map(t => `  • "${t.trim()}"`).join('\n')}
   const isComplexComplaint = messageRichness === 'very_detailed' && (sentiment === 'very_negative' || sentiment === 'negative');
 
   // Length rules pulled hard toward short. Dosing/reconstitution is the ONLY
-  // sanctioned exception where numbers must be complete and exact.
-  const lengthRule = len === 'long'
-    ? (isComplexComplaint
-        ? `Up to 4 sentences, only because this is a genuine multi-part complaint. Acknowledge the single most important thing ONCE, fused into the sentence that fixes it, then the action. Don't cover everything they didn't ask. MAX 90 words. Reconstitution/dosing math is the one place you may go fully complete regardless.`
-        : `2 to 4 sentences MAX, and only if the message truly needs it. Usually 2 is plenty. Fuse any apology into the working sentence. MAX 70 words.`)
-    : len === 'short'
-      ? `1 to 2 sentences. Say the one thing, then stop. MAX 30 words.`
-      : `1 to 3 sentences, usually 1 or 2. Answer the one thing they asked, then stop. MAX 45 words. The only exception is reconstitution/dosing math, where the numbers must be complete and exact even if that runs a bit longer.`;
+  // sanctioned exception where numbers must be complete and exact. A SERVICE
+  // FAILURE is the other: it needs 2-4 sentences to carry the full resolution,
+  // and that requirement overrides any shorter admin length setting.
+  const lengthRule = isServiceFailure
+    ? `SERVICE FAILURE: this OVERRIDES any shorter length setting. Use 2 to 4 sentences to complete all three required moves — acknowledge once, state the resolution, give the brain's concrete next step/alternative. MAX 90 words. Never pad, but never drop the resolution or the next step just to stay short.`
+    : len === 'long'
+      ? (isComplexComplaint
+          ? `Up to 4 sentences, only because this is a genuine multi-part complaint. Acknowledge the single most important thing ONCE, fused into the sentence that fixes it, then the action. Don't cover everything they didn't ask. MAX 90 words. Reconstitution/dosing math is the one place you may go fully complete regardless.`
+          : `2 to 4 sentences MAX, and only if the message truly needs it. Usually 2 is plenty. Fuse any apology into the working sentence. MAX 70 words.`)
+      : len === 'short'
+        ? `1 to 2 sentences. Say the one thing, then stop. MAX 30 words.`
+        : `1 to 3 sentences, usually 1 or 2. Answer the one thing they asked, then stop. MAX 45 words. The only exception is reconstitution/dosing math, where the numbers must be complete and exact even if that runs a bit longer.`;
 
   const toneRule = tone === 'formal' ? `Formal, professional, but still a real person, not a form letter. No contractions.` : tone === 'casual' ? `Casual, conversational. Contractions and fragments encouraged.` : `Friendly, direct, a little blunt, genuinely on their side. Warm but not eager or performing.`;
   const empathyRule = empathy === 'high' ? `When something actually went wrong, lead with a short genuine acknowledgment fused into the fix. One acknowledgment, never stacked. On a routine question, skip empathy entirely and just answer.` : empathy === 'low' ? `Skip empathy preambles. Get straight to the answer.` : `Brief acknowledgment only when warranted, then the answer.`;
@@ -410,7 +565,11 @@ ${cleanExamples.map(t => `  • "${t.trim()}"`).join('\n')}
   // Safety + honesty gates. These OVERRIDE the voice — short never means unsafe.
   const nonNegotiablesBlock = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nNON-NEGOTIABLES (override the voice — correctness wins over brevity):\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n- NO fake time promises. State a shipping, handling, or delivery timeframe ONLY if it appears in the BRAIN DATA for this reply, and quote the brain's numbers exactly. If the brain gave you no timeframe, do NOT state one, commit to the action, not the clock. Never invent a date or deadline of any kind.\n- Never say "same day", "next day", "overnight", "by tomorrow", or any specific speed unless the brain explicitly states it. And never infer delivery speed from where the customer is or from them saying you're "close", "local", or "nearby", proximity is not a service you offer unless the brain says so.\n- Stay honest. Never invent tracking status, stock, pickup options, or order details. If you don't know, say you're checking, for real.\n- Confirm the SPECIFIC product before giving any dosing or reconstitution answer.\n- All facts come from the brain, never from you. Product details, dosing, protocols, prices, stock, shipping, handling, returns, refunds, guarantees, eligibility, and safety rules are only what the BRAIN DATA states. Never assert a fact, number, policy, or restriction the brain didn't give you. If it's not in the brain and you can't look it up, say you'll check, don't fill the gap.\n- Safety and eligibility: apply whatever health, age, or contraindication rules the brain provides, exactly, in your own voice. Never invent one, and never give dosing or medical guidance beyond what the brain states. If a customer raises a health condition, age, or safety concern, follow the brain's rule and point them to a healthcare provider.\n- Only ever give links or URLs that appear in the brain, exactly as written. Never guess, shorten, or invent a domain.`;
 
-  return `${humanVoiceBlock}${ROBOT_VS_HUMAN_BLOCK}${trustBlock}${voiceExamplesBlock}${brainBlock}${imageBlock}${styleSection}You ARE the support person at ${storeName || 'this store'}, texting a customer directly. Not ghostwriting, not relaying, you. The customer must feel like they're talking to the same knowledgeable person every time.\n\n${qualityBlock}\n\n${nonNegotiablesBlock}\n\n${contextGuidance}\n\n${customerContext}\n\n${analysisBlock}\n\n${policyBlock}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCORE RULES:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n1. Answer the ONE thing they asked. Reference something they actually said, the product, their stated goal, or the specific issue. Generic replies are not acceptable, but neither is covering things they didn't ask.\n2. NEVER say "let me check" / "let me find out" / "let me get back to you" when the brain already contains the answer.\n3. "Let me check" is ONLY for real-time lookups (order status, tracking, account balance). Never for product/knowledge questions.\n4. Never ask for info already provided. Never repeat what the agent already said.\n5. The 3 suggestions are 3 DIFFERENT WAYS TO SAY THE ONE THING, not one-thing vs one-thing-plus-extra. Vary the angle, warmth, and phrasing, NOT the amount of stuff:\n   - Suggestion 1: The tightest, most direct version.\n   - Suggestion 2: Same answer, slightly warmer or with the one most relevant detail.\n   - Suggestion 3: Same answer phrased as a quick back-and-forth (only add a follow-up question if there's a GENUINE open question, otherwise just a third phrasing).\n   None of the three should stack empathy + action + timeline + closer.\n6. Match the customer's emotional state, once, fused in. Don't perform a failure that didn't happen.\n7. No promises on timeframes or amounts unless confirmed. Shipping windows above are the only exception.\n8. CRITICAL, JSON LIMIT: each suggestion string must fit inside a JSON value and stay within the LENGTH word limit above. If tempted to write more, cut it, a truncated JSON response is a total failure.\n9. NEVER use em dashes, en dashes, or double hyphens (--). Use a comma, a period, or a new sentence. Write like a person typing in a chat.\n10. Avoid AI tells: no three-adjective stacks, no "furthermore/moreover/additionally", no throat-clearing warm-up ("Thanks so much for reaching out about your order"). Short, plain, like someone who already knows the answer.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nRespond ONLY with valid JSON: {"suggestions": ["reply 1", "reply 2", "reply 3"]}`;
+  const serviceFailureCoreNote = isServiceFailure
+    ? `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nSERVICE-FAILURE EXCEPTION TO RULE 5 (applies to THIS reply only):\nAll three suggestions must EACH be a COMPLETE resolution — acknowledge once + the resolution you're doing now + the brain's concrete next step/alternative. Rule 5's "don't stack" does NOT apply here. Vary the wording and warmth across the three, NOT the completeness. None of the three may drop the resolution or the next step. Still no tacked-on closer.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
+    : '';
+
+  return `${humanVoiceBlock}${ROBOT_VS_HUMAN_BLOCK}${trustBlock}${serviceFailureBlock}${voiceExamplesBlock}${brainBlock}${imageBlock}${styleSection}You ARE the support person at ${storeName || 'this store'}, texting a customer directly. Not ghostwriting, not relaying, you. The customer must feel like they're talking to the same knowledgeable person every time.\n\n${qualityBlock}\n\n${nonNegotiablesBlock}\n\n${contextGuidance}\n\n${customerContext}\n\n${analysisBlock}\n\n${policyBlock}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCORE RULES:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n1. Answer the ONE thing they asked. Reference something they actually said, the product, their stated goal, or the specific issue. Generic replies are not acceptable, but neither is covering things they didn't ask.\n2. NEVER say "let me check" / "let me find out" / "let me get back to you" when the brain already contains the answer.\n3. "Let me check" is ONLY for real-time lookups (order status, tracking, account balance). Never for product/knowledge questions.\n4. Never ask for info already provided. Never repeat what the agent already said.\n5. The 3 suggestions are 3 DIFFERENT WAYS TO SAY THE ONE THING, not one-thing vs one-thing-plus-extra. Vary the angle, warmth, and phrasing, NOT the amount of stuff:\n   - Suggestion 1: The tightest, most direct version.\n   - Suggestion 2: Same answer, slightly warmer or with the one most relevant detail.\n   - Suggestion 3: Same answer phrased as a quick back-and-forth (only add a follow-up question if there's a GENUINE open question, otherwise just a third phrasing).\n   None of the three should stack empathy + action + timeline + closer. (SERVICE FAILURE is the exception — see the note below the rules.)\n6. Match the customer's emotional state, once, fused in. Don't perform a failure that didn't happen.\n7. No promises on timeframes or amounts unless confirmed. Shipping windows above are the only exception.\n8. CRITICAL, JSON LIMIT: each suggestion string must fit inside a JSON value and stay within the LENGTH word limit above. If tempted to write more, cut it, a truncated JSON response is a total failure.\n9. NEVER use em dashes, en dashes, or double hyphens (--). Use a comma, a period, or a new sentence. Write like a person typing in a chat.\n10. Avoid AI tells: no three-adjective stacks, no "furthermore/moreover/additionally", no throat-clearing warm-up ("Thanks so much for reaching out about your order"). Short, plain, like someone who already knows the answer.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${serviceFailureCoreNote}\nRespond ONLY with valid JSON: {"suggestions": ["reply 1", "reply 2", "reply 3"]}`;
 }
 
 function buildUserPrompt(chatHistory, clientMessage, messageEdited, adminNote, conversationState, recentContext, brainContext = '', imageAnalysis = '') {
@@ -471,8 +630,20 @@ function buildUserPrompt(chatHistory, clientMessage, messageEdited, adminNote, c
     ? `\n\n⚠️ TIMEFRAME RULE (overrides all voice/length guidance):\n- State a delivery/shipping timeframe ONLY if it is written in the BRAIN data above. Never invent one.\n- The brain gives DIFFERENT figures for Canada vs the US. Do NOT mix them. Give a US customer the US range and a Canada customer the Canada range.\n- If you cannot tell which country the customer is in, do NOT guess a number — ask where they're located or point to tracking instead.\n- Quote the FULL range exactly as the brain states it. Do NOT collapse a range to its fastest end (never say "2-3 days" when the brain's range is "2-5"; never drop the upper bound).\n- Present carrier transit as a maximum ("up to X business days"), never as a guaranteed delivery date. Weekends don't count as business days.\n- This applies to all 3 replies.`
     : '';
 
-  return `${brainBlock}${imageBlock}${signalsBlock}${recentBlock}${historyBlock}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCUSTOMER MESSAGE:\n${clientMessage}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${noteBlock}${timeframeGuard}\n\nUsing the brain data${imageAnalysis?.trim() ? ' and the screenshot context' : ''} above as your primary source, write 3 replies that each answer the ONE thing this customer asked, then stop. Three different phrasings of that one answer, not three amounts of stuff. Keep each within the word limit. Return JSON only.`;
+  // ── Brain-silence guard ────────────────────────────────────────────────────
+  // Catches invented facts on ANY topic the brain is silent on (cooling packs,
+  // heat stability, ingredients, etc.) — not just timeframes. Same landing spot
+  // as the timeframe guard so the model weights it at generation time. The
+  // system prompt already says "all facts from brain," but buried mid-prompt it
+  // loses to the customer's direct question. This repeats it last.
+  const isFactualClaim = !isOrderQuestion && /\?|do you|can i|is it|are they|does it|will it|how (much|many|do|does)|what('| i)?s|stable|store|storage|heat|cold|cool|temperature|ingredient|contain|include|come with|safe/i.test(msgLower);
+  const brainSilenceGuard = isFactualClaim
+    ? `\n\n⚠️ FACT-SILENCE RULE: If the BRAIN data above does NOT contain the specific fact this customer is asking about, do NOT invent an answer, do NOT reassure ("you're all good", "it's fine", "quite stable"), and do NOT state a product/handling/stability claim from your own general knowledge. Instead acknowledge their point and say you'll confirm the exact detail. It is far better to say "let me confirm that and come right back" than to state something the brain never told you. This applies to all 3 replies.`
+    : '';
+
+  return `${brainBlock}${imageBlock}${signalsBlock}${recentBlock}${historyBlock}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCUSTOMER MESSAGE:\n${clientMessage}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${noteBlock}${timeframeGuard}${brainSilenceGuard}\n\nUsing the brain data${imageAnalysis?.trim() ? ' and the screenshot context' : ''} above as your primary source, write 3 replies that each answer the ONE thing this customer asked, then stop. Three different phrasings of that one answer, not three amounts of stuff. Keep each within the word limit. Return JSON only.`;
 }
+
 
 function buildEnhancedAnalysisBlock(analysis, conversationState, recentContext) {
   if (!analysis && !conversationState && !recentContext) return '';
@@ -797,9 +968,11 @@ module.exports = {
   buildSystemPrompt,
   buildUserPrompt,
   detectTrustQuestion,
+  detectServiceFailure,
   buildEnhancedAnalysisBlock,
   buildCustomerContext,
   buildPolicyBlock,
+  parseAIResponse,
   analyzeConversationState,
   validateSuggestions,
   generateSmartFallbackSuggestionsRaw,

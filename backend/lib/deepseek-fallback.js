@@ -76,6 +76,7 @@ function isCreditExhaustedError(message) {
 // ─────────────────────────────────────────────────────────────────────────
 
 async function tryDeepSeekFallback(anthropicRequestBodyStr) {
+  const DEEPSEEK_TIMEOUT_MS = 60000; // fail into Claude after 35s
   try {
     const deepseekKey = await getProviderKey('deepseek', 'DEEPSEEK_API_KEY');
     if (!deepseekKey) {
@@ -107,6 +108,18 @@ async function tryDeepSeekFallback(anthropicRequestBodyStr) {
       deepseekMessages.push({ role: m.role, content: flatten(m.content) });
     });
 
+    // ── DEBUG: what are we actually POSTing? Remove once diagnosed. ──
+    console.log('[AI] DeepSeek payload:', JSON.stringify({
+      model: process.env.DEEPSEEK_MODEL || 'deepseek-v4-pro',
+      max_tokens: Math.min(parsed.max_tokens || 2000, 8192),
+      temperature: parsed.temperature ?? 1.0,
+      systemChars: parsed.system?.length || 0,
+      msgCount: deepseekMessages.length,
+      roles: deepseekMessages.map(m => m.role),
+      msgChars: deepseekMessages.map(m => m.content?.length || 0),
+      anyEmpty: deepseekMessages.some(m => !m.content || m.content.length === 0),
+    }));
+
     const res = await fetch('https://api.deepseek.com/chat/completions', {
       method: 'POST',
       headers: {
@@ -117,9 +130,10 @@ async function tryDeepSeekFallback(anthropicRequestBodyStr) {
         model: process.env.DEEPSEEK_MODEL || 'deepseek-v4-pro',
         max_tokens: Math.min(parsed.max_tokens || 2000, 8192),
         temperature: parsed.temperature ?? 1.0,
+        reasoning_effort: parsed._reasoningEffort || 'low',
         messages: deepseekMessages,
       }),
-      signal: AbortSignal.timeout(28000),  // fail fast into Claude — was 60000
+      signal: AbortSignal.timeout(DEEPSEEK_TIMEOUT_MS),
     });
 
     const text = await res.text();
@@ -133,14 +147,11 @@ async function tryDeepSeekFallback(anthropicRequestBodyStr) {
     const finish = choice.finish_reason ?? '?';
     console.log(`[AI] DeepSeek model=${data.model || 'unknown'} tokens=${data.usage?.total_tokens ?? '?'} completion=${data.usage?.completion_tokens ?? '?'} finish=${finish}`);
 
-    // v4-pro may be reasoning-style: real answer can land in reasoning_content
-    // when `content` is empty. Prefer content, fall back to reasoning_content.
     const content = choice.message?.content
       || choice.message?.reasoning_content
       || '';
 
     if (!content) {
-      // Log the actual body so the empty-response cause is visible, not guessed.
       console.error(`[AI] DeepSeek returned no content (finish=${finish}). Body: ${text.slice(0, 500)}`);
       return null;
     }
@@ -152,8 +163,9 @@ async function tryDeepSeekFallback(anthropicRequestBodyStr) {
       _fallbackProvider: 'deepseek',
     };
   } catch (err) {
-    // AbortSignal.timeout throws a TimeoutError/AbortError — name it clearly.
-    const label = err.name === 'TimeoutError' || err.name === 'AbortError' ? 'timeout (12s)' : err.message;
+    const label = err.name === 'TimeoutError' || err.name === 'AbortError'
+      ? `timeout (${DEEPSEEK_TIMEOUT_MS / 1000}s)`
+      : err.message;
     console.error('[AI] DeepSeek fallback error:', label);
     return null;
   }
