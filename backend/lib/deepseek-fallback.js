@@ -2,9 +2,6 @@
 //
 // Provider-key storage (DB-backed, env-var fallback) + DeepSeek fallback
 // for when the Anthropic API is rate-limited or the account is out of credit.
-//
-// Drop this file in backend/lib/. If your `database.js` lives somewhere
-// other than one level up from this file, adjust the require path below.
 
 const db = require('../database');
 
@@ -23,8 +20,6 @@ async function ensureProviderKeysTable() {
   `);
 }
 
-// envFallbackVar lets you keep using an env var (e.g. DEEPSEEK_API_KEY) until
-// an admin saves one via the UI — the DB value always wins once it exists.
 async function getProviderKey(provider, envFallbackVar) {
   try {
     await ensureProviderKeysTable();
@@ -78,13 +73,6 @@ function isCreditExhaustedError(message) {
 
 // ─────────────────────────────────────────────────────────────────────────
 // DeepSeek fallback call
-//
-// Converts an Anthropic-shaped request (system + messages, possibly with
-// image blocks) into DeepSeek's OpenAI-compatible chat/completions format,
-// then wraps the reply back into Anthropic's response shape:
-//   { content: [{ type: 'text', text: '...' }] }
-// so every existing call site (`response.content?.[0]?.text`) keeps working
-// completely unchanged.
 // ─────────────────────────────────────────────────────────────────────────
 
 async function tryDeepSeekFallback(anthropicRequestBodyStr) {
@@ -97,8 +85,6 @@ async function tryDeepSeekFallback(anthropicRequestBodyStr) {
 
     const parsed = JSON.parse(anthropicRequestBodyStr);
 
-    // DeepSeek's standard chat API is text-only as far as this integration
-    // assumes — bail out rather than silently dropping image content.
     const hasImages = (parsed.messages || []).some(m =>
       Array.isArray(m.content) && m.content.some(c => c.type === 'image')
     );
@@ -128,25 +114,34 @@ async function tryDeepSeekFallback(anthropicRequestBodyStr) {
         'Authorization': `Bearer ${deepseekKey}`,
       },
       body: JSON.stringify({
-        model: process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash',   // explicit, not the deprecating 'deepseek-chat' alias
+        model: process.env.DEEPSEEK_MODEL || 'deepseek-v4-pro',
         max_tokens: Math.min(parsed.max_tokens || 2000, 8192),
         temperature: parsed.temperature ?? 1.0,
         messages: deepseekMessages,
       }),
-      signal: AbortSignal.timeout(60000),
+      signal: AbortSignal.timeout(28000),  // fail fast into Claude — was 60000
     });
 
     const text = await res.text();
     if (!res.ok) {
-      console.error(`[AI] DeepSeek fallback failed: ${res.status} ${text.slice(0, 200)}`);
+      console.error(`[AI] DeepSeek fallback failed: ${res.status} ${text.slice(0, 300)}`);
       return null;
     }
 
     const data = JSON.parse(text);
-    console.log(`[AI] DeepSeek model=${data.model || 'unknown'} tokens=${data.usage?.total_tokens ?? '?'}`);
-    const content = data.choices?.[0]?.message?.content || '';
+    const choice = data.choices?.[0] || {};
+    const finish = choice.finish_reason ?? '?';
+    console.log(`[AI] DeepSeek model=${data.model || 'unknown'} tokens=${data.usage?.total_tokens ?? '?'} completion=${data.usage?.completion_tokens ?? '?'} finish=${finish}`);
+
+    // v4-pro may be reasoning-style: real answer can land in reasoning_content
+    // when `content` is empty. Prefer content, fall back to reasoning_content.
+    const content = choice.message?.content
+      || choice.message?.reasoning_content
+      || '';
+
     if (!content) {
-      console.error('[AI] DeepSeek fallback returned no content');
+      // Log the actual body so the empty-response cause is visible, not guessed.
+      console.error(`[AI] DeepSeek returned no content (finish=${finish}). Body: ${text.slice(0, 500)}`);
       return null;
     }
 
@@ -157,7 +152,9 @@ async function tryDeepSeekFallback(anthropicRequestBodyStr) {
       _fallbackProvider: 'deepseek',
     };
   } catch (err) {
-    console.error('[AI] DeepSeek fallback error:', err.message);
+    // AbortSignal.timeout throws a TimeoutError/AbortError — name it clearly.
+    const label = err.name === 'TimeoutError' || err.name === 'AbortError' ? 'timeout (12s)' : err.message;
+    console.error('[AI] DeepSeek fallback error:', label);
     return null;
   }
 }
