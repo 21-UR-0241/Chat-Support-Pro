@@ -1,5 +1,1896 @@
 
 
+// const express = require('express');
+// const multer  = require('multer');
+// const router  = express.Router();
+
+// const { authenticateToken } = require('../auth');
+// const db = require('../database');
+// const {
+//   ensureProviderKeysTable, getProviderKey, saveProviderKey, deleteProviderKey,
+//   maskKey, isCreditExhaustedError, tryDeepSeekFallback,
+// } = require('../lib/deepseek-fallback');
+
+// const upload = multer({
+//   storage: multer.memoryStorage(),
+//   limits: { fileSize: 10 * 1024 * 1024 },
+// });
+
+// // ─────────────────────────────────────────────────────────────────────────────
+// // GET /api/ai/training/brain
+// // ─────────────────────────────────────────────────────────────────────────────
+// router.get('/brain', authenticateToken, async (req, res) => {
+//   try {
+//     const result = await db.pool.query(
+//       `SELECT brain_data FROM ai_training_brain ORDER BY updated_at DESC LIMIT 1`
+//     );
+//     if (result.rows.length === 0) return res.json({ brain: null });
+//     res.json({ brain: result.rows[0].brain_data });
+//   } catch (err) {
+//     console.error('[AI Training] GET brain error:', err);
+//     res.status(500).json({ error: 'Failed to load brain' });
+//   }
+// });
+
+// // ─────────────────────────────────────────────────────────────────────────────
+// // PUT /api/ai/training/brain
+// // ─────────────────────────────────────────────────────────────────────────────
+// router.put('/brain', authenticateToken, async (req, res) => {
+//   try {
+//     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+//     const { brain } = req.body;
+//     if (!brain || typeof brain !== 'object') return res.status(400).json({ error: 'brain object required' });
+
+//     await backupBrain('pre-manual-edit', req.user.email, { minIntervalMinutes: 30 });
+
+//     await db.pool.query(`
+//       INSERT INTO ai_training_brain (id, brain_data, updated_at, updated_by)
+//       VALUES (1, $1, NOW(), $2)
+//       ON CONFLICT (id) DO UPDATE
+//         SET brain_data = EXCLUDED.brain_data,
+//             updated_at = EXCLUDED.updated_at,
+//             updated_by = EXCLUDED.updated_by
+//     `, [JSON.stringify(brain), req.user.email]);
+
+//     try {
+//       const { refreshBrainCache } = require('../brain-context');
+//       refreshBrainCache();
+//     } catch { /* brain-context may not be wired yet */ }
+
+//     console.log(`[AI Training] Brain saved by ${req.user.email}`);
+//     res.json({ ok: true });
+//   } catch (err) {
+//     console.error('[AI Training] PUT brain error:', err);
+//     res.status(500).json({ error: 'Failed to save brain' });
+//   }
+// });
+
+// // ─────────────────────────────────────────────────────────────────────────────
+// // POST /api/ai/training/upload-doc
+// // ─────────────────────────────────────────────────────────────────────────────
+// router.post('/upload-doc', authenticateToken, upload.single('file'), async (req, res) => {
+//   try {
+//     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+//     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+//     const { mimetype, buffer, originalname } = req.file;
+//     let text = '';
+
+//     if (mimetype === 'text/plain') {
+//       text = buffer.toString('utf-8');
+//     } else if (mimetype === 'application/pdf') {
+//       const pdfParse = require('pdf-parse');
+//       const data = await pdfParse(buffer);
+//       text = data.text;
+//     } else if (
+//       mimetype === 'application/msword' ||
+//       mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+//       originalname.match(/\.docx?$/i)
+//     ) {
+//       const mammoth = require('mammoth');
+//       const result = await mammoth.extractRawText({ buffer });
+//       text = result.value;
+//     } else {
+//       return res.status(400).json({ error: `Unsupported file type: ${mimetype}` });
+//     }
+
+//     if (!text?.trim()) return res.status(400).json({ error: 'Could not extract text from file' });
+
+//     console.log(`[AI Training] Doc uploaded by ${req.user.email}: ${originalname} (${text.length} chars)`);
+//     res.json({ text: text.trim(), filename: originalname, chars: text.length });
+
+//   } catch (err) {
+//     console.error('[AI Training] upload-doc error:', err);
+//     res.status(500).json({ error: 'Failed to process document', message: err.message });
+//   }
+// });
+
+// // ─────────────────────────────────────────────────────────────────────────────
+// // POST /api/ai/training/extract-rules
+// // ─────────────────────────────────────────────────────────────────────────────
+// router.post('/extract-rules', authenticateToken, async (req, res) => {
+//   try {
+//     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+//     const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+//     if (!ANTHROPIC_API_KEY) return res.status(400).json({ error: 'No API key' });
+
+//     const { text, filename } = req.body;
+//     if (!text?.trim()) return res.status(400).json({ error: 'No text provided' });
+
+//     const systemPrompt = `You extract and preserve knowledge from documents for a peptide e-commerce customer support AI brain (400+ Shopify stores, Canada + US).
+
+// This document may be a product guide, dosing protocol, FAQ, policy doc, or training material.
+// Your job is to extract ALL useful information — preserving detail, not summarizing it away.
+
+// CATEGORIES:
+// - tone: how agents should communicate
+// - avoid: what agents must never say or do
+// - prefer: what agents should always say or do
+// - product: peptide/product knowledge — dosing, storage, reconstitution, ingredients, effects, usage protocols, BAC water ratios, vial sizes, concentrations, cycle lengths, peptide stacks
+// - policy: refunds, shipping timelines, guarantees, order handling, payment, returns
+// - example: gold-standard reply examples
+
+// RULES FOR EXTRACTION:
+// - For product/policy rules: preserve FULL detail — include numbers, dosages, timeframes, temperatures, ratios
+//   BAD: "BPC-157 dosing information is available"
+//   GOOD: "BPC-157 standard dose is 250-500mcg per injection, 1-2x daily, injected subcutaneously near the site of injury"
+// - For tone/avoid/prefer rules: keep them concise and actionable
+// - Each rule must be self-contained — an agent reading it alone should understand it fully
+// - Extract EVERYTHING from this document — err heavily on the side of including more rules
+// - Minimum 10 rules per document, no maximum
+// - Split compound information into separate rules for clarity
+// - Include brand/product names, specific SKUs, prices if mentioned
+// - Deduplication is handled automatically after extraction — your job is only to extract.
+
+// RESPONSE FORMAT — valid JSON only, no markdown:
+// {
+//   "rules": [
+//     { "category": "product", "text": "Full detailed rule text preserving all specifics", "source": "document" }
+//   ],
+//   "summary": "Extracted X rules covering: [topic list]"
+// }`;
+
+//     const requestBody = JSON.stringify({
+//       model: 'claude-sonnet-4-6',
+//       max_tokens: 6000,
+//       system: systemPrompt,
+//       messages: [{ role: 'user', content: `Extract all rules from this${filename ? ` document (${filename})` : ' text'}:\n\n${text}` }],
+//     });
+
+//     const response = await callAnthropicAPI(requestBody, ANTHROPIC_API_KEY);
+//     const raw = response.content?.[0]?.text || '{}';
+//     const parsed = parseAIResponse(raw) || { rules: [], summary: 'Could not parse extraction.' };
+
+//     const rules = (parsed.rules || [])
+//       .filter(r => r.text && r.category)
+//       .map(r => ({ ...r, source: filename ? 'document-upload' : 'admin-input' }));
+
+//     if (rules.length > 0) {
+//       try {
+//         const currentResult = await db.pool.query(
+//           `SELECT brain_data FROM ai_training_brain ORDER BY updated_at DESC LIMIT 1`
+//         );
+//         const currentBrain = currentResult.rows[0]?.brain_data || {};
+//         const BRAIN_KEYS = {
+//           tone: 'toneRules', avoid: 'avoidPatterns', prefer: 'preferPatterns',
+//           product: 'productKnowledge', policy: 'customPolicies', example: 'responseExamples',
+//         };
+//         const updatedBrain = { ...currentBrain };
+//         let newRulesAdded = 0;
+//         rules.forEach(rule => {
+//           const key = BRAIN_KEYS[rule.category];
+//           if (!key) return;
+//           if (!updatedBrain[key]) updatedBrain[key] = [];
+//           const exists = updatedBrain[key].some(r => (r.text || r) === rule.text);
+//           if (!exists) {
+//             updatedBrain[key].push({ text: rule.text, source: rule.source });
+//             newRulesAdded++;
+//           }
+//         });
+
+//         await backupBrain('pre-doc-extract', req.user.email, { minIntervalMinutes: 10 });
+
+//         await db.pool.query(`
+//           INSERT INTO ai_training_brain (id, brain_data, updated_at, updated_by)
+//           VALUES (1, $1, NOW(), $2)
+//           ON CONFLICT (id) DO UPDATE
+//             SET brain_data = EXCLUDED.brain_data,
+//                 updated_at = EXCLUDED.updated_at,
+//                 updated_by = EXCLUDED.updated_by
+//         `, [JSON.stringify(updatedBrain), 'extract-rules-auto']);
+//         try { const { refreshBrainCache } = require('../brain-context'); refreshBrainCache(); } catch {}
+//         console.log(`[AI Training] Auto-saved ${newRulesAdded} new rules (${rules.length - newRulesAdded} dupes skipped)`);
+//       } catch (saveErr) {
+//         console.error('[AI Training] extract-rules auto-save error:', saveErr.message);
+//       }
+//     }
+
+//     console.log(`[AI Training] Extracted ${rules.length} rules from ${filename || 'text'}`);
+//     res.json({ rules, summary: parsed.summary || `Extracted ${rules.length} rules.` });
+
+//   } catch (err) {
+//     console.error('[AI Training] extract-rules error:', err);
+//     res.status(500).json({ error: 'Extraction failed', message: err.message });
+//   }
+// });
+
+// // ─────────────────────────────────────────────────────────────────────────────
+// // GET /api/ai/training/conversation-samples
+// // ─────────────────────────────────────────────────────────────────────────────
+// router.get('/conversation-samples', authenticateToken, async (req, res) => {
+//   try {
+//     const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+//     const result = await db.pool.query(`
+//       SELECT
+//         c.id            AS conv_id,
+//         c.customer_email,
+//         c.customer_name,
+//         s.brand_name    AS store,
+//         cm.content      AS customer_msg,
+//         am.content      AS agent_msg,
+//         cm.sent_at      AS date
+//       FROM conversations c
+//       LEFT JOIN stores s ON s.id = c.shop_id
+//       JOIN LATERAL (
+//         SELECT content, sent_at FROM messages
+//         WHERE conversation_id = c.id AND sender_type = 'customer'
+//         ORDER BY sent_at DESC LIMIT 1
+//       ) cm ON TRUE
+//       LEFT JOIN LATERAL (
+//         SELECT content FROM messages
+//         WHERE conversation_id = c.id AND sender_type = 'agent'
+//         ORDER BY sent_at DESC LIMIT 1
+//       ) am ON TRUE
+//       WHERE c.status IN ('open', 'closed')
+//         AND cm.content IS NOT NULL
+//         AND LENGTH(TRIM(cm.content)) > 10
+//       ORDER BY cm.sent_at DESC
+//       LIMIT $1
+//     `, [limit]);
+//     res.json({ samples: result.rows });
+//   } catch (err) {
+//     console.error('[AI Training] conversation-samples error:', err);
+//     res.status(500).json({ error: 'Failed to load samples' });
+//   }
+// });
+
+// // ─────────────────────────────────────────────────────────────────────────────
+// // POST /api/ai/training/auto-analyze
+// // ─────────────────────────────────────────────────────────────────────────────
+// router.post('/auto-analyze', authenticateToken, async (req, res) => {
+//   try {
+//     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+//     const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+//     if (!ANTHROPIC_API_KEY) return res.status(400).json({ error: 'No ANTHROPIC_API_KEY configured' });
+
+//     const { limit = 200, batchSize = 15 } = req.body;
+//     console.log(`[AI Training] Auto-analyze started by ${req.user.email} (limit=${limit})`);
+
+//     const convsResult = await db.pool.query(`
+//       SELECT c.id, c.customer_email, c.customer_name, s.brand_name AS store
+//       FROM conversations c
+//       LEFT JOIN stores s ON s.id = c.shop_id
+//       WHERE c.status IN ('open', 'closed')
+//       ORDER BY c.updated_at DESC
+//       LIMIT $1
+//     `, [Math.min(limit, 500)]);
+
+//     if (convsResult.rows.length === 0) {
+//       return res.json({ rules: [], gaps: [], totalConversations: 0, batchesProcessed: 0 });
+//     }
+
+//     const convIds = convsResult.rows.map(c => c.id);
+//     const msgsResult = await db.pool.query(`
+//       SELECT conversation_id, sender_type, content, sent_at
+//       FROM messages
+//       WHERE conversation_id = ANY($1) AND content IS NOT NULL AND LENGTH(TRIM(content)) > 0
+//       ORDER BY conversation_id, sent_at ASC
+//     `, [convIds]);
+
+//     const msgsByConv = {};
+//     msgsResult.rows.forEach(m => {
+//       if (!msgsByConv[m.conversation_id]) msgsByConv[m.conversation_id] = [];
+//       msgsByConv[m.conversation_id].push(m);
+//     });
+
+//     const threads = convsResult.rows
+//       .map(c => {
+//         const msgs = msgsByConv[c.id] || [];
+//         if (msgs.length < 2) return null;
+//         const thread = msgs.map(m =>
+//           `  [${m.sender_type === 'agent' ? 'AGENT' : 'CUSTOMER'}]: ${(m.content || '').slice(0, 300)}`
+//         ).join('\n');
+//         return `--- Conversation #${c.id} (${c.store || 'store'}) ---\n${thread}`;
+//       })
+//       .filter(Boolean);
+
+//     const BATCH_SIZE = Math.min(batchSize, 20);
+//     const allRules = [];
+//     const allGaps = [];
+//     const seenRules = new Set();
+//     const seenGaps = new Set();
+//     let batchesProcessed = 0;
+
+//     for (let i = 0; i < threads.length; i += BATCH_SIZE) {
+//       const batch = threads.slice(i, i + BATCH_SIZE);
+
+//       const systemPrompt = `You analyze customer support conversations for a peptide e-commerce business (400+ Shopify stores, Canada + US) and extract improvement rules AND knowledge gaps.
+
+// RULE CATEGORIES: tone, avoid, prefer, product, policy, example
+
+// ALSO find GAPS — topics where agent answers were vague, inconsistent, or missing info. These become interview questions for the admin.
+
+// RESPONSE FORMAT — valid JSON only, no markdown:
+// {
+//   "rules": [
+//     { "category": "avoid", "text": "Never ask for order number if customer already gave it", "confidence": "high" }
+//   ],
+//   "gaps": [
+//     { "topic": "BAC water", "question": "Is BAC water included with peptide orders? How much?", "category": "product" },
+//     { "topic": "refund timeline", "question": "How many days does a refund take after approval?", "category": "policy" }
+//   ]
+// }
+
+// 3-8 rules per batch, 2-4 gaps per batch. Only medium/high confidence rules.`;
+
+//       try {
+//         const requestBody = JSON.stringify({
+//           model: 'claude-sonnet-4-6',
+//           max_tokens: 1500,
+//           system: systemPrompt,
+//           messages: [{ role: 'user', content: `Analyze these ${batch.length} conversations:\n\n${batch.join('\n\n')}` }],
+//         });
+
+//         const response = await callAnthropicAPI(requestBody, ANTHROPIC_API_KEY);
+//         const raw = response.content?.[0]?.text || '{}';
+//         const parsed = parseAIResponse(raw) || { rules: [], gaps: [] };
+
+//         (parsed.rules || []).forEach(r => {
+//           if (!r.text || !r.category) return;
+//           const key = r.text.toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 60);
+//           if (!seenRules.has(key)) {
+//             seenRules.add(key);
+//             allRules.push({ category: r.category, text: r.text.trim(), confidence: r.confidence || 'medium', source: 'auto-analysis' });
+//           }
+//         });
+
+//         (parsed.gaps || []).forEach(g => {
+//           if (!g.question || !g.topic) return;
+//           const key = g.topic.toLowerCase().trim();
+//           if (!seenGaps.has(key)) {
+//             seenGaps.add(key);
+//             allGaps.push({ topic: g.topic, question: g.question, category: g.category || 'product' });
+//           }
+//         });
+
+//         batchesProcessed++;
+//       } catch (batchErr) {
+//         console.error(`[AI Training] Batch ${batchesProcessed + 1} error:`, batchErr.message);
+//       }
+
+//       if (i + BATCH_SIZE < threads.length) await new Promise(r => setTimeout(r, 500));
+//     }
+
+//     const confidenceOrder = { high: 0, medium: 1, low: 2 };
+//     allRules.sort((a, b) => (confidenceOrder[a.confidence] || 1) - (confidenceOrder[b.confidence] || 1));
+
+//     console.log(`[AI Training] Done: ${allRules.length} rules, ${allGaps.length} gaps, ${batchesProcessed} batches`);
+//     res.json({
+//       rules: allRules,
+//       gaps: allGaps,
+//       totalConversations: threads.length,
+//       batchesProcessed,
+//       message: `Analyzed ${threads.length} conversations. Found ${allRules.length} rules and ${allGaps.length} knowledge gaps.`,
+//     });
+
+//   } catch (err) {
+//     console.error('[AI Training] auto-analyze error:', err);
+//     res.status(500).json({ error: 'Auto-analysis failed', message: err.message });
+//   }
+// });
+
+// // ─────────────────────────────────────────────────────────────────────────────
+// // POST /api/ai/training/proactive-questions
+// // ─────────────────────────────────────────────────────────────────────────────
+// router.post('/proactive-questions', authenticateToken, async (req, res) => {
+//   try {
+//     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+//     const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+//     if (!ANTHROPIC_API_KEY) return res.status(400).json({ error: 'No ANTHROPIC_API_KEY' });
+
+//     const { gaps = [], rules = [] } = req.body;
+
+//     const brain = await loadBrainFromDB();
+//     const brainSummary = formatBrainForPromptBudgeted(brain, 8000);
+//     const gapLines = gaps.map((g, i) => `${i + 1}. [${g.category}] ${g.topic}: ${g.question}`).join('\n');
+
+//     const systemPrompt = `You are a sharp AI trainer. You just finished analyzing customer support conversations for a peptide e-commerce business (400+ Shopify stores). You found knowledge gaps and now you need to interview the admin to fill them.
+
+// Generate 6-8 targeted questions. Each must:
+// - Be specific to what you found in the data
+// - Have 2-4 quick-reply options when there's a predictable answer set
+// - Include a brief hint explaining why you're asking
+// - Be ordered by business impact (most important first)
+
+// RESPONSE FORMAT — valid JSON only, no markdown:
+// {
+//   "intro": "Brief summary of what you found and why you need to ask admin these questions",
+//   "questions": [
+//     {
+//       "id": "q1",
+//       "text": "Question text here",
+//       "hint": "Why this matters — what you observed in the data",
+//       "category": "product|policy|tone|avoid|prefer|example",
+//       "quickReplies": ["Option A", "Option B", "Option C"]
+//     }
+//   ]
+// }`;
+
+//     const userPrompt = `I analyzed ${rules.length} patterns from conversations.
+
+// GAPS FOUND:
+// ${gapLines || 'General gaps in product knowledge and policy communication.'}
+
+// BRAIN ALREADY KNOWS:
+// ${brainSummary || 'Nothing yet.'}
+
+// Generate the interview.`;
+
+//     const requestBody = JSON.stringify({
+//       model: 'claude-sonnet-4-6',
+//       max_tokens: 2500,
+//       system: systemPrompt,
+//       messages: [{ role: 'user', content: userPrompt }],
+//     });
+
+//     const response = await callAnthropicAPI(requestBody, ANTHROPIC_API_KEY);
+//     const raw = response.content?.[0]?.text || '{}';
+//     const parsed = parseAIResponse(raw) || {
+//       intro: "I found some gaps in your conversations — let me ask a few questions.",
+//       questions: gaps.slice(0, 6).map((g, i) => ({
+//         id: `q${i + 1}`, text: g.question, hint: `Observed in conversations: ${g.topic}`,
+//         category: g.category || 'product', quickReplies: [],
+//       })),
+//     };
+
+//     res.json(parsed);
+//   } catch (err) {
+//     console.error('[AI Training] proactive-questions error:', err);
+//     res.status(500).json({ error: 'Failed to generate questions', message: err.message });
+//   }
+// });
+
+// // ─────────────────────────────────────────────────────────────────────────────
+// // POST /api/ai/training/chat
+// // ─────────────────────────────────────────────────────────────────────────────
+// router.post('/chat', authenticateToken, async (req, res) => {
+//   try {
+//     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+//     const { message, images = [], history = [], interviewContext = null } = req.body;
+
+//     if (!message && images.length === 0) return res.status(400).json({ error: 'message or images required' });
+
+//     const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+//     if (!ANTHROPIC_API_KEY) {
+//       return res.json({ message: "No ANTHROPIC_API_KEY configured.", type: 'answer', isQuestion: false, ruleUpdates: [] });
+//     }
+
+//     const currentBrain = await loadBrainFromDB();
+//     const brainCounts = countBrainRules(currentBrain);
+//     const totalRules = Object.values(brainCounts).reduce((s, n) => s + n, 0);
+
+//     const userText = `${message || ''}`;
+//     const isMetaQuery = /\b(all|every|everything|entire|full|list|show|know)\b.*\b(rules?|brain|memory|saved|have|stored)\b/i.test(userText)
+//                      || /\b(rules?|brain|memory)\b.*\b(all|every|everything|list)\b/i.test(userText)
+//                      || /^(what.*you.*know|what.*your.*brain|do you have rules)/i.test(userText.trim());
+
+//     const recencyPerCategory = isMetaQuery ? 100 : 30;
+//     const brainSummary = formatBrainForPromptBudgeted(currentBrain, 20000, recencyPerCategory);
+
+//     const lastUserHistory = [...history].reverse().find(h => h.role === 'user')?.content || '';
+//     const searchQuery = `${message || ''} ${lastUserHistory}`.slice(0, 1500);
+//     const relevantRules = searchBrainRules(currentBrain, searchQuery, { perCategory: 10, totalCap: 40 });
+//     const relevantBlock = formatRelevantRules(relevantRules);
+//     const relevantHits = Object.values(relevantRules).reduce((s, arr) => s + arr.length, 0);
+
+//     const settings = currentBrain.suggestionSettings || {};
+//     const interviewBlock = interviewContext
+//       ? `\n\nCONTEXT: Admin is answering the interview question: "${interviewContext.questionText}"\nHint: ${interviewContext.hint || ''}\nExtract concrete rules from his answer. Ask one smart follow-up if needed.`
+//       : '';
+
+//     const lengthGuide = settings.length === 'long'
+//       ? '4-6 sentences per suggestion, detailed and thorough like a human expert agent'
+//       : settings.length === 'short'
+//       ? '1-2 sentences, very direct'
+//       : '2-4 sentences, balanced — never one-liners';
+
+//     const systemPrompt = `You are the Brain AI — the intelligence that powers AI suggestions for a peptide e-commerce customer support operation (400+ Shopify stores, Canada + US). You are talking privately with the admin.
+
+// IMPORTANT — YOU HAVE FULL ACCESS TO YOUR BRAIN. DO NOT CLAIM OTHERWISE:
+// - The brain in this prompt is the complete, current state of your knowledge. It was loaded from the live database for this exact request.
+// - Total rules currently in your brain: ${totalRules} (TONE ${brainCounts.tone}, AVOID ${brainCounts.avoid}, PREFER ${brainCounts.prefer}, PRODUCT ${brainCounts.product}, POLICY ${brainCounts.policy}, EXAMPLE ${brainCounts.example}).
+// - NEVER say "I don't have access to the rules", "I can't see your rules", "the rules are in a database I can't query", or anything similar. You CAN see them — they are right below.
+// - If the brain is empty (0 rules), say so plainly: "Your brain is empty — no rules saved yet." Do not phrase this as access denial.
+// - If admin asks about a specific topic and no matching rule appears below, say: "I don't have a rule about X yet" — not "I can't access the rules."
+
+// YOUR MEMORY IS REAL AND PERSISTENT:
+// - Every rule you return in ruleUpdates gets AUTOMATICALLY saved to the PostgreSQL database before this response reaches the admin. No developer, no copy-pasting.
+// - You are NOT stateless. Rules persist across sessions.
+// - If admin asks "did that save?", confirm yes — rules in ruleUpdates are written immediately.
+
+// YOUR TWO MODES:
+// 1. ANSWER freely — product questions, support strategy, tone, policies, anything. Talk like a smart colleague.
+// 2. LEARN actively — extract rules from what admin tells you, analyze screenshots, confirm what you've learned.
+
+// BE PROACTIVE:
+// - After any teaching message, ask one specific follow-up to go deeper
+// - After analyzing a screenshot, ask "What would the ideal reply have been here?"
+// - If a critical area is empty (dosing, refund policy, shipping times), bring it up
+// - ONE question at a time. Never list multiple questions.
+
+// BUSINESS CONTEXT:
+// - Peptides: BPC-157, TB-500, Semaglutide, Tirzepatide, Retatrutide, CJC-1295, Ipamorelin, HGH Fragment, NAD+, GHK-Cu, Wolverine blend
+// - Customers ask about: dosing, reconstitution with BAC water, refrigerated storage, shipping times, tracking, order status
+// - English + French support (Quebec customers)
+// - Common issues: shipping delays, missing orders, payment failures, peptide usage questions, COA requests
+
+// SUGGESTION QUALITY SETTINGS (what agents get):
+// - Reply length: ${settings.length || 'medium'} — ${lengthGuide}
+// - Tone: ${settings.tone || 'friendly-professional'}
+// - Empathy level: ${settings.empathy || 'high'}
+// ${interviewBlock}
+
+// ═══════════════════════════════════════════════════════════════
+// YOUR BRAIN (loaded fresh from DB for this request):
+// ═══════════════════════════════════════════════════════════════
+// ${brainSummary || '⚠️ EMPTY BRAIN — zero rules saved. Tell admin plainly: "Your brain is empty — no rules saved yet. Let\'s fix that."'}
+
+// ${relevantBlock ? `═══════════════════════════════════════════════════════════════\n${relevantBlock}\n═══════════════════════════════════════════════════════════════\n\nThe "RULES RELEVANT" block above is the AUTHORITATIVE source for the admin's current question. Quote it accurately, follow its constraints, and don't contradict it.\n` : ''}
+
+// RULE EXTRACTION — DO THIS EVERY MESSAGE:
+// - Read EVERY admin message for extractable facts, preferences, corrections, instructions
+// - If admin states ANYTHING about how agents should behave, what products are, what policies exist → extract as a rule
+// - NEVER return empty ruleUpdates for a teaching message
+// - type="training" → extracted rules only | "mixed" → rules + answer | "answer" → no new info (rare)
+// - Tone/style → "tone" | Forbidden → "avoid" | Must-do → "prefer"
+// - Product/dosing/storage → "product" | Refunds/shipping/timelines → "policy" | Gold replies → "example"
+// - Short messages like "always include tracking link" are valid rules — extract them
+// - Extract silently: "Got it, saved as a rule."
+
+// ═══════════════════════════════════════════════════════════════
+// RULE OUTPUT DISCIPLINE — STRICT:
+// ═══════════════════════════════════════════════════════════════
+// - Rules go ONLY in the ruleUpdates array. NEVER show rule JSON, "MASTER RULE" blocks, or raw { "category": ..., "text": ... } syntax inside the message field.
+// - The message field is conversational prose. The admin sees ruleUpdates rendered as cards in the UI automatically.
+// - If you've extracted 6 rules, message says: "Got it — saved 6 rules covering refunds and tracking. Want me to lock in the BAC-water defaults too?"
+// - Hard cap: message field stays under 1500 characters unless admin explicitly asks for a long explanation.
+// ═══════════════════════════════════════════════════════════════
+
+// SCREENSHOT ANALYSIS:
+// - Read every detail in the image
+// - Identify what's wrong or right with the conversation/suggestion shown
+// - Extract specific learnable patterns as rules
+// - Always ask what the ideal response should have been
+
+// ═══════════════════════════════════════════════════════════════
+// OUTPUT FORMAT — CRITICAL:
+// ═══════════════════════════════════════════════════════════════
+// Your ENTIRE response is ONE JSON object. The admin sees ONLY the "message" field — everything else is invisible to them. There is no preamble, no postamble, no prose before or after the JSON. The first character of your response is "{" and the last character is "}".
+
+// Wrong (what NOT to do):
+//   Here's everything I know about BPC-157:
+//   Reconstitution: 1mL BAC water...
+//   {"message": "Here's everything about BPC-157", ...}
+
+// Right:
+//   {"message": "Here's everything I know about BPC-157:\\n\\nReconstitution: 1mL BAC water...", ...}
+
+// The "message" field holds the FULL response shown to admin. If admin asks for a detailed dump (BPC-157 protocol, list all rules, etc.), the full detail goes INSIDE "message" — use \\n for line breaks. Length is whatever the admin needs: short for casual chat, long for info dumps. The 1500-char cap from rule output discipline does NOT apply to genuine info requests where admin asked for detail.
+
+// JSON SHAPE — no markdown fences, no code blocks, just the object:
+// {
+//   "message": "The complete response admin sees. Can be one sentence or many paragraphs. Use \\n for line breaks within the string.",
+//   "type": "answer|training|mixed|question",
+//   "isQuestion": true/false,
+//   "ruleUpdates": [
+//     { "category": "prefer", "text": "concrete actionable rule text", "source": "admin-feedback" }
+//   ],
+//   "nextQuestion": "One follow-up question string, or null"
+// }`;
+
+//     const MAX_HISTORY_CHARS = 25000;
+//     let historyBudget = MAX_HISTORY_CHARS;
+//     let droppedCount = 0;
+//     const rawMessages = [];
+//     for (const h of [...history].reverse().slice(0, 14)) {
+//       const role = h.role === 'ai' ? 'assistant' : h.role;
+//       if (!['user', 'assistant'].includes(role)) continue;
+//       const content = (h.content || '').trim();
+//       if (!content) continue;
+//       if (content.length > historyBudget) { droppedCount++; continue; }
+//       rawMessages.unshift({ role, content });
+//       historyBudget -= content.length;
+//     }
+//     if (droppedCount > 0) {
+//       console.log(`[AI Training] Dropped ${droppedCount} oversized history message(s)`);
+//     }
+
+//     const chatMessages = [];
+//     for (const msg of rawMessages) {
+//       if (chatMessages.length > 0 && chatMessages[chatMessages.length - 1].role === msg.role) {
+//         chatMessages[chatMessages.length - 1] = msg;
+//       } else {
+//         chatMessages.push(msg);
+//       }
+//     }
+
+//     if (chatMessages.length > 0 && chatMessages[chatMessages.length - 1].role === 'user') {
+//       chatMessages.pop();
+//     }
+
+//     const userContent = [];
+//     if (message?.trim()) userContent.push({ type: 'text', text: message });
+//     images.forEach(img => {
+//       if (img.base64 && img.type) {
+//         userContent.push({ type: 'image', source: { type: 'base64', media_type: img.type, data: img.base64 } });
+//       }
+//     });
+//     if (userContent.length === 0) userContent.push({ type: 'text', text: '(shared an image)' });
+//     chatMessages.push({ role: 'user', content: userContent });
+
+//     console.log(`[AI Training] chat: brain=${totalRules}r (${JSON.stringify(brainCounts)}) summary=${brainSummary.length}c relevant=${relevantHits}r/${relevantBlock.length}c meta=${isMetaQuery} msgs=${chatMessages.length}`);
+
+//     const requestBody = JSON.stringify({
+//       model: 'claude-sonnet-4-6',
+//       max_tokens: 2500,
+//       system: systemPrompt,
+//       messages: chatMessages,
+//     });
+
+//     const anthropicResponse = await callAnthropicAPI(requestBody, ANTHROPIC_API_KEY);
+//     if (anthropicResponse._fallbackProvider) {
+//       console.log(`[AI Training] chat served via fallback provider: ${anthropicResponse._fallbackProvider}`);
+//     }
+//     const rawContent = anthropicResponse.content?.[0]?.text || '{}';
+
+//     const parsed = parseAIResponse(rawContent) || {
+//       message: rawContent,
+//       isQuestion: rawContent.includes('?'),
+//       ruleUpdates: [],
+//       type: 'answer'
+//     };
+
+//     const ruleUpdates = Array.isArray(parsed.ruleUpdates) ? parsed.ruleUpdates : [];
+
+//     if (ruleUpdates.length > 0) {
+//       console.log(`[AI Training] Extracted ${ruleUpdates.length} rule(s) — auto-saving to DB`);
+//       try {
+//         const currentResult = await db.pool.query(
+//           `SELECT brain_data FROM ai_training_brain ORDER BY updated_at DESC LIMIT 1`
+//         );
+//         const currentBrainDB = currentResult.rows[0]?.brain_data || {};
+//         const BRAIN_KEYS = {
+//           tone: 'toneRules', avoid: 'avoidPatterns', prefer: 'preferPatterns',
+//           product: 'productKnowledge', policy: 'customPolicies', example: 'responseExamples',
+//         };
+//         const updatedBrain = { ...currentBrainDB };
+//         let actuallyAdded = 0;
+//         ruleUpdates.forEach(rule => {
+//           const key = BRAIN_KEYS[rule.category];
+//           if (!key) return;
+//           if (!updatedBrain[key]) updatedBrain[key] = [];
+//           const exists = updatedBrain[key].some(r => (r.text || r) === rule.text);
+//           if (!exists) {
+//             updatedBrain[key].push({ text: rule.text, source: rule.source || 'admin-chat' });
+//             actuallyAdded++;
+//           }
+//         });
+
+//         if (actuallyAdded >= 3) {
+//           await backupBrain('pre-chat-save', req.user?.email || 'chat-auto', { minIntervalMinutes: 10 });
+//         }
+
+//         await db.pool.query(`
+//           INSERT INTO ai_training_brain (id, brain_data, updated_at, updated_by)
+//           VALUES (1, $1, NOW(), $2)
+//           ON CONFLICT (id) DO UPDATE
+//             SET brain_data = EXCLUDED.brain_data,
+//                 updated_at = EXCLUDED.updated_at,
+//                 updated_by = EXCLUDED.updated_by
+//         `, [JSON.stringify(updatedBrain), req.user?.email || 'chat-auto']);
+//         try { const { refreshBrainCache } = require('../brain-context'); refreshBrainCache(); } catch {}
+//       } catch (saveErr) {
+//         console.error('[AI Training] chat auto-save error:', saveErr.message);
+//       }
+//     }
+
+//     res.json({
+//       message: parsed.message || 'Tell me more.',
+//       type: parsed.type || (ruleUpdates.length > 0 ? 'training' : 'answer'),
+//       isQuestion: parsed.isQuestion ?? false,
+//       ruleUpdates,
+//       nextQuestion: parsed.nextQuestion || null,
+//     });
+
+//   } catch (err) {
+//     console.error('[AI Training] chat error:', err);
+//     res.status(500).json({ error: 'Training chat failed', message: err.message });
+//   }
+// });
+
+// // ─────────────────────────────────────────────────────────────────────────────
+// // GET /api/ai/training/brain-search?q=...
+// // ─────────────────────────────────────────────────────────────────────────────
+// router.get('/brain-search', authenticateToken, async (req, res) => {
+//   try {
+//     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+//     const q = req.query.q || '';
+//     if (!q.trim()) return res.status(400).json({ error: 'q query param required' });
+
+//     const brain = await loadBrainFromDB();
+//     const perCategory = Math.min(parseInt(req.query.perCategory) || 10, 25);
+//     const totalCap    = Math.min(parseInt(req.query.totalCap)    || 40, 100);
+
+//     const tokens   = tokenizeQuery(q);
+//     const matched  = searchBrainRules(brain, q, { perCategory, totalCap });
+//     const totalHits = Object.values(matched).reduce((s, arr) => s + arr.length, 0);
+//     const counts   = countBrainRules(brain);
+
+//     res.json({ query: q, tokens, brainCounts: counts, totalHits, perCategory, totalCap, matched });
+//   } catch (err) {
+//     console.error('[AI Training] brain-search error:', err);
+//     res.status(500).json({ error: 'Search failed', message: err.message });
+//   }
+// });
+
+// // ─────────────────────────────────────────────────────────────────────────────
+// // POST /api/ai/training/consolidate
+// // Standard (non-interactive) full consolidation — writes directly to DB.
+// // ─────────────────────────────────────────────────────────────────────────────
+// router.post('/consolidate', authenticateToken, async (req, res) => {
+//   try {
+//     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+//     const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+//     if (!ANTHROPIC_API_KEY) return res.status(400).json({ error: 'No ANTHROPIC_API_KEY' });
+
+//     const { categories = null, dryRun = false, verify = false } = req.body;
+//     const ALL_KEYS = {
+//       tone: 'toneRules', avoid: 'avoidPatterns', prefer: 'preferPatterns',
+//       product: 'productKnowledge', policy: 'customPolicies', example: 'responseExamples',
+//     };
+//     const target = Array.isArray(categories) && categories.length
+//       ? categories.filter(c => ALL_KEYS[c])
+//       : Object.keys(ALL_KEYS);
+
+//     const brain = await loadBrainFromDB();
+//     if (brainRuleTotal(brain) === 0) {
+//       return res.status(503).json({ error: 'Brain loaded empty or unavailable — aborting to protect existing rules. Try again in a moment.' });
+//     }
+//     const newBrain = { ...brain };
+//     const report = {};
+
+
+//     for (const cat of target) {
+//       const key = ALL_KEYS[cat];
+//       const arr = (brain[key] || []).map(r => (typeof r === 'string' ? { text: r } : r));
+//       if (arr.length < 2) {
+//         report[cat] = { before: arr.length, after: arr.length, action: 'skipped (< 2 rules)' };
+//         continue;
+//       }
+//       const result = await consolidateCategoryDeep(cat, arr, ANTHROPIC_API_KEY, { verify });
+//       if (!result || !result.rules.length || result.rules.length >= arr.length) {
+//         report[cat] = { before: arr.length, after: arr.length, action: 'no merge possible', clusters: result?.clusters };
+//         continue;
+//       }
+//       newBrain[key] = result.rules.map(text => ({ text, source: 'consolidated' }));
+//       report[cat] = {
+//         before: arr.length,
+//         after: result.rules.length,
+//         saved: arr.length - result.rules.length,
+//         clusters: result.clusters,
+//         recoveredDetails: result.lostInfo || [],
+//       };
+//     }
+
+//     if (dryRun) {
+//       return res.json({ dryRun: true, report, proposedCounts: countBrainRules(newBrain) });
+//     }
+
+//     try {
+//       await db.pool.query(`
+//         CREATE TABLE IF NOT EXISTS ai_training_brain_backups (
+//           id SERIAL PRIMARY KEY,
+//           brain_data JSONB NOT NULL,
+//           backed_up_at TIMESTAMPTZ DEFAULT NOW(),
+//           reason TEXT,
+//           backed_up_by TEXT
+//         )
+//       `);
+//       await db.pool.query(
+//         `INSERT INTO ai_training_brain_backups (brain_data, reason, backed_up_by) VALUES ($1, $2, $3)`,
+//         [JSON.stringify(brain), 'pre-consolidate', req.user.email]
+//       );
+//     } catch (bErr) {
+//       console.error('[AI Training] consolidate backup failed:', bErr.message);
+//     }
+
+//     await db.pool.query(`
+//       INSERT INTO ai_training_brain (id, brain_data, updated_at, updated_by)
+//       VALUES (1, $1, NOW(), $2)
+//       ON CONFLICT (id) DO UPDATE
+//         SET brain_data = EXCLUDED.brain_data,
+//             updated_at = EXCLUDED.updated_at,
+//             updated_by = EXCLUDED.updated_by
+//     `, [JSON.stringify(newBrain), `consolidate-${req.user.email}`]);
+
+//     try { const { refreshBrainCache } = require('../brain-context'); refreshBrainCache(); } catch {}
+
+//     const rulesBefore = Object.values(report).reduce((s, r) => s + (r.before || 0), 0);
+//     const rulesAfter  = Object.values(report).reduce((s, r) => s + (r.after  || 0), 0);
+//     const removed     = rulesBefore - rulesAfter;
+
+//     console.log(`[AI Training] Consolidate by ${req.user.email}: ${rulesBefore} → ${rulesAfter} rules (-${removed})`);
+//     res.json({
+//       ok: true,
+//       report,
+//       brainCounts: countBrainRules(newBrain),
+//       rulesBefore,
+//       rulesAfter,
+//       removed,
+//       message: `Consolidated ${rulesBefore} rules into ${rulesAfter} — removed ${removed} redundant ${removed === 1 ? 'entry' : 'entries'}.`,
+//     });
+
+//   } catch (err) {
+//     console.error('[AI Training] consolidate error:', err);
+//     res.status(500).json({ error: 'Consolidation failed', message: err.message });
+//   }
+// });
+
+// // ─────────────────────────────────────────────────────────────────────────────
+// // POST /api/ai/training/consolidate/preview
+// // Clusters all rules and proposes merges WITHOUT writing to DB.
+// // Returns proposals the admin can approve/edit/reject in the review UI.
+// // ─────────────────────────────────────────────────────────────────────────────
+// router.post('/consolidate/preview', authenticateToken, async (req, res) => {
+//   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+//   const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+//   if (!ANTHROPIC_API_KEY) return res.status(400).json({ error: 'No ANTHROPIC_API_KEY' });
+
+//   try {
+//     const brain = await loadBrainFromDB();
+//     const ALL_KEYS = {
+//       tone: 'toneRules', avoid: 'avoidPatterns', prefer: 'preferPatterns',
+//       product: 'productKnowledge', policy: 'customPolicies', example: 'responseExamples',
+//     };
+
+//     // Flatten every rule across all categories with its source metadata
+//     const allRules = [];
+//     for (const [cat, key] of Object.entries(ALL_KEYS)) {
+//       const arr = brain[key] || [];
+//       arr.forEach((r, idx) => {
+//         const text = typeof r === 'string' ? r : r?.text;
+//         if (text?.trim()) allRules.push({ cat, key, text: text.trim(), raw: r, idx });
+//       });
+//     }
+
+//     const totalBefore = allRules.length;
+//     if (totalBefore === 0) {
+//       return res.json({ proposals: [], unchanged: 0, summary: { currentRules: 0, proposalCount: 0, estimatedAfter: 0, reductionPercent: 0 } });
+//     }
+
+//     // Cluster all rules by canonical topic (cross-category where topic matches)
+//     const clusterMap = new Map(); // clusterKey → [rule objects]
+//     for (const rule of allRules) {
+//       const topic = primaryTopic(rule.text);
+//       // Keep category in cluster key so tone/product rules don't accidentally merge
+//       const clusterKey = `${rule.cat}::${topic}`;
+//       if (!clusterMap.has(clusterKey)) clusterMap.set(clusterKey, []);
+//       clusterMap.get(clusterKey).push(rule);
+//     }
+
+//     let unchangedCount = 0;
+
+//     // Sort clusters: largest first so high-impact proposals appear at top of review
+//     const sortedClusters = [...clusterMap.entries()]
+//       .sort((a, b) => b[1].length - a[1].length);
+
+//     // Separate single-rule clusters (no work needed) from multi-rule clusters
+//     const workClusters = [];
+//     for (const [clusterKey, members] of sortedClusters) {
+//       if (members.length < 2) { unchangedCount++; continue; }
+//       workClusters.push([clusterKey, members]);
+//     }
+
+//     // Process clusters in parallel batches — 5 concurrent AI calls instead of sequential
+//     const CONCURRENCY = 5;
+//     const clusterResults = []; // [{ clusterKey, members, goldenRules }]
+
+//     for (let i = 0; i < workClusters.length; i += CONCURRENCY) {
+//       const batch = workClusters.slice(i, i + CONCURRENCY);
+//       const batchResults = await Promise.all(batch.map(async ([clusterKey, members]) => {
+//         const [cat, ...topicParts] = clusterKey.split('::');
+//         const topicLabel = topicParts.join('::')
+//           .replace(/^peptide:/, '').replace(/^ops:/, '')
+//           .replace(/^policy:/, '').replace(/^meta:/, '')
+//           .replace(/_/g, ' ');
+//         const texts = members.map(m => m.text);
+//         try {
+//           const goldenRules = await consolidateOneCluster(cat, topicLabel, texts, ANTHROPIC_API_KEY);
+//           return { clusterKey, members, cat, topicLabel, texts, goldenRules };
+//         } catch (err) {
+//           console.error(`[Preview] cluster ${clusterKey} failed:`, err.message);
+//           return { clusterKey, members, cat, topicLabel, texts, goldenRules: null };
+//         }
+//       }));
+//       clusterResults.push(...batchResults);
+//       // Small pause between batches to stay within Anthropic rate limits
+//       if (i + CONCURRENCY < workClusters.length) {
+//         await new Promise(r => setTimeout(r, 300));
+//       }
+//     }
+
+//     // Build proposal list from results (maintain largest-first order)
+//     const proposals = [];
+//     let proposalSeq = 0;
+//     for (const { clusterKey, members, cat, topicLabel, texts, goldenRules } of clusterResults) {
+//       if (!goldenRules || goldenRules.length >= members.length) {
+//         unchangedCount += members.length;
+//         continue;
+//       }
+//       const absorbedCount = members.length;
+//       const impact = absorbedCount >= 8 ? 'critical' : absorbedCount >= 4 ? 'high' : 'medium';
+//         goldenRules.forEach((golden, gIdx) => {
+//         proposalSeq++;
+//         proposals.push({
+//           id: `prop_${proposalSeq}`,
+//           category: cat,
+//           key: members[0].key,
+//           topic: topicLabel || cat,
+//           impact,
+//           golden,
+//           absorbedTexts: gIdx === 0 ? texts : [],
+//           absorbedCount: gIdx === 0 ? absorbedCount : 0,
+//           // ← ADDED: did this cluster contain any admin-authored rule?
+//           absorbedGolden: gIdx === 0
+//             ? members.some(m => {
+//                 const s = (m.raw && typeof m.raw === 'object' ? m.raw.source : '') || '';
+//                 return ['admin-feedback','admin-upload','admin-training','admin-chat','admin-consolidation-audit'].includes(s);
+//               })
+//             : false,
+//           clusterKey,
+//         });
+//       });
+//     }
+
+//     const estimatedAfter = unchangedCount + proposals.length;
+//     const reductionPercent = totalBefore > 0
+//       ? Math.round((1 - estimatedAfter / totalBefore) * 100)
+//       : 0;
+
+//     console.log(`[Consolidate Preview] ${req.user.email}: ${totalBefore} rules → ${proposals.length} proposals → est. ${estimatedAfter} after commit`);
+
+//     res.json({
+//       proposals,
+//       unchanged: unchangedCount,
+//       summary: {
+//         currentRules: totalBefore,
+//         proposalCount: proposals.length,
+//         estimatedAfter,
+//         reductionPercent,
+//       },
+//     });
+
+//   } catch (err) {
+//     console.error('[Consolidate Preview] Error:', err.message);
+//     res.status(500).json({ error: 'Preview failed', message: err.message });
+//   }
+// });
+
+// // ─────────────────────────────────────────────────────────────────────────────
+// // POST /api/ai/training/consolidate/commit
+// // Applies only the admin-approved proposals from a preview session.
+// // Body: { approvedProposals: [...proposal objects with golden text...] }
+// // ─────────────────────────────────────────────────────────────────────────────
+// router.post('/consolidate/commit', authenticateToken, async (req, res) => {
+//   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+
+//   const { approvedProposals = [] } = req.body;
+//   if (!approvedProposals.length) {
+//     return res.status(400).json({ error: 'No approved proposals provided' });
+//   }
+
+//   try {
+// const brain = await loadBrainFromDB();
+//     if (brainRuleTotal(brain) === 0) {
+//       return res.status(503).json({ error: 'Brain loaded empty or unavailable — aborting commit to protect existing rules. Try again in a moment.' });
+//     }
+
+//     // Always backup before any destructive change — no interval guard here
+//     await backupBrain('pre-interactive-consolidate', req.user.email, { minIntervalMinutes: 0 });
+
+//     // Build the set of original rule texts to remove
+//     const toRemove = new Set();
+//     for (const p of approvedProposals) {
+//       (p.absorbedTexts || []).forEach(t => {
+//         if (t?.trim()) toRemove.add(t.trim());
+//       });
+//     }
+
+//     const ALL_KEYS = {
+//       tone: 'toneRules', avoid: 'avoidPatterns', prefer: 'preferPatterns',
+//       product: 'productKnowledge', policy: 'customPolicies', example: 'responseExamples',
+//     };
+
+//     // Start with a clean copy — strip every absorbed rule
+//     const newBrain = {};
+//     for (const [, key] of Object.entries(ALL_KEYS)) {
+//       const arr = brain[key] || [];
+//       newBrain[key] = arr.filter(r => {
+//         const text = typeof r === 'string' ? r : r?.text;
+//         return !toRemove.has((text || '').trim());
+//       });
+//     }
+
+//     // Append each approved golden rule to its category
+// for (const p of approvedProposals) {
+//       if (!p.key || !p.golden?.trim()) continue;
+//       if (!newBrain[p.key]) newBrain[p.key] = [];
+//       const alreadyThere = newBrain[p.key].some(r => (r.text || r) === p.golden.trim());
+//       if (!alreadyThere) {
+//         // ← CHANGED: preserve admin authority through the merge
+//         const outSource = p.absorbedGolden ? 'admin-consolidation-audit' : 'consolidated';
+//         newBrain[p.key].push({ text: p.golden.trim(), source: outSource });
+//       }
+//     }
+
+//     await db.pool.query(`
+//       INSERT INTO ai_training_brain (id, brain_data, updated_at, updated_by)
+//       VALUES (1, $1, NOW(), $2)
+//       ON CONFLICT (id) DO UPDATE
+//         SET brain_data = EXCLUDED.brain_data,
+//             updated_at = EXCLUDED.updated_at,
+//             updated_by = EXCLUDED.updated_by
+//     `, [JSON.stringify(newBrain), `interactive-consolidate-${req.user.email}`]);
+
+//     try { const { refreshBrainCache } = require('../brain-context'); refreshBrainCache(); } catch {}
+
+//     const counts = countBrainRules(newBrain);
+//     const remaining = Object.values(counts).reduce((s, n) => s + n, 0);
+
+//     console.log(`[Consolidate Commit] ${req.user.email}: removed ${toRemove.size} rules, added ${approvedProposals.length} golden rules → ${remaining} total`);
+
+//     res.json({
+//       ok: true,
+//       absorbed: toRemove.size,
+//       added: approvedProposals.length,
+//       remainingRules: remaining,
+//       brainCounts: counts,
+//       message: `Committed ${approvedProposals.length} merges. Absorbed ${toRemove.size} old rules. ${remaining} rules remaining.`,
+//     });
+
+//   } catch (err) {
+//     console.error('[Consolidate Commit] Error:', err.message);
+//     res.status(500).json({ error: 'Commit failed', message: err.message });
+//   }
+// });
+
+// // ─────────────────────────────────────────────────────────────────────────────
+// // POST /api/ai/training/consolidate-restore
+// // Reverts the brain to the most recent backup.
+// // ─────────────────────────────────────────────────────────────────────────────
+// router.post('/consolidate-restore', authenticateToken, async (req, res) => {
+//   try {
+//     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+
+//     const r = await db.pool.query(
+//       `SELECT id, brain_data, backed_up_at
+//        FROM ai_training_brain_backups
+//        ORDER BY backed_up_at DESC
+//        LIMIT 1`
+//     );
+//     if (r.rows.length === 0) {
+//       return res.status(404).json({ error: 'No backup found to revert to.' });
+//     }
+
+//     const { id: backupId, brain_data, backed_up_at } = r.rows[0];
+
+//     await db.pool.query(`
+//       INSERT INTO ai_training_brain (id, brain_data, updated_at, updated_by)
+//       VALUES (1, $1, NOW(), $2)
+//       ON CONFLICT (id) DO UPDATE
+//         SET brain_data = EXCLUDED.brain_data,
+//             updated_at = EXCLUDED.updated_at,
+//             updated_by = EXCLUDED.updated_by
+//     `, [JSON.stringify(brain_data), `restore-${req.user.email}`]);
+
+//     await db.pool.query(`DELETE FROM ai_training_brain_backups WHERE id = $1`, [backupId]);
+
+//     try { const { refreshBrainCache } = require('../brain-context'); refreshBrainCache(); } catch {}
+
+//     console.log(`↩️  [AI Training] Brain reverted to backup from ${backed_up_at} by ${req.user.email}`);
+//     res.json({
+//       ok: true,
+//       restoredFrom: backed_up_at,
+//       brainCounts: countBrainRules(brain_data),
+//       message: `Brain restored from backup created at ${new Date(backed_up_at).toLocaleString()}.`,
+//     });
+//   } catch (err) {
+//     console.error('↩️  [AI Training] consolidate-restore error:', err.message);
+//     res.status(500).json({ error: `Revert failed: ${err.message}` });
+//   }
+// });
+
+// // ─────────────────────────────────────────────────────────────────────────────
+// // GET /api/ai/settings/keys
+// // Lists fallback providers (currently: deepseek) with masked keys.
+// // ─────────────────────────────────────────────────────────────────────────────
+// router.get('/settings/keys', authenticateToken, async (req, res) => {
+//   try {
+//     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+//     await ensureProviderKeysTable();
+//     const r = await db.pool.query(`SELECT provider, api_key, updated_at, updated_by FROM api_provider_keys`);
+//     const dbKeys = {};
+//     r.rows.forEach(row => { dbKeys[row.provider] = row; });
+
+//     const providers = ['deepseek'].map(provider => {
+//       const dbRow = dbKeys[provider];
+//       const envVar = provider === 'deepseek' ? 'DEEPSEEK_API_KEY' : null;
+//       const hasEnv = envVar ? !!process.env[envVar] : false;
+//       return {
+//         provider,
+//         configured: !!dbRow || hasEnv,
+//         source: dbRow ? 'database' : (hasEnv ? 'environment' : null),
+//         maskedKey: dbRow ? maskKey(dbRow.api_key) : (hasEnv ? maskKey(process.env[envVar]) : null),
+//         updatedAt: dbRow?.updated_at || null,
+//         updatedBy: dbRow?.updated_by || null,
+//       };
+//     });
+
+//     res.json({ providers });
+//   } catch (err) {
+//     console.error('[API Keys] GET settings/keys error:', err);
+//     res.status(500).json({ error: 'Failed to load API key settings' });
+//   }
+// });
+
+// // ─────────────────────────────────────────────────────────────────────────────
+// // POST /api/ai/settings/keys
+// // Body: { provider: 'deepseek', apiKey: '...' }
+// // ─────────────────────────────────────────────────────────────────────────────
+// router.post('/settings/keys', authenticateToken, async (req, res) => {
+//   try {
+//     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+//     const { provider, apiKey } = req.body;
+//     if (!provider || !apiKey?.trim()) return res.status(400).json({ error: 'provider and apiKey required' });
+
+//     await saveProviderKey(provider, apiKey.trim(), req.user.email);
+//     console.log(`[API Keys] ${provider} key saved by ${req.user.email}`);
+//     res.json({ ok: true, provider, maskedKey: maskKey(apiKey.trim()) });
+//   } catch (err) {
+//     console.error('[API Keys] POST settings/keys error:', err);
+//     res.status(500).json({ error: 'Failed to save API key' });
+//   }
+// });
+
+// // ─────────────────────────────────────────────────────────────────────────────
+// // DELETE /api/ai/settings/keys/:provider
+// // Removes the saved key — reverts to the env var, if one exists.
+// // ─────────────────────────────────────────────────────────────────────────────
+// router.delete('/settings/keys/:provider', authenticateToken, async (req, res) => {
+//   try {
+//     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+//     await deleteProviderKey(req.params.provider);
+//     console.log(`[API Keys] ${req.params.provider} key removed by ${req.user.email}`);
+//     res.json({ ok: true });
+//   } catch (err) {
+//     console.error('[API Keys] DELETE settings/keys error:', err);
+//     res.status(500).json({ error: 'Failed to delete API key' });
+//   }
+// });
+
+// // ═════════════════════════════════════════════════════════════════════════════
+// // Helpers
+// // ═════════════════════════════════════════════════════════════════════════════
+
+// function parseAIResponse(raw) {
+//   if (!raw) return null;
+//   const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+//   try { return JSON.parse(cleaned); } catch {}
+//   const jsonMatch = cleaned.match(/\{[\s\S]*\}\s*$/);
+//   if (jsonMatch) {
+//     try { return JSON.parse(jsonMatch[0]); } catch {}
+//   }
+//   return null;
+// }
+
+// async function loadBrainFromDB() {
+//   // NOTE: intentionally NOT catching. A transient DB error must propagate so
+//   // destructive callers (consolidate/commit) abort via their try/catch rather
+//   // than silently treating a read failure as an empty brain and overwriting it.
+//   const r = await db.pool.query(
+//     `SELECT brain_data FROM ai_training_brain ORDER BY updated_at DESC LIMIT 1`
+//   );
+//   return r.rows[0]?.brain_data || {};
+// }
+
+// function brainRuleTotal(brain) {
+//   if (!brain || typeof brain !== 'object') return 0;
+//   const KEYS = ['toneRules','avoidPatterns','preferPatterns','productKnowledge','customPolicies','responseExamples'];
+//   return KEYS.reduce((s, k) => s + (Array.isArray(brain[k]) ? brain[k].length : 0), 0);
+// }
+
+
+// async function backupBrain(reason, userEmail, { minIntervalMinutes = 0 } = {}) {
+//   try {
+//     await db.pool.query(`
+//       CREATE TABLE IF NOT EXISTS ai_training_brain_backups (
+//         id SERIAL PRIMARY KEY,
+//         brain_data JSONB NOT NULL,
+//         backed_up_at TIMESTAMPTZ DEFAULT NOW(),
+//         reason TEXT,
+//         backed_up_by TEXT
+//       )
+//     `);
+
+//     if (minIntervalMinutes > 0) {
+//       const recent = await db.pool.query(
+//         `SELECT 1 FROM ai_training_brain_backups
+//          WHERE backed_up_at > NOW() - INTERVAL '1 minute' * $1
+//          LIMIT 1`,
+//         [minIntervalMinutes]
+//       );
+//       if (recent.rows.length > 0) return;
+
+//     }
+
+//     const current = await db.pool.query(
+//       `SELECT brain_data FROM ai_training_brain ORDER BY updated_at DESC LIMIT 1`
+//     );
+//     // Don't back up an empty/missing brain — an empty backup destroys the one
+//     // recovery path. Only insert when there's real data to preserve.
+//     if (current.rows[0]?.brain_data && brainRuleTotal(current.rows[0].brain_data) > 0) {
+//       await db.pool.query(
+//         `INSERT INTO ai_training_brain_backups (brain_data, reason, backed_up_by) VALUES ($1, $2, $3)`,
+//         [JSON.stringify(current.rows[0].brain_data), reason, userEmail]
+//       );
+//     }
+//   } catch (err) {
+//     console.error('[AI Training] backupBrain error:', err.message);
+//   }
+// }
+
+// function countBrainRules(brain) {
+//   return {
+//     tone:    (brain?.toneRules        || []).length,
+//     avoid:   (brain?.avoidPatterns    || []).length,
+//     prefer:  (brain?.preferPatterns   || []).length,
+//     product: (brain?.productKnowledge || []).length,
+//     policy:  (brain?.customPolicies   || []).length,
+//     example: (brain?.responseExamples || []).length,
+//   };
+// }
+
+// function formatBrainForPromptBudgeted(brain, maxChars = 20000, perCategory = 30) {
+//   if (!brain) return '';
+//   const txt = r => typeof r === 'string' ? r : r.text;
+//   const KEYS = [
+//     ['TONE',     'toneRules'],
+//     ['AVOID',    'avoidPatterns'],
+//     ['PREFER',   'preferPatterns'],
+//     ['PRODUCT',  'productKnowledge'],
+//     ['POLICIES', 'customPolicies'],
+//     ['EXAMPLES', 'responseExamples'],
+//   ];
+//   const counts = KEYS.map(([label, key]) =>
+//     `${label} ${(brain[key] || []).length}`).join(' · ');
+//   const total = KEYS.reduce((s, [, k]) => s + (brain[k] || []).length, 0);
+//   if (total === 0) return '';
+
+//   const header = `TOTALS: ${counts}\n(Showing ${perCategory}+ most recent per category. Additional matching rules surface in the RELEVANT block via keyword search.)\n\n`;
+//   let budget = maxChars - header.length;
+//   const sections = [];
+//   for (const [label, key] of KEYS) {
+//     const arr = brain[key] || [];
+//     if (!arr.length) continue;
+//     const recent = arr.slice(-perCategory);
+//     const section = `${label}:\n${recent.map(r => `  - ${txt(r)}`).join('\n')}`;
+//     if (section.length > budget) {
+//       const partial = `${label}:\n${recent.map(r => `  - ${txt(r)}`).join('\n').slice(0, Math.max(0, budget - label.length - 20))}\n  - [... truncated, ${arr.length} total]`;
+//       sections.push(partial);
+//       break;
+//     }
+//     sections.push(section);
+//     budget -= section.length + 2;
+//   }
+//   return header + sections.join('\n\n');
+// }
+
+// // ─────────────────────────────────────────────────────────────────────────────
+// // Keyword relevance search
+// // ─────────────────────────────────────────────────────────────────────────────
+
+// const SEARCH_STOPWORDS = new Set([
+//   'the','a','an','and','or','but','is','are','was','were','be','been','being',
+//   'have','has','had','do','does','did','will','would','should','could','can',
+//   'may','might','of','at','by','for','with','about','as','into','through',
+//   'to','from','up','down','in','out','on','off','over','under','again',
+//   'here','there','when','where','why','how','what','which','who','whom',
+//   'this','that','these','those','i','me','my','we','our','you','your',
+//   'he','him','his','she','her','it','its','they','them','their',
+//   'just','also','still','really','very','quite','pretty','always','never',
+//   'hi','hey','hello','thanks','please','okay','ok','yes','no','yeah','nope',
+//   'tell','show','give','want','need','think','make',
+//   'something','anything','everything','nothing','keep','going','more','some',
+//   'say','says','said','one','two','three','first','last',
+// ]);
+
+// const PEPTIDE_ALIASES_SEARCH = {
+//   reta: 'retatrutide', tirz: 'tirzepatide', sema: 'semaglutide',
+//   bpc: 'bpc-157', tb: 'tb-500', cjc: 'cjc-1295', ipa: 'ipamorelin',
+//   ghk: 'ghk-cu', tesa: 'tesamorelin', nad: 'nad+', glp: 'semaglutide',
+// };
+
+// function tokenizeQuery(query) {
+//   const raw = (query || '')
+//     .toLowerCase()
+//     .replace(/[^a-z0-9\s-]/g, ' ')
+//     .split(/\s+/)
+//     .filter(w => w.length >= 3 && !SEARCH_STOPWORDS.has(w));
+
+//   const expanded = new Set(raw);
+//   for (const t of raw) {
+//     if (PEPTIDE_ALIASES_SEARCH[t]) expanded.add(PEPTIDE_ALIASES_SEARCH[t]);
+//   }
+//   return [...expanded];
+// }
+
+// function searchBrainRules(brain, query, { perCategory = 8, totalCap = 30 } = {}) {
+//   if (!brain || !query) return {};
+//   const tokens = tokenizeQuery(query);
+//   if (tokens.length === 0) return {};
+
+//   const KEYS = {
+//     tone:    'toneRules',
+//     avoid:   'avoidPatterns',
+//     prefer:  'preferPatterns',
+//     product: 'productKnowledge',
+//     policy:  'customPolicies',
+//     example: 'responseExamples',
+//   };
+//   const txt = r => (typeof r === 'string' ? r : r.text || '').toLowerCase();
+//   const escapeRegex = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+//   const results = {};
+//   let totalReturned = 0;
+
+//   for (const [cat, key] of Object.entries(KEYS)) {
+//     const arr = brain[key] || [];
+//     if (!arr.length) continue;
+
+//     const scored = arr
+//       .map(rule => {
+//         const text = txt(rule);
+//         if (!text) return null;
+//         let score = 0;
+//         let distinctHits = 0;
+//         for (const tok of tokens) {
+//           const wholeWord = new RegExp(`\\b${escapeRegex(tok)}\\b`, 'i');
+//           if (wholeWord.test(text))    { score += 3; distinctHits++; }
+//           else if (text.includes(tok)) { score += 1; distinctHits++; }
+//         }
+//         if (distinctHits >= 2) score += distinctHits * 2;
+//         return score > 0 ? { rule, score } : null;
+//       })
+//       .filter(Boolean)
+//       .sort((a, b) => b.score - a.score)
+//       .slice(0, perCategory)
+//       .map(x => x.rule);
+
+//     if (scored.length) {
+//       results[cat] = scored;
+//       totalReturned += scored.length;
+//       if (totalReturned >= totalCap) break;
+//     }
+//   }
+//   return results;
+// }
+
+// function formatRelevantRules(results) {
+//   const entries = Object.entries(results);
+//   if (!entries.length) return '';
+//   const txt = r => typeof r === 'string' ? r : r.text;
+//   const labels = {
+//     tone: 'TONE', avoid: 'AVOID', prefer: 'PREFER',
+//     product: 'PRODUCT', policy: 'POLICIES', example: 'EXAMPLES',
+//   };
+//   const total = entries.reduce((sum, [, arr]) => sum + arr.length, 0);
+//   const sections = entries.map(([cat, rules]) =>
+//     `${labels[cat]}:\n${rules.map(r => `  - ${txt(r)}`).join('\n')}`
+//   );
+//   return `RULES RELEVANT TO ADMIN'S CURRENT MESSAGE (${total} matched via keyword search across full brain):\n${sections.join('\n\n')}`;
+// }
+
+// // ─────────────────────────────────────────────────────────────────────────────
+// // Canonical alias maps for topic clustering
+// // All spelling variants of the same concept collapse to one cluster key.
+// // Longest entries first so "bpc 157" is checked before "bpc".
+// // ─────────────────────────────────────────────────────────────────────────────
+
+// const PEPTIDE_CANONICAL = [
+//   // entry: [alias, canonicalKey] — sorted longest-first within the array
+//   ['hgh fragment', 'hghfrag'], ['aod-9604', 'hghfrag'], ['aod9604', 'hghfrag'],
+//   ['growth hormone', 'hgh'],
+//   ['copper peptide', 'ghkcu'],
+//   ['bpc-157', 'bpc157'], ['bpc 157', 'bpc157'], ['bpc157', 'bpc157'],
+//   ['tb-500', 'tb500'],   ['tb 500', 'tb500'],   ['tb500', 'tb500'],
+//   ['cjc-1295', 'cjc1295'], ['cjc 1295', 'cjc1295'], ['cjc1295', 'cjc1295'],
+//   ['ghk-cu', 'ghkcu'],   ['ghk-cu', 'ghkcu'],   ['ghk ', 'ghkcu'],
+//   ['mt-2', 'mt2'],       ['mt2', 'mt2'],
+//   ['pt-141', 'pt141'],   ['pt141', 'pt141'],
+//   ['mots-c', 'motsc'],   ['motsc', 'motsc'],
+//   ['tirzepatide', 'tirz'], ['mounjaro', 'tirz'],
+//   ['semaglutide', 'sema'], ['ozempic', 'sema'], ['wegovy', 'sema'],
+//   ['retatrutide', 'reta'],
+//   ['ipamorelin', 'ipa'],
+//   ['tesamorelin', 'tesa'],
+//   ['sermorelin', 'sermorelin'],
+//   ['melanotan', 'mt2'],
+//   ['bremelanotide', 'pt141'],
+//   ['kisspeptin', 'kisspeptin'],
+//   ['gonadorelin', 'gonadorelin'],
+//   ['triptorelin', 'triptorelin'],
+//   ['epithalon', 'epithalon'], ['epitalon', 'epithalon'],
+//   ['pinealon', 'pinealon'],
+//   ['thymalin', 'thymalin'],
+//   ['selank', 'selank'],
+//   ['semax', 'semax'],
+//   ['follistatin', 'follistatin'],
+//   ['aicar', 'aicar'],
+//   ['wolverine', 'wolverine'],
+//   ['glow blend', 'glow'],
+//   ['hgh', 'hgh'],
+//   ['nad+', 'nad'],
+//   ['nad ', 'nad'],
+//   ['aod ', 'hghfrag'],
+//   ['klow', 'klow'],
+// ];
+
+// const OPS_CANONICAL = [
+//   ['bacteriostatic water', 'reconstitution'],
+//   ['bac water', 'reconstitution'],
+//   ['reconstitut', 'reconstitution'],
+//   ['insulin pin', 'injection'],
+//   ['subcutaneous', 'injection'],
+//   ['intramuscular', 'injection'],
+//   ['certificate of analysis', 'coa'],
+//   ['room temperature', 'storage'],
+//   ['refrigerat', 'storage'],
+//   ['freezer', 'storage'],
+//   ['storage', 'storage'],
+//   ['fridge', 'storage'],
+//   ['syringe', 'injection_supplies'],
+//   ['needle', 'injection_supplies'],
+//   ['vial', 'vial'],
+//   ['protocol', 'cycle'],
+//   ['inject', 'injection'],
+//   ['dosage', 'dosing'],
+//   ['dosing', 'dosing'],
+//   ['cycle', 'cycle'],
+//   ['stack', 'cycle'],
+//   ['dose', 'dosing'],
+//   ['purity', 'coa'],
+//   ['coa', 'coa'],
+//   ['mcg', 'dosing'],
+//   ['iu ', 'dosing'],
+// ];
+
+// const POLICY_CANONICAL = [
+//   ['money back', 'refund'],
+//   ['card decline', 'payment'],
+//   ['chargeback', 'payment'],
+//   ['lost order', 'lost_order'],
+//   ['first time customer', 'discount'],
+//   ['satisfaction', 'guarantee'],
+//   ['warranty', 'guarantee'],
+//   ['guarantee', 'guarantee'],
+//   ['french', 'french_support'],
+//   ['francais', 'french_support'],
+//   ['quebec', 'french_support'],
+//   ['customs', 'customs'],
+//   ['border', 'customs'],
+//   ['duty', 'customs'],
+//   ['discount', 'discount'],
+//   ['coupon', 'discount'],
+//   ['promo', 'discount'],
+//   ['refund', 'refund'],
+//   ['return', 'refund'],
+//   ['shipping', 'shipping'],
+//   ['tracking', 'shipping'],
+//   ['delivery', 'shipping'],
+//   ['transit', 'shipping'],
+//   ['payment', 'payment'],
+//   ['helcim', 'payment'],
+//   ['interac', 'payment'],
+//   ['stripe', 'payment'],
+//   ['crypto', 'payment'],
+//   ['missing', 'lost_order'],
+//   ['delay', 'delays'],
+//   ['late', 'delays'],
+//   ['lost', 'lost_order'],
+// ];
+
+// const META_CANONICAL = [
+//   ['apology', 'meta_apology'],
+//   ['compensation', 'meta_apology'],
+//   ['escalat', 'meta_escalation'],
+//   ['greeting', 'meta_greeting'],
+//   ['sign-off', 'meta_signoff'],
+//   ['signature', 'meta_signoff'],
+//   ['sorry', 'meta_apology'],
+// ];
+
+// // ─────────────────────────────────────────────────────────────────────────────
+// // primaryTopic — canonical topic key for clustering
+// // Longest alias checked first within each group to prevent partial matches
+// // overriding specific ones (e.g. "bpc" matching before "bpc-157").
+// // ─────────────────────────────────────────────────────────────────────────────
+// function primaryTopic(text) {
+//   const lower = (text || '').toLowerCase();
+
+//   for (const [alias, canonical] of PEPTIDE_CANONICAL) {
+//     if (lower.includes(alias)) return `peptide:${canonical}`;
+//   }
+//   for (const [alias, canonical] of OPS_CANONICAL) {
+//     if (lower.includes(alias)) return `ops:${canonical}`;
+//   }
+//   for (const [alias, canonical] of POLICY_CANONICAL) {
+//     if (lower.includes(alias)) return `policy:${canonical}`;
+//   }
+//   for (const [alias, canonical] of META_CANONICAL) {
+//     if (lower.includes(alias)) return `meta:${canonical}`;
+//   }
+
+//   return 'general';
+// }
+
+// // ─────────────────────────────────────────────────────────────────────────────
+// // Deep consolidation — topic clustering + within-cluster merge + optional verify
+// // ─────────────────────────────────────────────────────────────────────────────
+
+// const CONSOLIDATE_HINTS = {
+//   tone:    'how agents communicate — voice, register, style',
+//   avoid:   'what agents must NEVER say or do',
+//   prefer:  'what agents must ALWAYS say or do',
+//   product: 'peptide product facts — dosing, storage, reconstitution, BAC water ratios, vial sizes, concentrations, ingredients, cycle lengths, stacks',
+//   policy:  'business policies — refunds, shipping, payment, returns, timelines, guarantees',
+//   example: 'gold-standard reply examples',
+// };
+
+// const TOPIC_VOCAB = {
+//   peptide: [
+//     'bpc-157','bpc157','bpc 157',
+//     'tb-500','tb500','tb 500',
+//     'semaglutide','sema ',
+//     'tirzepatide','tirz','tirze',
+//     'retatrutide','reta ',
+//     'cjc-1295','cjc1295','cjc ',
+//     'ipamorelin','ipa ',
+//     'hgh fragment','aod-9604','aod9604','aod ',
+//     'hgh','growth hormone',
+//     'nad+','nad ',
+//     'ghk-cu','ghk ','copper peptide',
+//     'melanotan','mt-2','mt2','pt-141','pt141','bremelanotide',
+//     'tesamorelin','tesa ',
+//     'mots-c','motsc',
+//     'epitalon','epithalon','pinealon','dsip','selank','semax',
+//     'kisspeptin','gonadorelin','triptorelin',
+//     'wolverine','klow','glow stack',
+//   ],
+//   ops: [
+//     'reconstitut','bac water','bacteriostatic',
+//     'dose','dosing','mcg','iu',
+//     'injection','subcutaneous','intramuscular','inject',
+//     'storage','refrigerat','fridge','freezer','room temperature',
+//     'cycle','stack','protocol',
+//     'coa','certificate of analysis','purity',
+//     'vial','syringe','needle','insulin pin',
+//   ],
+//   policy: [
+//     'refund','return','cancel',
+//     'shipping','tracking','delivery','delivered','transit',
+//     'customs','duty','border','hold',
+//     'payment','card decline','chargeback',
+//     'stripe','helcim','interac','crypto','zelle',
+//     'lost','missing','late','delay',
+//     'discount','coupon','promo','first time customer',
+//     'guarantee','warranty','satisfaction',
+//     'french','francais','quebec',
+//   ],
+//   meta: [
+//     'apology','sorry','compensation','escalate',
+//     'greeting','sign-off','signature','closing',
+//   ],
+// };
+
+// function clusterRulesByTopic(rules) {
+//   const txt = r => (typeof r === 'string' ? r : r.text);
+//   const buckets = new Map();
+//   for (const r of rules) {
+//     const key = primaryTopic(txt(r));
+//     if (!buckets.has(key)) buckets.set(key, []);
+//     buckets.get(key).push(r);
+//   }
+//   return [...buckets.entries()]
+//     .map(([topic, members]) => ({ topic, members }))
+//     .sort((a, b) => b.members.length - a.members.length);
+// }
+
+// function areSimilar(a, b) {
+//   const sig = s => new Set(s.toLowerCase().split(/[^a-z0-9-]+/).filter(w => w.length >= 4));
+//   const A = sig(a), B = sig(b);
+//   if (!A.size || !B.size) return false;
+//   let shared = 0;
+//   for (const w of A) if (B.has(w)) shared++;
+//   return shared / Math.min(A.size, B.size) >= 0.4; // loosened from 0.5
+// }
+
+// async function consolidateCategoryDeep(category, rules, apiKey, { verify = false } = {}) {
+//   const txt = r => (typeof r === 'string' ? r : r.text);
+//   const clusters = clusterRulesByTopic(rules);
+//   console.log(`[AI Training] ${category}: ${rules.length} rules → ${clusters.length} topic clusters`);
+
+//   const finalRules = [];
+//   const lostInfo = [];
+
+//   for (const { topic, members } of clusters) {
+//     if (members.length === 1) {
+//       finalRules.push(txt(members[0]));
+//       continue;
+//     }
+
+//     // For pairs: try consolidation regardless (removed the areSimilar gate)
+//     if (members.length === 2) {
+//       const merged = await consolidateOneCluster(category, topic, members.map(txt), apiKey);
+//       if (merged && merged.length < 2) {
+//         finalRules.push(...merged);
+//       } else {
+//         // Still similar enough to try harder — only keep both if they're genuinely different
+//         if (areSimilar(txt(members[0]), txt(members[1]))) {
+//           // Force to one via a second pass with explicit instruction
+//           const forced = await consolidateOneCluster(category, topic, members.map(txt), apiKey);
+//           finalRules.push(...(forced && forced.length ? forced : members.map(txt)));
+//         } else {
+//           finalRules.push(...members.map(txt));
+//         }
+//       }
+//       continue;
+//     }
+
+//     let working = members.map(txt);
+//     const CLUSTER_CHUNK = 40; // increased from 30
+
+//     if (working.length <= CLUSTER_CHUNK) {
+//       const out = await consolidateOneCluster(category, topic, working, apiKey);
+//       if (out && out.length && out.length < working.length) working = out;
+//     } else {
+//       // Sub-chunk processing
+//       const consolidated = [];
+//       for (let i = 0; i < working.length; i += CLUSTER_CHUNK) {
+//         const sub = working.slice(i, i + CLUSTER_CHUNK);
+//         const out = await consolidateOneCluster(category, topic, sub, apiKey);
+//         consolidated.push(...(out && out.length < sub.length ? out : sub));
+//         await new Promise(r => setTimeout(r, 350));
+//       }
+//       // Final pass across all sub-chunk results
+//       if (consolidated.length >= 2) {
+//         const cap = Math.min(consolidated.length, CLUSTER_CHUNK * 2);
+//         const merged = await consolidateOneCluster(category, topic, consolidated.slice(0, cap), apiKey);
+//         working = merged && merged.length < consolidated.length
+//           ? merged.concat(consolidated.slice(cap))
+//           : consolidated;
+//       } else {
+//         working = consolidated;
+//       }
+//     }
+
+//     if (verify && members.length >= 3) {
+//       const dropped = await findDroppedInfo(category, topic, members.map(txt), working, apiKey);
+//       if (dropped && dropped.length) {
+//         console.log(`[AI Training] ${category}/${topic}: ${dropped.length} dropped detail(s) re-added`);
+//         working.push(...dropped);
+//         lostInfo.push({ topic, count: dropped.length });
+//       }
+//     }
+
+//     finalRules.push(...working);
+//   }
+
+//   return { rules: finalRules, clusters: clusters.length, lostInfo };
+// }
+
+// async function consolidateOneCluster(category, topic, rules, apiKey) {
+//   const systemPrompt = `You are aggressively compressing a customer-support knowledge base for a peptide e-commerce operation (400+ Shopify stores, Canada + US).
+
+// Category: ${category} — ${CONSOLIDATE_HINTS[category] || ''}
+// Topic cluster: ${topic}
+
+// These rules are PRE-GROUPED — they are ALL about the same topic. Your goal is ONE comprehensive master rule that fully replaces all of them. Not "fewer rules." ONE rule that contains every useful detail from every input rule.
+
+// WHAT ONE RULE MEANS:
+// - Read all input rules. Extract every numeric fact: doses (mcg/mg/iu), ratios (e.g. 2ml BAC water per 5mg vial), temperatures, day counts, prices, vial sizes, cycle lengths, routes of administration.
+// - Write one dense, complete, self-contained sentence or short paragraph containing ALL of those facts.
+// - The output must be something an agent reads once and knows everything about this topic. Nothing left out.
+
+// STRICT RULES:
+// 1. Preserve ALL numeric values, all product names, all named entities. If three input rules give doses of 200mcg, 250mcg, and 500mcg for different use cases — list all three in the output with their contexts.
+// 2. Do NOT output more than 2 rules unless there is a genuine distinct sub-topic (e.g. one rule for dosing, one rule for storage). This is rare.
+// 3. If two input rules give genuinely incompatible facts (different doses for the same use case with no context difference), write the secondary as "ALT: [secondary version]" — never silently drop it.
+// 4. Do NOT invent facts not present in any input rule.
+// 5. Maximum 600 chars per output rule. If content doesn't fit in one, split into exactly two complementary rules covering distinct aspects.
+// 6. Plain agent-readable text only. No labels, no numbering, no "MASTER RULE:" prefixes, no category names.
+// 7. Your output MUST have fewer rules than the input. If you return the same count, you have failed.
+
+// RESPONSE FORMAT — valid JSON only, no markdown fences:
+// {
+//   "rules": ["comprehensive rule text"],
+//   "merged_from": <int — how many input rules were absorbed>,
+//   "conflicts_kept": <int — number of ALT-prefixed rules>
+// }`;
+
+//   const userPrompt = `Consolidate these ${rules.length} ${category} rules (topic: ${topic}) into ONE comprehensive rule:\n\n${rules.map((r, i) => `${i + 1}. ${r}`).join('\n')}`;
+
+//   try {
+//     const requestBody = JSON.stringify({
+//       model: 'claude-sonnet-4-6',
+//       max_tokens: 8000,
+//       system: systemPrompt,
+//       messages: [{ role: 'user', content: userPrompt }],
+//     });
+
+//     const response = await callAnthropicAPI(requestBody, apiKey);
+//     const raw = response.content?.[0]?.text || '{}';
+//     const parsed = parseAIResponse(raw);
+//     if (!parsed || !Array.isArray(parsed.rules)) return null;
+
+//     const cleaned = parsed.rules
+//       .map(r => (typeof r === 'string' ? r.trim() : r?.text?.trim()))
+//       .filter(Boolean);
+//     console.log(`[AI Training] cluster ${category}/${topic}: ${rules.length} → ${cleaned.length} (merged ${parsed.merged_from ?? '?'}, alt ${parsed.conflicts_kept ?? 0})`);
+//     return cleaned;
+//   } catch (err) {
+//     console.error(`[AI Training] cluster ${category}/${topic} error:`, err.message);
+//     return null;
+//   }
+// }
+
+// async function findDroppedInfo(category, topic, originals, consolidated, apiKey) {
+//   const systemPrompt = `You audit rule consolidation for information loss.
+
+// Below are ORIGINAL rules (before consolidation) and CONSOLIDATED rules (after). Find every concrete detail present in originals but missing from consolidated.
+
+// Concrete detail = specific number, ratio, peptide name, brand name, price, vial size, temperature, day count, dose, route of administration, currency, or named exception.
+
+// Tone preferences, generic phrasing differences, and stylistic variation DO NOT count as lost information. Only flag concrete facts that disappeared.
+
+// For each lost detail, write ONE recovery rule capturing it. If nothing material is lost, return an empty array.
+
+// RESPONSE FORMAT — valid JSON only, no markdown fences:
+// {
+//   "lost": [
+//     { "detail": "what specifically was missing", "rule": "self-contained rule restoring this fact" }
+//   ]
+// }`;
+
+//   const userPrompt = `Category: ${category} | Topic: ${topic}
+
+// ORIGINAL (${originals.length}):
+// ${originals.map((r, i) => `${i + 1}. ${r}`).join('\n')}
+
+// CONSOLIDATED (${consolidated.length}):
+// ${consolidated.map((r, i) => `${i + 1}. ${r}`).join('\n')}
+
+// What concrete details from ORIGINAL are missing in CONSOLIDATED?`;
+
+//   try {
+//     const requestBody = JSON.stringify({
+//       model: 'claude-sonnet-4-6',
+//       max_tokens: 4000,
+//       system: systemPrompt,
+//       messages: [{ role: 'user', content: userPrompt }],
+//     });
+
+//     const response = await callAnthropicAPI(requestBody, apiKey);
+//     const raw = response.content?.[0]?.text || '{}';
+//     const parsed = parseAIResponse(raw);
+//     if (!parsed || !Array.isArray(parsed.lost)) return [];
+
+//     return parsed.lost.map(item => item.rule).filter(Boolean);
+//   } catch (err) {
+//     console.error(`[AI Training] findDroppedInfo ${category}/${topic} error:`, err.message);
+//     return [];
+//   }
+// }
+
+// // ─────────────────────────────────────────────────────────────────────────────
+// // callAnthropicAPI — retries on 429/500/502/503/529 and transient network errors.
+// // On persistent failure (credits exhausted, or retries exhausted on a
+// // rate-limit/server error), falls back to DeepSeek if a key is configured.
+// // The fallback response is wrapped in Anthropic's response shape so every
+// // call site (`response.content?.[0]?.text`) keeps working unchanged.
+// // ─────────────────────────────────────────────────────────────────────────────
+// async function callAnthropicAPI(requestBody, apiKey) {
+//   // ── PRIMARY: DeepSeek ──
+//   try {
+//     const primary = await tryDeepSeekFallback(requestBody);
+//     if (primary) return primary;
+//     console.warn('[AI] DeepSeek primary unavailable (no key / empty result) — falling back to Claude');
+//   } catch (err) {
+//     console.warn(`[AI] DeepSeek primary error: ${err.message} — falling back to Claude`);
+//   }
+
+//   // ── FALLBACK: Anthropic / Claude ──
+//   const RETRYABLE_STATUS = [429, 500, 502, 503, 529];
+//   const MAX_ATTEMPTS = 4;
+
+//   if (!apiKey) throw new Error('DeepSeek unavailable and no ANTHROPIC_API_KEY for fallback');
+
+//   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+//     try {
+//       const res = await fetch('https://api.anthropic.com/v1/messages', {
+//         method: 'POST',
+//         headers: {
+//           'Content-Type': 'application/json',
+//           'x-api-key': apiKey,
+//           'anthropic-version': '2023-06-01',
+//         },
+//         body: requestBody,
+//         signal: AbortSignal.timeout(60000),
+//       });
+
+//       const text = await res.text();
+
+//       if (!res.ok) {
+//         const isLastAttempt = attempt === MAX_ATTEMPTS - 1;
+
+//         // Credit exhaustion isn't transient. DeepSeek already failed above, so
+//         // there's nothing left to fall back to — surface the error.
+//         if (isCreditExhaustedError(text)) {
+//           throw new Error(`Anthropic credits exhausted (fallback): ${text.slice(0, 200)}`);
+//         }
+
+//         if (RETRYABLE_STATUS.includes(res.status) && !isLastAttempt) {
+//           const wait = 1500 * Math.pow(2, attempt);
+//           console.warn(`[AI] Claude fallback ${res.status} — retry ${attempt + 1}/${MAX_ATTEMPTS - 1} in ${wait}ms`);
+//           await new Promise(r => setTimeout(r, wait));
+//           continue;
+//         }
+
+//         throw new Error(`Anthropic API ${res.status}: ${text.slice(0, 200)}`);
+//       }
+
+//       return JSON.parse(text);
+
+//     } catch (err) {
+//       const retryable = err.name === 'TimeoutError' ||
+//         ['ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED'].includes(err.cause?.code);
+
+//       if (retryable && attempt < MAX_ATTEMPTS - 1) {
+//         const wait = 1500 * Math.pow(2, attempt);
+//         console.warn(`[AI] Claude fallback ${err.message} — retry ${attempt + 1}/${MAX_ATTEMPTS - 1} in ${wait}ms`);
+//         await new Promise(r => setTimeout(r, wait));
+//         continue;
+//       }
+//       throw err;
+//     }
+//   }
+// }
+
+
+// module.exports = router;
+
+
+
+
 const express = require('express');
 const multer  = require('multer');
 const router  = express.Router();
@@ -21,6 +1912,7 @@ const upload = multer({
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/brain', authenticateToken, async (req, res) => {
   try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
     const result = await db.pool.query(
       `SELECT brain_data FROM ai_training_brain ORDER BY updated_at DESC LIMIT 1`
     );
@@ -38,26 +1930,29 @@ router.get('/brain', authenticateToken, async (req, res) => {
 router.put('/brain', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
-    const { brain } = req.body;
+    const { brain, force } = req.body;
     if (!brain || typeof brain !== 'object') return res.status(400).json({ error: 'brain object required' });
 
-    await backupBrain('pre-manual-edit', req.user.email, { minIntervalMinutes: 30 });
+    const incomingTotal = brainRuleTotal(brain);
+    const isDestructiveWipe = incomingTotal === 0;
 
-    await db.pool.query(`
-      INSERT INTO ai_training_brain (id, brain_data, updated_at, updated_by)
-      VALUES (1, $1, NOW(), $2)
-      ON CONFLICT (id) DO UPDATE
-        SET brain_data = EXCLUDED.brain_data,
-            updated_at = EXCLUDED.updated_at,
-            updated_by = EXCLUDED.updated_by
-    `, [JSON.stringify(brain), req.user.email]);
+    if (isDestructiveWipe) {
+      const existing = await loadBrainFromDB();
+      if (brainRuleTotal(existing) > 0 && !force) {
+        return res.status(409).json({
+          error: 'This save would wipe an existing non-empty brain (0 rules incoming). Resend with { force: true } to confirm.',
+        });
+      }
+    }
 
-    try {
-      const { refreshBrainCache } = require('../brain-context');
-      refreshBrainCache();
-    } catch { /* brain-context may not be wired yet */ }
+    const backedUp = await backupBrain('pre-manual-edit', req.user.email, { minIntervalMinutes: 30 });
+    if (!backedUp && isDestructiveWipe) {
+      return res.status(500).json({ error: 'Backup failed — aborting this destructive edit rather than risk an unrecoverable wipe. Try again.' });
+    }
 
-    console.log(`[AI Training] Brain saved by ${req.user.email}`);
+    const { brain: saved } = await updateBrainAtomic(async () => brain, req.user.email);
+
+    console.log(`[AI Training] Brain saved by ${req.user.email} (${brainRuleTotal(saved)} rules)`);
     res.json({ ok: true });
   } catch (err) {
     console.error('[AI Training] PUT brain error:', err);
@@ -76,20 +1971,25 @@ router.post('/upload-doc', authenticateToken, upload.single('file'), async (req,
     const { mimetype, buffer, originalname } = req.file;
     let text = '';
 
+    const isDocx = mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      || /\.docx$/i.test(originalname || '');
+    const isLegacyDoc = mimetype === 'application/msword' || /\.doc$/i.test(originalname || '');
+
     if (mimetype === 'text/plain') {
       text = buffer.toString('utf-8');
     } else if (mimetype === 'application/pdf') {
       const pdfParse = require('pdf-parse');
       const data = await pdfParse(buffer);
       text = data.text;
-    } else if (
-      mimetype === 'application/msword' ||
-      mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-      originalname.match(/\.docx?$/i)
-    ) {
+    } else if (isDocx) {
+      // mammoth only understands OOXML (.docx) — check this before the legacy
+      // check so a .docx that happens to arrive with the ambiguous
+      // application/msword mimetype still gets routed here correctly.
       const mammoth = require('mammoth');
       const result = await mammoth.extractRawText({ buffer });
       text = result.value;
+    } else if (isLegacyDoc) {
+      return res.status(400).json({ error: 'Legacy .doc format is not supported — please save as .docx or PDF and re-upload.' });
     } else {
       return res.status(400).json({ error: `Unsupported file type: ${mimetype}` });
     }
@@ -112,7 +2012,7 @@ router.post('/extract-rules', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
     const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-    if (!ANTHROPIC_API_KEY) return res.status(400).json({ error: 'No API key' });
+    if (!(await hasAnyAIProvider())) return res.status(503).json({ error: 'No AI provider configured (need ANTHROPIC_API_KEY or a DeepSeek key).' });
 
     const { text, filename } = req.body;
     if (!text?.trim()) return res.status(400).json({ error: 'No text provided' });
@@ -158,8 +2058,19 @@ RESPONSE FORMAT — valid JSON only, no markdown:
     });
 
     const response = await callAnthropicAPI(requestBody, ANTHROPIC_API_KEY);
+    const truncated = response?.stop_reason === 'max_tokens';
     const raw = response.content?.[0]?.text || '{}';
-    const parsed = parseAIResponse(raw) || { rules: [], summary: 'Could not parse extraction.' };
+    const parsed = parseAIResponse(raw);
+
+    // Previously fell back to { rules: [], summary: 'Could not parse...' } and
+    // still returned 200 — the admin would see "0 rules extracted" with no
+    // indication anything went wrong. A parse failure is a real failure.
+    if (!parsed) {
+      return res.status(422).json({
+        error: 'Extraction failed — the AI response could not be parsed as valid JSON.',
+        truncated,
+      });
+    }
 
     const rules = (parsed.rules || [])
       .filter(r => r.text && r.category)
@@ -167,38 +2078,33 @@ RESPONSE FORMAT — valid JSON only, no markdown:
 
     if (rules.length > 0) {
       try {
-        const currentResult = await db.pool.query(
-          `SELECT brain_data FROM ai_training_brain ORDER BY updated_at DESC LIMIT 1`
-        );
-        const currentBrain = currentResult.rows[0]?.brain_data || {};
         const BRAIN_KEYS = {
           tone: 'toneRules', avoid: 'avoidPatterns', prefer: 'preferPatterns',
           product: 'productKnowledge', policy: 'customPolicies', example: 'responseExamples',
         };
-        const updatedBrain = { ...currentBrain };
-        let newRulesAdded = 0;
-        rules.forEach(rule => {
-          const key = BRAIN_KEYS[rule.category];
-          if (!key) return;
-          if (!updatedBrain[key]) updatedBrain[key] = [];
-          const exists = updatedBrain[key].some(r => (r.text || r) === rule.text);
-          if (!exists) {
-            updatedBrain[key].push({ text: rule.text, source: rule.source });
-            newRulesAdded++;
-          }
-        });
 
+        // Backup before the write (not after) so it captures pre-extraction
+        // state. Best-effort — the atomic write below is the real safety net
+        // against lost updates; this is just point-in-time recovery.
         await backupBrain('pre-doc-extract', req.user.email, { minIntervalMinutes: 10 });
 
-        await db.pool.query(`
-          INSERT INTO ai_training_brain (id, brain_data, updated_at, updated_by)
-          VALUES (1, $1, NOW(), $2)
-          ON CONFLICT (id) DO UPDATE
-            SET brain_data = EXCLUDED.brain_data,
-                updated_at = EXCLUDED.updated_at,
-                updated_by = EXCLUDED.updated_by
-        `, [JSON.stringify(updatedBrain), 'extract-rules-auto']);
-        try { const { refreshBrainCache } = require('../brain-context'); refreshBrainCache(); } catch {}
+        let newRulesAdded = 0;
+        await updateBrainAtomic((currentBrain) => {
+          const next = { ...currentBrain };
+          newRulesAdded = 0;
+          rules.forEach(rule => {
+            const key = BRAIN_KEYS[rule.category];
+            if (!key) return;
+            if (!next[key]) next[key] = [];
+            const exists = next[key].some(r => normalizeRuleText(r.text || r) === normalizeRuleText(rule.text));
+            if (!exists) {
+              next[key].push({ text: rule.text, source: rule.source });
+              newRulesAdded++;
+            }
+          });
+          return newRulesAdded > 0 ? next : null; // nothing new — skip the write
+        }, 'extract-rules-auto');
+
         console.log(`[AI Training] Auto-saved ${newRulesAdded} new rules (${rules.length - newRulesAdded} dupes skipped)`);
       } catch (saveErr) {
         console.error('[AI Training] extract-rules auto-save error:', saveErr.message);
@@ -206,7 +2112,7 @@ RESPONSE FORMAT — valid JSON only, no markdown:
     }
 
     console.log(`[AI Training] Extracted ${rules.length} rules from ${filename || 'text'}`);
-    res.json({ rules, summary: parsed.summary || `Extracted ${rules.length} rules.` });
+    res.json({ rules, summary: parsed.summary || `Extracted ${rules.length} rules.`, truncated });
 
   } catch (err) {
     console.error('[AI Training] extract-rules error:', err);
@@ -219,6 +2125,7 @@ RESPONSE FORMAT — valid JSON only, no markdown:
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/conversation-samples', authenticateToken, async (req, res) => {
   try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
     const limit = Math.min(parseInt(req.query.limit) || 20, 50);
     const result = await db.pool.query(`
       SELECT
@@ -261,7 +2168,7 @@ router.post('/auto-analyze', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
     const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-    if (!ANTHROPIC_API_KEY) return res.status(400).json({ error: 'No ANTHROPIC_API_KEY configured' });
+    if (!(await hasAnyAIProvider())) return res.status(503).json({ error: 'No AI provider configured (need ANTHROPIC_API_KEY or a DeepSeek key).' });
 
     const { limit = 200, batchSize = 15 } = req.body;
     console.log(`[AI Training] Auto-analyze started by ${req.user.email} (limit=${limit})`);
@@ -310,6 +2217,7 @@ router.post('/auto-analyze', authenticateToken, async (req, res) => {
     const seenRules = new Set();
     const seenGaps = new Set();
     let batchesProcessed = 0;
+    let batchesFailed = 0;
 
     for (let i = 0; i < threads.length; i += BATCH_SIZE) {
       const batch = threads.slice(i, i + BATCH_SIZE);
@@ -347,7 +2255,7 @@ RESPONSE FORMAT — valid JSON only, no markdown:
 
         (parsed.rules || []).forEach(r => {
           if (!r.text || !r.category) return;
-          const key = r.text.toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 60);
+          const key = normalizeRuleText(r.text); // full text, not truncated — avoids unrelated rules colliding
           if (!seenRules.has(key)) {
             seenRules.add(key);
             allRules.push({ category: r.category, text: r.text.trim(), confidence: r.confidence || 'medium', source: 'auto-analysis' });
@@ -365,22 +2273,29 @@ RESPONSE FORMAT — valid JSON only, no markdown:
 
         batchesProcessed++;
       } catch (batchErr) {
-        console.error(`[AI Training] Batch ${batchesProcessed + 1} error:`, batchErr.message);
+        batchesFailed++;
+        console.error(`[AI Training] Batch ${batchesProcessed + batchesFailed} error:`, batchErr.message);
       }
 
       if (i + BATCH_SIZE < threads.length) await new Promise(r => setTimeout(r, 500));
     }
 
+    // `?? 1` not `|| 1` — confidenceOrder.high is 0, and `0 || 1` evaluates to
+    // 1, which silently demoted every high-confidence rule to medium sort order.
     const confidenceOrder = { high: 0, medium: 1, low: 2 };
-    allRules.sort((a, b) => (confidenceOrder[a.confidence] || 1) - (confidenceOrder[b.confidence] || 1));
+    allRules.sort((a, b) => (confidenceOrder[a.confidence] ?? 1) - (confidenceOrder[b.confidence] ?? 1));
 
-    console.log(`[AI Training] Done: ${allRules.length} rules, ${allGaps.length} gaps, ${batchesProcessed} batches`);
+    const totalBatches = batchesProcessed + batchesFailed;
+    console.log(`[AI Training] Done: ${allRules.length} rules, ${allGaps.length} gaps, ${batchesProcessed}/${totalBatches} batches ok (${batchesFailed} failed)`);
     res.json({
       rules: allRules,
       gaps: allGaps,
       totalConversations: threads.length,
       batchesProcessed,
-      message: `Analyzed ${threads.length} conversations. Found ${allRules.length} rules and ${allGaps.length} knowledge gaps.`,
+      batchesFailed,
+      message: batchesFailed > 0
+        ? `Analyzed ${threads.length} conversations across ${totalBatches} batches (${batchesFailed} failed and were skipped). Found ${allRules.length} rules and ${allGaps.length} knowledge gaps.`
+        : `Analyzed ${threads.length} conversations. Found ${allRules.length} rules and ${allGaps.length} knowledge gaps.`,
     });
 
   } catch (err) {
@@ -396,7 +2311,7 @@ router.post('/proactive-questions', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
     const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-    if (!ANTHROPIC_API_KEY) return res.status(400).json({ error: 'No ANTHROPIC_API_KEY' });
+    if (!(await hasAnyAIProvider())) return res.status(503).json({ error: 'No AI provider configured (need ANTHROPIC_API_KEY or a DeepSeek key).' });
 
     const { gaps = [], rules = [] } = req.body;
 
@@ -471,8 +2386,10 @@ router.post('/chat', authenticateToken, async (req, res) => {
     if (!message && images.length === 0) return res.status(400).json({ error: 'message or images required' });
 
     const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-    if (!ANTHROPIC_API_KEY) {
-      return res.json({ message: "No ANTHROPIC_API_KEY configured.", type: 'answer', isQuestion: false, ruleUpdates: [] });
+    if (!(await hasAnyAIProvider())) {
+      // Was a fake-success 200 with the error hidden in the message field —
+      // callers checking res.ok never noticed anything was wrong.
+      return res.status(503).json({ error: 'No AI provider configured (need ANTHROPIC_API_KEY or a DeepSeek key).' });
     }
 
     const currentBrain = await loadBrainFromDB();
@@ -617,10 +2534,13 @@ JSON SHAPE — no markdown fences, no code blocks, just the object:
 
     const chatMessages = [];
     for (const msg of rawMessages) {
-      if (chatMessages.length > 0 && chatMessages[chatMessages.length - 1].role === msg.role) {
-        chatMessages[chatMessages.length - 1] = msg;
+      const last = chatMessages[chatMessages.length - 1];
+      if (last && last.role === msg.role) {
+        // Merge, don't replace — the previous fix silently dropped the earlier
+        // message's content whenever two same-role messages landed back to back.
+        last.content = `${last.content}\n${msg.content}`;
       } else {
-        chatMessages.push(msg);
+        chatMessages.push({ ...msg });
       }
     }
 
@@ -665,40 +2585,31 @@ JSON SHAPE — no markdown fences, no code blocks, just the object:
     if (ruleUpdates.length > 0) {
       console.log(`[AI Training] Extracted ${ruleUpdates.length} rule(s) — auto-saving to DB`);
       try {
-        const currentResult = await db.pool.query(
-          `SELECT brain_data FROM ai_training_brain ORDER BY updated_at DESC LIMIT 1`
-        );
-        const currentBrainDB = currentResult.rows[0]?.brain_data || {};
         const BRAIN_KEYS = {
           tone: 'toneRules', avoid: 'avoidPatterns', prefer: 'preferPatterns',
           product: 'productKnowledge', policy: 'customPolicies', example: 'responseExamples',
         };
-        const updatedBrain = { ...currentBrainDB };
-        let actuallyAdded = 0;
-        ruleUpdates.forEach(rule => {
-          const key = BRAIN_KEYS[rule.category];
-          if (!key) return;
-          if (!updatedBrain[key]) updatedBrain[key] = [];
-          const exists = updatedBrain[key].some(r => (r.text || r) === rule.text);
-          if (!exists) {
-            updatedBrain[key].push({ text: rule.text, source: rule.source || 'admin-chat' });
-            actuallyAdded++;
-          }
-        });
 
-        if (actuallyAdded >= 3) {
+        if (ruleUpdates.length >= 3) {
           await backupBrain('pre-chat-save', req.user?.email || 'chat-auto', { minIntervalMinutes: 10 });
         }
 
-        await db.pool.query(`
-          INSERT INTO ai_training_brain (id, brain_data, updated_at, updated_by)
-          VALUES (1, $1, NOW(), $2)
-          ON CONFLICT (id) DO UPDATE
-            SET brain_data = EXCLUDED.brain_data,
-                updated_at = EXCLUDED.updated_at,
-                updated_by = EXCLUDED.updated_by
-        `, [JSON.stringify(updatedBrain), req.user?.email || 'chat-auto']);
-        try { const { refreshBrainCache } = require('../brain-context'); refreshBrainCache(); } catch {}
+        let actuallyAdded = 0;
+        await updateBrainAtomic((currentBrainDB) => {
+          const next = { ...currentBrainDB };
+          actuallyAdded = 0;
+          ruleUpdates.forEach(rule => {
+            const key = BRAIN_KEYS[rule.category];
+            if (!key) return;
+            if (!next[key]) next[key] = [];
+            const exists = next[key].some(r => normalizeRuleText(r.text || r) === normalizeRuleText(rule.text));
+            if (!exists) {
+              next[key].push({ text: rule.text, source: rule.source || 'admin-chat' });
+              actuallyAdded++;
+            }
+          });
+          return actuallyAdded > 0 ? next : null;
+        }, req.user?.email || 'chat-auto');
       } catch (saveErr) {
         console.error('[AI Training] chat auto-save error:', saveErr.message);
       }
@@ -751,9 +2662,13 @@ router.post('/consolidate', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
     const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-    if (!ANTHROPIC_API_KEY) return res.status(400).json({ error: 'No ANTHROPIC_API_KEY' });
+    if (!(await hasAnyAIProvider())) return res.status(503).json({ error: 'No AI provider configured (need ANTHROPIC_API_KEY or a DeepSeek key).' });
 
-    const { categories = null, dryRun = false, verify = false } = req.body;
+    // verify now defaults to true — the loss-audit pass (findDroppedInfo) is
+    // what catches the model silently dropping a dosage/ratio/etc during
+    // merge. It costs one extra AI call per cluster with 3+ rules; worth it
+    // by default given this operation is destructive.
+    const { categories = null, dryRun = false, verify = true } = req.body;
     const ALL_KEYS = {
       tone: 'toneRules', avoid: 'avoidPatterns', prefer: 'preferPatterns',
       product: 'productKnowledge', policy: 'customPolicies', example: 'responseExamples',
@@ -762,7 +2677,10 @@ router.post('/consolidate', authenticateToken, async (req, res) => {
       ? categories.filter(c => ALL_KEYS[c])
       : Object.keys(ALL_KEYS);
 
-    const brain = await loadBrainFromDB();
+    // Captured alongside brain_data so we can detect, right before the final
+    // write below, whether anyone else modified the brain while the AI
+    // consolidation calls (which can take a while) were in flight.
+    const { brain, updatedAt: loadedAt } = await loadBrainWithMeta();
     if (brainRuleTotal(brain) === 0) {
       return res.status(503).json({ error: 'Brain loaded empty or unavailable — aborting to protect existing rules. Try again in a moment.' });
     }
@@ -782,7 +2700,13 @@ router.post('/consolidate', authenticateToken, async (req, res) => {
         report[cat] = { before: arr.length, after: arr.length, action: 'no merge possible', clusters: result?.clusters };
         continue;
       }
-      newBrain[key] = result.rules.map(text => ({ text, source: 'consolidated' }));
+      // Preserve admin authorship through the merge, same as /consolidate/commit
+      // does — a cluster that absorbed an admin-authored rule gets tagged
+      // 'admin-consolidation-audit' instead of a flat 'consolidated'.
+      newBrain[key] = result.rules.map((text, i) => ({
+        text,
+        source: result.sources[i] ? 'admin-consolidation-audit' : 'consolidated',
+      }));
       report[cat] = {
         before: arr.length,
         after: result.rules.length,
@@ -796,6 +2720,7 @@ router.post('/consolidate', authenticateToken, async (req, res) => {
       return res.json({ dryRun: true, report, proposedCounts: countBrainRules(newBrain) });
     }
 
+    let preConsolidateBackupOk = false;
     try {
       await db.pool.query(`
         CREATE TABLE IF NOT EXISTS ai_training_brain_backups (
@@ -810,8 +2735,26 @@ router.post('/consolidate', authenticateToken, async (req, res) => {
         `INSERT INTO ai_training_brain_backups (brain_data, reason, backed_up_by) VALUES ($1, $2, $3)`,
         [JSON.stringify(brain), 'pre-consolidate', req.user.email]
       );
+      preConsolidateBackupOk = true;
     } catch (bErr) {
       console.error('[AI Training] consolidate backup failed:', bErr.message);
+    }
+
+    if (!preConsolidateBackupOk) {
+      return res.status(500).json({ error: 'Pre-consolidate backup failed — aborting to avoid an unrecoverable change. Try again.' });
+    }
+
+    // Staleness check: the AI consolidation calls above can take a while.
+    // If someone else wrote to the brain in the meantime (a manual PUT, a
+    // chat auto-save, another consolidate run), applying newBrain now would
+    // silently discard their change. Abort instead of clobbering.
+    const staleCheck = await db.pool.query(`SELECT updated_at FROM ai_training_brain WHERE id = 1`);
+    const nowStoredAt = staleCheck.rows[0]?.updated_at || null;
+    const wasModifiedDuringRun = loadedAt && nowStoredAt
+      ? new Date(loadedAt).getTime() !== new Date(nowStoredAt).getTime()
+      : loadedAt !== nowStoredAt;
+    if (wasModifiedDuringRun) {
+      return res.status(409).json({ error: 'Brain was modified by someone else while consolidating — please retry to avoid overwriting their changes.' });
     }
 
     await db.pool.query(`
@@ -854,7 +2797,7 @@ router.post('/consolidate', authenticateToken, async (req, res) => {
 router.post('/consolidate/preview', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
   const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-  if (!ANTHROPIC_API_KEY) return res.status(400).json({ error: 'No ANTHROPIC_API_KEY' });
+  if (!(await hasAnyAIProvider())) return res.status(503).json({ error: 'No AI provider configured (need ANTHROPIC_API_KEY or a DeepSeek key).' });
 
   try {
     const brain = await loadBrainFromDB();
@@ -894,10 +2837,16 @@ router.post('/consolidate/preview', authenticateToken, async (req, res) => {
     const sortedClusters = [...clusterMap.entries()]
       .sort((a, b) => b[1].length - a[1].length);
 
-    // Separate single-rule clusters (no work needed) from multi-rule clusters
-    const workClusters = [];
+ const workClusters = [];
     for (const [clusterKey, members] of sortedClusters) {
-      if (members.length < 2) { unchangedCount++; continue; }
+      const [cat] = clusterKey.split('::');
+      const topicPart = clusterKey.split('::').slice(1).join('::');
+      // Verbatim human replies — never send these through the compression
+      // prompt, same reasoning as the /consolidate (non-interactive) path.
+      if (cat === 'example' || members.length < 2 || topicPart === 'general') {
+        unchangedCount += members.length;
+        continue;
+      }
       workClusters.push([clusterKey, members]);
     }
 
@@ -932,14 +2881,19 @@ router.post('/consolidate/preview', authenticateToken, async (req, res) => {
     // Build proposal list from results (maintain largest-first order)
     const proposals = [];
     let proposalSeq = 0;
-    for (const { clusterKey, members, cat, topicLabel, texts, goldenRules } of clusterResults) {
+for (const { clusterKey, members, cat, topicLabel, texts, goldenRules } of clusterResults) {
       if (!goldenRules || goldenRules.length >= members.length) {
         unchangedCount += members.length;
         continue;
       }
       const absorbedCount = members.length;
       const impact = absorbedCount >= 8 ? 'critical' : absorbedCount >= 4 ? 'high' : 'medium';
-        goldenRules.forEach((golden, gIdx) => {
+      const hasAdminOrigin = members.some(m => {
+        const s = (m.raw && typeof m.raw === 'object' ? m.raw.source : '') || '';
+        return ['admin-feedback','admin-upload','admin-training','admin-chat','admin-consolidation-audit'].includes(s);
+      });
+
+      goldenRules.forEach((golden, gIdx) => {
         proposalSeq++;
         proposals.push({
           id: `prop_${proposalSeq}`,
@@ -950,13 +2904,7 @@ router.post('/consolidate/preview', authenticateToken, async (req, res) => {
           golden,
           absorbedTexts: gIdx === 0 ? texts : [],
           absorbedCount: gIdx === 0 ? absorbedCount : 0,
-          // ← ADDED: did this cluster contain any admin-authored rule?
-          absorbedGolden: gIdx === 0
-            ? members.some(m => {
-                const s = (m.raw && typeof m.raw === 'object' ? m.raw.source : '') || '';
-                return ['admin-feedback','admin-upload','admin-training','admin-chat','admin-consolidation-audit'].includes(s);
-              })
-            : false,
+          absorbedGolden: hasAdminOrigin, // same value for every proposal from this cluster
           clusterKey,
         });
       });
@@ -1000,19 +2948,25 @@ router.post('/consolidate/commit', authenticateToken, async (req, res) => {
   }
 
   try {
-const brain = await loadBrainFromDB();
-    if (brainRuleTotal(brain) === 0) {
+    const preCheck = await loadBrainFromDB();
+    if (brainRuleTotal(preCheck) === 0) {
       return res.status(503).json({ error: 'Brain loaded empty or unavailable — aborting commit to protect existing rules. Try again in a moment.' });
     }
 
-    // Always backup before any destructive change — no interval guard here
-    await backupBrain('pre-interactive-consolidate', req.user.email, { minIntervalMinutes: 0 });
+    // Always backup before any destructive change — no interval guard here.
+    // Abort if it fails; don't proceed on an unconfirmed safety net.
+    const backedUp = await backupBrain('pre-interactive-consolidate', req.user.email, { minIntervalMinutes: 0 });
+    if (!backedUp) {
+      return res.status(500).json({ error: 'Backup failed — aborting commit to avoid an unrecoverable change. Try again.' });
+    }
 
-    // Build the set of original rule texts to remove
+    // Build the set of original rule texts to remove (normalized — case and
+    // whitespace differences between the proposal's snapshot and the live
+    // brain shouldn't leave orphaned near-duplicates behind).
     const toRemove = new Set();
     for (const p of approvedProposals) {
       (p.absorbedTexts || []).forEach(t => {
-        if (t?.trim()) toRemove.add(t.trim());
+        if (t?.trim()) toRemove.add(normalizeRuleText(t));
       });
     }
 
@@ -1021,38 +2975,41 @@ const brain = await loadBrainFromDB();
       product: 'productKnowledge', policy: 'customPolicies', example: 'responseExamples',
     };
 
-    // Start with a clean copy — strip every absorbed rule
-    const newBrain = {};
-    for (const [, key] of Object.entries(ALL_KEYS)) {
-      const arr = brain[key] || [];
-      newBrain[key] = arr.filter(r => {
-        const text = typeof r === 'string' ? r : r?.text;
-        return !toRemove.has((text || '').trim());
-      });
-    }
+    // This route's own work (filtering + appending, no AI calls) is fast, so
+    // — unlike /consolidate — it's safe to do the whole thing inside a held
+    // row lock via updateBrainAtomic rather than a check-then-write.
+    const { applied, brain: newBrain } = await updateBrainAtomic((current) => {
+      if (brainRuleTotal(current) === 0) return null; // brain went empty concurrently — bail
 
-    // Append each approved golden rule to its category
-for (const p of approvedProposals) {
-      if (!p.key || !p.golden?.trim()) continue;
-      if (!newBrain[p.key]) newBrain[p.key] = [];
-      const alreadyThere = newBrain[p.key].some(r => (r.text || r) === p.golden.trim());
-      if (!alreadyThere) {
-        // ← CHANGED: preserve admin authority through the merge
-        const outSource = p.absorbedGolden ? 'admin-consolidation-audit' : 'consolidated';
-        newBrain[p.key].push({ text: p.golden.trim(), source: outSource });
+      // Start from the FULL locked brain so non-category fields (e.g.
+      // suggestionSettings) survive the commit. Only the 6 rule categories
+      // get rebuilt below.
+      const next = { ...current };
+      for (const [, key] of Object.entries(ALL_KEYS)) {
+        const arr = current[key] || [];
+        next[key] = arr.filter(r => {
+          const text = typeof r === 'string' ? r : r?.text;
+          return !toRemove.has(normalizeRuleText(text || ''));
+        });
       }
+
+      for (const p of approvedProposals) {
+        if (!p.key || !p.golden?.trim()) continue;
+        if (!Object.values(ALL_KEYS).includes(p.key)) continue; // reject unknown/forged keys
+        if (!next[p.key]) next[p.key] = [];
+        const alreadyThere = next[p.key].some(r => normalizeRuleText(r.text || r) === normalizeRuleText(p.golden));
+        if (!alreadyThere) {
+          // preserve admin authority through the merge
+          const outSource = p.absorbedGolden ? 'admin-consolidation-audit' : 'consolidated';
+          next[p.key].push({ text: p.golden.trim(), source: outSource });
+        }
+      }
+      return next;
+    }, `interactive-consolidate-${req.user.email}`);
+
+    if (!applied) {
+      return res.status(503).json({ error: 'Brain became empty or unavailable during commit — aborting to protect existing rules. Try again.' });
     }
-
-    await db.pool.query(`
-      INSERT INTO ai_training_brain (id, brain_data, updated_at, updated_by)
-      VALUES (1, $1, NOW(), $2)
-      ON CONFLICT (id) DO UPDATE
-        SET brain_data = EXCLUDED.brain_data,
-            updated_at = EXCLUDED.updated_at,
-            updated_by = EXCLUDED.updated_by
-    `, [JSON.stringify(newBrain), `interactive-consolidate-${req.user.email}`]);
-
-    try { const { refreshBrainCache } = require('../brain-context'); refreshBrainCache(); } catch {}
 
     const counts = countBrainRules(newBrain);
     const remaining = Object.values(counts).reduce((s, n) => s + n, 0);
@@ -1074,25 +3031,82 @@ for (const p of approvedProposals) {
   }
 });
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/ai/training/consolidate-backups
+// Lists recent backups so the admin can choose which one to restore, instead
+// of restore always being locked to "whatever is most recent."
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/consolidate-backups', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+
+    await db.pool.query(`
+      CREATE TABLE IF NOT EXISTS ai_training_brain_backups (
+        id SERIAL PRIMARY KEY,
+        brain_data JSONB NOT NULL,
+        backed_up_at TIMESTAMPTZ DEFAULT NOW(),
+        reason TEXT,
+        backed_up_by TEXT
+      )
+    `);
+
+    const r = await db.pool.query(
+      `SELECT id, backed_up_at, reason, backed_up_by
+       FROM ai_training_brain_backups
+       ORDER BY backed_up_at DESC
+       LIMIT 30`
+    );
+    res.json({ backups: r.rows });
+  } catch (err) {
+    console.error('[AI Training] list backups error:', err.message);
+    res.status(500).json({ error: 'Failed to list backups' });
+  }
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/ai/training/consolidate-restore
-// Reverts the brain to the most recent backup.
+// Reverts the brain to a backup. Body: { backupId? } — omit to use the most
+// recent backup.
+//
+// Previously: always grabbed the single latest backup (no way to pick a
+// different point in time), overwrote the live brain with zero snapshot of
+// what was about to be lost, then DELETEd the backup row it just used —
+// making the whole operation a one-shot, non-reversible undo. Fixed on all
+// three counts below.
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/consolidate-restore', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
 
-    const r = await db.pool.query(
-      `SELECT id, brain_data, backed_up_at
-       FROM ai_training_brain_backups
-       ORDER BY backed_up_at DESC
-       LIMIT 1`
-    );
+    const { backupId } = req.body || {};
+
+    const r = backupId
+      ? await db.pool.query(
+          `SELECT id, brain_data, backed_up_at FROM ai_training_brain_backups WHERE id = $1`,
+          [backupId]
+        )
+      : await db.pool.query(
+          `SELECT id, brain_data, backed_up_at
+           FROM ai_training_brain_backups
+           ORDER BY backed_up_at DESC
+           LIMIT 1`
+        );
+
     if (r.rows.length === 0) {
-      return res.status(404).json({ error: 'No backup found to revert to.' });
+      return res.status(404).json({ error: backupId ? 'Backup not found.' : 'No backup found to revert to.' });
     }
 
-    const { id: backupId, brain_data, backed_up_at } = r.rows[0];
+    const { id: usedBackupId, brain_data, backed_up_at } = r.rows[0];
+
+    // A restore overwrites the live brain — that's destructive too. Snapshot
+    // the CURRENT state first so this restore itself can be undone (picking
+    // a different backup, or reverting the restore) rather than being a
+    // one-way door.
+    const preRestoreOk = await backupBrain('pre-restore-snapshot', req.user.email, { minIntervalMinutes: 0 });
+    if (!preRestoreOk) {
+      return res.status(500).json({ error: 'Could not snapshot the current brain before restoring — aborting so this restore stays reversible. Try again.' });
+    }
 
     await db.pool.query(`
       INSERT INTO ai_training_brain (id, brain_data, updated_at, updated_by)
@@ -1103,16 +3117,19 @@ router.post('/consolidate-restore', authenticateToken, async (req, res) => {
             updated_by = EXCLUDED.updated_by
     `, [JSON.stringify(brain_data), `restore-${req.user.email}`]);
 
-    await db.pool.query(`DELETE FROM ai_training_brain_backups WHERE id = $1`, [backupId]);
+    // The backup row used for this restore is intentionally NOT deleted —
+    // restore history should be additive, so an admin can re-restore or pick
+    // a different point in time later without losing options.
 
     try { const { refreshBrainCache } = require('../brain-context'); refreshBrainCache(); } catch {}
 
-    console.log(`↩️  [AI Training] Brain reverted to backup from ${backed_up_at} by ${req.user.email}`);
+    console.log(`↩️  [AI Training] Brain reverted to backup #${usedBackupId} (${backed_up_at}) by ${req.user.email}`);
     res.json({
       ok: true,
+      restoredFromBackupId: usedBackupId,
       restoredFrom: backed_up_at,
       brainCounts: countBrainRules(brain_data),
-      message: `Brain restored from backup created at ${new Date(backed_up_at).toLocaleString()}.`,
+      message: `Brain restored from backup #${usedBackupId} created at ${new Date(backed_up_at).toLocaleString()}.`,
     });
   } catch (err) {
     console.error('↩️  [AI Training] consolidate-restore error:', err.message);
@@ -1213,6 +3230,95 @@ async function loadBrainFromDB() {
   return r.rows[0]?.brain_data || {};
 }
 
+// loadBrainFromDB + its updated_at, used by slow (AI-call-heavy) routes to
+// detect — after the fact — whether someone else wrote to the brain while
+// the AI work was in flight. See updateBrainAtomic below for the fast-path
+// equivalent that holds a real row lock instead.
+async function loadBrainWithMeta() {
+  const r = await db.pool.query(
+    `SELECT brain_data, updated_at FROM ai_training_brain ORDER BY updated_at DESC LIMIT 1`
+  );
+  return { brain: r.rows[0]?.brain_data || {}, updatedAt: r.rows[0]?.updated_at || null };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// updateBrainAtomic — fixes the read-then-write race that every brain mutation
+// used to have (two concurrent saves could silently clobber each other, since
+// each did its own unlocked SELECT ... then INSERT ON CONFLICT).
+//
+// Acquires a row lock (SELECT ... FOR UPDATE) inside a transaction, hands the
+// currently-locked brain_data to `mutator`, and writes back whatever it
+// returns. `mutator` may return null to signal "no change needed" (e.g. a
+// dedup pass that found nothing new) — the transaction rolls back and the
+// unchanged current brain is returned instead of writing a no-op.
+//
+// Only use this for FAST mutators (pure data transforms on already-fetched
+// inputs). Never do slow work (AI calls, network I/O) inside `mutator` — that
+// would hold the row lock for the duration and serialize every other writer
+// behind it. For consolidation routes, which need an AI call before they know
+// what to write, use loadBrainWithMeta() + this function's staleness check
+// pattern instead (see /consolidate and /consolidate/commit).
+// ─────────────────────────────────────────────────────────────────────────────
+async function updateBrainAtomic(mutator, updatedBy) {
+  const client = await db.pool.connect();
+  try {
+    await client.query('BEGIN');
+    const r = await client.query(
+      `SELECT brain_data, updated_at FROM ai_training_brain WHERE id = 1 FOR UPDATE`
+    );
+    const current = r.rows[0]?.brain_data || {};
+    const currentUpdatedAt = r.rows[0]?.updated_at || null;
+
+    const next = await mutator(current, { updatedAt: currentUpdatedAt });
+
+    if (next === null) {
+      await client.query('ROLLBACK');
+      return { applied: false, brain: current };
+    }
+
+    await client.query(`
+      INSERT INTO ai_training_brain (id, brain_data, updated_at, updated_by)
+      VALUES (1, $1, NOW(), $2)
+      ON CONFLICT (id) DO UPDATE
+        SET brain_data = EXCLUDED.brain_data,
+            updated_at = EXCLUDED.updated_at,
+            updated_by = EXCLUDED.updated_by
+    `, [JSON.stringify(next), updatedBy]);
+
+    await client.query('COMMIT');
+    try { const { refreshBrainCache } = require('../brain-context'); refreshBrainCache(); } catch {}
+    return { applied: true, brain: next };
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// Normalizes rule text for duplicate detection — case/whitespace differences
+// shouldn't let near-identical rules pile up. Not a fuzzy match; that's a
+// separate, higher-risk change (areSimilar) left for admin-invoked
+// consolidation only, not silent auto-save dedup.
+function normalizeRuleText(t) {
+  return (t || '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+// Every route used to gate on `process.env.ANTHROPIC_API_KEY` alone, even
+// though callAnthropicAPI tries DeepSeek FIRST. That meant a store running
+// DeepSeek-only (no Anthropic key at all) got hard-blocked from every AI
+// route despite being fully able to serve requests. Gate on "any provider"
+// instead.
+async function hasAnyAIProvider() {
+  if (process.env.ANTHROPIC_API_KEY) return true;
+  if (process.env.DEEPSEEK_API_KEY) return true;
+  try {
+    const key = await getProviderKey('deepseek');
+    if (key) return true;
+  } catch { /* ignore — treat as not configured */ }
+  return false;
+}
+
 function brainRuleTotal(brain) {
   if (!brain || typeof brain !== 'object') return 0;
   const KEYS = ['toneRules','avoidPatterns','preferPatterns','productKnowledge','customPolicies','responseExamples'];
@@ -1220,6 +3326,10 @@ function brainRuleTotal(brain) {
 }
 
 
+// Returns true if a backup exists to cover this call (either just written, or
+// a sufficiently recent one with the SAME reason already exists), false if a
+// backup was needed and failed to write. Destructive callers should check
+// this and abort rather than proceeding on an unconfirmed safety net.
 async function backupBrain(reason, userEmail, { minIntervalMinutes = 0 } = {}) {
   try {
     await db.pool.query(`
@@ -1233,29 +3343,35 @@ async function backupBrain(reason, userEmail, { minIntervalMinutes = 0 } = {}) {
     `);
 
     if (minIntervalMinutes > 0) {
+      // Throttle per-reason, not globally — a recent 'pre-manual-edit' backup
+      // shouldn't suppress a needed 'pre-consolidate' backup and vice versa.
       const recent = await db.pool.query(
         `SELECT 1 FROM ai_training_brain_backups
-         WHERE backed_up_at > NOW() - INTERVAL '1 minute' * $1
+         WHERE reason = $1
+           AND backed_up_at > NOW() - INTERVAL '1 minute' * $2
          LIMIT 1`,
-        [minIntervalMinutes]
+        [reason, minIntervalMinutes]
       );
-      if (recent.rows.length > 0) return;
-
+      if (recent.rows.length > 0) return true;
     }
 
     const current = await db.pool.query(
       `SELECT brain_data FROM ai_training_brain ORDER BY updated_at DESC LIMIT 1`
     );
     // Don't back up an empty/missing brain — an empty backup destroys the one
-    // recovery path. Only insert when there's real data to preserve.
+    // recovery path. Only insert when there's real data to preserve. An empty
+    // *current* brain isn't a failure to back up — there's nothing to lose —
+    // so this still returns true.
     if (current.rows[0]?.brain_data && brainRuleTotal(current.rows[0].brain_data) > 0) {
       await db.pool.query(
         `INSERT INTO ai_training_brain_backups (brain_data, reason, backed_up_by) VALUES ($1, $2, $3)`,
         [JSON.stringify(current.rows[0].brain_data), reason, userEmail]
       );
     }
+    return true;
   } catch (err) {
     console.error('[AI Training] backupBrain error:', err.message);
+    return false;
   }
 }
 
@@ -1634,34 +3750,79 @@ function areSimilar(a, b) {
   return shared / Math.min(A.size, B.size) >= 0.4; // loosened from 0.5
 }
 
+// Sources that represent a human explicitly writing/approving this exact
+// text, as opposed to an AI extraction or merge. Used to decide whether a
+// consolidated cluster's output should carry forward an "admin authored
+// something in here" tag.
+const ADMIN_AUTHORED_SOURCES = new Set([
+  'admin-feedback', 'admin-upload', 'admin-training', 'admin-chat',
+  'admin-consolidation-audit', 'admin-input',
+]);
+
+function clusterHasAdminSource(members) {
+  return members.some(m => {
+    const src = (typeof m === 'object' && m?.source) || '';
+    return ADMIN_AUTHORED_SOURCES.has(src);
+  });
+}
+
 async function consolidateCategoryDeep(category, rules, apiKey, { verify = false } = {}) {
   const txt = r => (typeof r === 'string' ? r : r.text);
+
+  // Verbatim human replies — the value IS the exact wording. Running these
+  // through the compression prompt below produces fact-dense recipe blobs,
+  // the opposite of what they're meant to teach. Never touch this category.
+  if (category === 'example') {
+    return {
+      rules: rules.map(txt),
+      sources: rules.map(r => clusterHasAdminSource([r])),
+      clusters: 0,
+      lostInfo: [],
+    };
+  }
+
   const clusters = clusterRulesByTopic(rules);
   console.log(`[AI Training] ${category}: ${rules.length} rules → ${clusters.length} topic clusters`);
 
   const finalRules = [];
+  const finalSources = []; // parallel array: true = cluster had an admin-authored member
   const lostInfo = [];
 
+  const emit = (texts, adminOrigin) => {
+    finalRules.push(...texts);
+    finalSources.push(...texts.map(() => adminOrigin));
+  };
+
   for (const { topic, members } of clusters) {
+    const adminOrigin = clusterHasAdminSource(members);
+
     if (members.length === 1) {
-      finalRules.push(txt(members[0]));
+      emit([txt(members[0])], adminOrigin);
+      continue;
+    }
+
+    // The 'general' bucket only means "no other topic matched" — its members
+    // are NOT necessarily related to each other. Force-merging across it was
+    // producing garbled rules that mashed unrelated facts together. Pass
+    // through untouched instead.
+    if (topic === 'general') {
+      emit(members.map(txt), adminOrigin);
       continue;
     }
 
     // For pairs: try consolidation regardless (removed the areSimilar gate)
     if (members.length === 2) {
       const merged = await consolidateOneCluster(category, topic, members.map(txt), apiKey);
-      if (merged && merged.length < 2) {
-        finalRules.push(...merged);
+      if (merged && merged.length > 0 && merged.length < 2) {
+        emit(merged, adminOrigin);
+      } else if (merged && merged.length > 0 && areSimilar(txt(members[0]), txt(members[1]))) {
+        // Rules were flagged similar and the model returned a non-empty
+        // result — accept it even if it kept 2 rules, rather than re-issuing
+        // an identical API call with identical inputs expecting a different
+        // answer (the previous "force" pass was a no-op duplicate call).
+        emit(merged, adminOrigin);
       } else {
-        // Still similar enough to try harder — only keep both if they're genuinely different
-        if (areSimilar(txt(members[0]), txt(members[1]))) {
-          // Force to one via a second pass with explicit instruction
-          const forced = await consolidateOneCluster(category, topic, members.map(txt), apiKey);
-          finalRules.push(...(forced && forced.length ? forced : members.map(txt)));
-        } else {
-          finalRules.push(...members.map(txt));
-        }
+        emit(members.map(txt), adminOrigin);
       }
       continue;
     }
@@ -1671,21 +3832,23 @@ async function consolidateCategoryDeep(category, rules, apiKey, { verify = false
 
     if (working.length <= CLUSTER_CHUNK) {
       const out = await consolidateOneCluster(category, topic, working, apiKey);
-      if (out && out.length && out.length < working.length) working = out;
+      // out.length > 0 guard: an empty [] from the model must never win a
+      // "fewer than" comparison and silently erase the whole chunk.
+      if (out && out.length > 0 && out.length < working.length) working = out;
     } else {
       // Sub-chunk processing
       const consolidated = [];
       for (let i = 0; i < working.length; i += CLUSTER_CHUNK) {
         const sub = working.slice(i, i + CLUSTER_CHUNK);
         const out = await consolidateOneCluster(category, topic, sub, apiKey);
-        consolidated.push(...(out && out.length < sub.length ? out : sub));
+        consolidated.push(...(out && out.length > 0 && out.length < sub.length ? out : sub));
         await new Promise(r => setTimeout(r, 350));
       }
       // Final pass across all sub-chunk results
       if (consolidated.length >= 2) {
         const cap = Math.min(consolidated.length, CLUSTER_CHUNK * 2);
         const merged = await consolidateOneCluster(category, topic, consolidated.slice(0, cap), apiKey);
-        working = merged && merged.length < consolidated.length
+        working = merged && merged.length > 0 && merged.length < consolidated.length
           ? merged.concat(consolidated.slice(cap))
           : consolidated;
       } else {
@@ -1702,10 +3865,10 @@ async function consolidateCategoryDeep(category, rules, apiKey, { verify = false
       }
     }
 
-    finalRules.push(...working);
+    emit(working, adminOrigin);
   }
 
-  return { rules: finalRules, clusters: clusters.length, lostInfo };
+  return { rules: finalRules, sources: finalSources, clusters: clusters.length, lostInfo };
 }
 
 async function consolidateOneCluster(category, topic, rules, apiKey) {
@@ -1887,4 +4050,3 @@ async function callAnthropicAPI(requestBody, apiKey) {
 
 
 module.exports = router;
-

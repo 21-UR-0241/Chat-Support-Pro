@@ -862,6 +862,7 @@ import '../styles/Aisuggestions.css';
 
 function AISuggestions({ conversation, messages, onSelectSuggestion }) {
   const [suggestions, setSuggestions]           = useState([]);
+  const [needsReview, setNeedsReview]           = useState([]);
   const [isFallback, setIsFallback]             = useState(false);
   const [loading, setLoading]                   = useState(false);
   const [error, setError]                       = useState(null);
@@ -889,6 +890,7 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
   const isEditedRef    = useRef(false);
   const editedTextRef  = useRef('');
   const adminNoteRef   = useRef('');
+  const activeConvRef  = useRef(null);
 
   const TAB_COLORS = [
     { color: '#f59e0b' },
@@ -902,7 +904,11 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
   // ── Reset ALL state when conversation changes ──────────────────────────────
   useEffect(() => {
     if (!conversation?.id) return;
+    activeConvRef.current = conversation.id;
+    setLoading(false);
+    setImageAnalyzing(false);
     setSuggestions([]);
+    setNeedsReview([]); 
     setIsFallback(false);
     setError(null);
     setContextLevel('none');
@@ -1171,7 +1177,8 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
   const handleDragOver  = (e) => { e.preventDefault(); e.currentTarget.classList.add('dragging'); };
   const handleDragLeave = (e) => { e.currentTarget.classList.remove('dragging'); };
 
-  const analyzeImage = async (imageData) => {
+const analyzeImage = async (imageData) => {
+    const reqConv = conversation?.id;
     setImageAnalyzing(true);
     setError(null);
     const baseUrl = api.baseUrl || import.meta.env.VITE_API_URL || '';
@@ -1186,22 +1193,27 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
         }),
       });
       if (!res.ok) { const text = await res.text(); throw new Error(`Vision ${res.status}: ${text.substring(0, 100)}`); }
-      const data     = await res.json();
+      const data = await res.json();
+      if (reqConv !== activeConvRef.current) return;   // switched during vision call — bail
       const analysis = data.analysis || '';
       setImageAnalysis(analysis);
-      // Always auto-generate when screenshot is uploaded
       const chatMsg = isEditedRef.current ? editedTextRef.current : getLastCustomerMessage()?.content;
-      const msgText = analysis.length > 80 ? analysis : chatMsg;
-      if (msgText) await fetchSuggestionsWithImage(msgText, imageData, analysis);
+      const msgText = chatMsg?.trim()
+        ? chatMsg
+        : '[Screenshot uploaded by agent — no customer message yet. Base your reply on the screenshot data.]';
+
+      await fetchSuggestionsWithImage(msgText, imageData, analysis);
     } catch (err) {
+      if (reqConv !== activeConvRef.current) return;
       setError(`Image analysis failed: ${err.message}`);
     } finally {
-      setImageAnalyzing(false);
+      if (reqConv === activeConvRef.current) setImageAnalyzing(false);
     }
   };
 
   const fetchSuggestionsWithImage = async (messageText, imageData, imageAnalysisText) => {
     if (!messageText?.trim()) return;
+    const reqConv = conversation?.id;
     setReadyToGenerate(false);
     setLoading(true);
     setError(null);
@@ -1228,12 +1240,15 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
       });
       if (!res.ok) { const text = await res.text(); throw new Error(`Server ${res.status}: ${text.substring(0, 100)}`); }
       const data = await res.json();
+      if (reqConv !== activeConvRef.current) return;   // switched mid-request — bail
       setSuggestions(data.suggestions || []);
+      setNeedsReview(data.needsReview || []); 
       setIsFallback(isFallbackResponse(data));
     } catch (err) {
+      if (reqConv !== activeConvRef.current) return;
       setError(`Could not generate suggestions: ${err.message}`);
     } finally {
-      setLoading(false);
+      if (reqConv === activeConvRef.current) setLoading(false);
     }
   };
 
@@ -1282,6 +1297,7 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
   // ── Core fetch ─────────────────────────────────────────────────────────────
   const fetchSuggestions = async (messageText, note) => {
     if (!messageText?.trim()) return;
+    const reqConv = conversation?.id;
     setReadyToGenerate(false);
     setLoading(true);
     setError(null);
@@ -1289,12 +1305,15 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
     setIsFallback(false);
     try {
       const data = await postToAI(buildPayload(messageText, { adminNote: note || '' }));
+      if (reqConv !== activeConvRef.current) return;   // switched mid-request — bail
       setSuggestions(data.suggestions || []);
+      setNeedsReview(data.needsReview || []); 
       setIsFallback(isFallbackResponse(data));
     } catch (err) {
+      if (reqConv !== activeConvRef.current) return;
       setError(`Could not generate suggestions: ${err.message}`);
     } finally {
-      setLoading(false);
+      if (reqConv === activeConvRef.current) setLoading(false);
     }
   };
 
@@ -1307,6 +1326,7 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
   const handleGenerateWithoutScreenshot = () => {
     const text = isEditedRef.current ? editedTextRef.current : getLastCustomerMessage()?.content;
     if (!text) return;
+    const reqConv = conversation?.id;
     setImageDismissed(true);
     setReadyToGenerate(false);
     setLoading(true);
@@ -1331,21 +1351,28 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
       body: JSON.stringify(payload),
     })
       .then(res => { if (!res.ok) throw new Error(`Server ${res.status}`); return res.json(); })
-      .then(data => { setSuggestions(data.suggestions || []); setIsFallback(isFallbackResponse(data)); })
-      .catch(err => setError(`Could not generate suggestions: ${err.message}`))
-      .finally(() => setLoading(false));
+      .then(data => {
+        if (reqConv !== activeConvRef.current) return;   // switched mid-request — bail
+        setSuggestions(data.suggestions || []);
+        setIsFallback(isFallbackResponse(data));
+      })
+      .catch(err => { if (reqConv === activeConvRef.current) setError(`Could not generate suggestions: ${err.message}`); })
+      .finally(() => { if (reqConv === activeConvRef.current) setLoading(false); });
   };
 
   const handleOpenDetailed = async () => {
     if (!suggestions.length) return;
+    const reqConv = conversation?.id;
     setDetailedModal({ loading: true, error: null, answers: [], fallback: false });
     setActiveTab(0);
     const lastCustomerMsg = getLastCustomerMessage();
     const clientMessage = isEditedRef.current ? editedTextRef.current : (lastCustomerMsg?.content || '');
     try {
       const data = await postToAI(buildPayload(clientMessage, { detailedAnswerMode: true, baseSuggestions: suggestions }));
+      if (reqConv !== activeConvRef.current) return;   // switched mid-request — bail
       setDetailedModal({ loading: false, error: null, answers: data.detailedAnswers || [], fallback: isFallbackResponse(data) });
     } catch (err) {
+      if (reqConv !== activeConvRef.current) return;
       setDetailedModal({ loading: false, error: `Failed to generate: ${err.message}`, answers: [], fallback: false });
     }
   };
@@ -1625,6 +1652,7 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
                 </button>
               ))}
             </div>
+
 
             {!loading && !imageAnalyzing && suggestions.length > 0 && (
               <button className="ai-detailed-trigger" onClick={handleOpenDetailed} type="button">

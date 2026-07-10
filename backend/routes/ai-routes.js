@@ -237,6 +237,8 @@
 
 
 
+
+
 const express = require('express');
 const db = require('../database');
 const { authenticateToken } = require('../auth');
@@ -252,11 +254,13 @@ const {
   buildSystemPrompt,
   buildUserPrompt,
   detectTrustQuestion,
+  detectSafetyDosingQuestion,
   buildEnhancedAnalysisBlock,
   buildCustomerContext,
   buildPolicyBlock,
   analyzeConversationState,
   validateSuggestions,
+  validateSafetyDosing,   
   generateSmartFallbackSuggestions,
 } = require('../lib/ai-suggestions');
 
@@ -264,36 +268,11 @@ const {
 const SUGGEST_MODEL  = 'claude-haiku-4-5-20251001'; // Claude fallback for fast path
 const DETAILED_MODEL = 'claude-sonnet-4-6';         // Claude fallback for essay mode
 const IMAGE_MODEL    = 'claude-sonnet-4-6';         // vision extraction quality matters
-
-// Cap brain context so both providers stay under their timeouts.
-// Raised 6000 -> 8000: a multi-intent message (refund + shipping) was losing its
-// second topic to the slice. DB fetch is ~1.8s so the extra chars are cheap; the
-// added input tokens are negligible against a ~12k prompt.
 const MAX_BRAIN_CHARS = 8000;
-
-// Fast-path output budget. Raised 2500 -> 4000 because deepseek-v4-pro reasons
-// before emitting JSON; on a complex complaint the reasoning trace alone ate the
-// full 2500 (finish=length) and the response was truncated BEFORE the JSON, so
-// parseAIResponse returned null and the route fell back to a canned template.
-// 4000 gives room for reasoning + 3 replies + the JSON object to actually land.
 const SUGGEST_MAX_TOKENS = 4000;
-
-// Intent detectors, shared by retrieval augmentation AND truncation so the two
-// stay in sync. Order matters at the call site: refund/complaint is checked
-// FIRST, because a refund complaint that also mentions shipping is a refund case
-// first -- otherwise shipping terms bury the refund policy in retrieval and it
-// gets truncated away before the model ever sees it.
 const REFUND_COMPLAINT_RE = /refund|money back|reimburse|charge.?back|cancel(l|led|ling|lation)?|escalat|complaint|unacceptable|lawyer|attorney|sue|dispute|still waiting|no (tracking|update|response|communication)|missed|delay(ed|s)?/i;
 const SHIPPING_LOCATION_RE = /pick.?up|collect|in.?person|in.?store|walk.?in|delivery|deliver|shipping|\bship\b|postage|courier|mail|when.*(arrive|get here|receive|come)|how long|near(by)?|close to|local\b/i;
-// Lines to protect from truncation when the message is a refund/complaint.
 const CRITICAL_POLICY_RE = /refund|unshipped|unfulfilled|not shipped|shipped\/|delivered|store credit|e-transfer|escalate|escalation|replacement|reship|return-to-sender|lost package|cancel/i;
-
-// Appended to the fast-path system prompt. buildSystemPrompt already ends with a
-// "respond only with JSON" line, but for a reasoning model that instruction is
-// too weak -- v4-pro dumps its chain-of-thought ("We are asked to produce 3
-// replies...") ahead of the JSON, which both wastes the token budget and, when
-// truncated, leaves no parseable JSON at all. This hardens it: reason silently,
-// start the response at "{".
 const JSON_HARDENING_SUFFIX = `\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nOUTPUT FORMAT — ABSOLUTE, OVERRIDES EVERYTHING ABOVE:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nDo ALL of your thinking silently. Output NOTHING before the JSON — no analysis, no "we are asked to", no restating the customer's question, no reasoning, no preamble of any kind. Your ENTIRE response is the single JSON object and nothing else. The FIRST character you output must be { and the LAST character must be }. Start immediately with {.`;
 
 module.exports = function createAiRoutes({ getCachedStore }) {
@@ -331,7 +310,7 @@ module.exports = function createAiRoutes({ getCachedStore }) {
         { type: 'image', source: { type: 'base64', media_type: image.mimeType, data: image.base64 } },
         { type: 'text', text: `You are a customer support assistant analyzing a screenshot uploaded by a support agent${storeContext}. Extract and report EVERYTHING visible in this image so the agent can write a precise, accurate reply to the customer.\n\nRead the ENTIRE screenshot carefully and extract:\n\n1. SCREEN TYPE — What kind of screen is this? (order confirmation, tracking page, error message, product page, payment screen, account page, chat/email, invoice, etc.)\n\n2. ALL VISIBLE TEXT — Extract every piece of text you can read: headings, labels, values, statuses, messages, error text, button labels, dates, times, prices, quantities, addresses, names, email addresses, phone numbers, reference numbers, order IDs, tracking numbers, product names, SKUs, descriptions — everything.\n\n3. KEY DATA POINTS — Specifically call out:\n   - Order/reference numbers (exact format, e.g. #1001, ORD-12345)\n   - Order status (pending, fulfilled, shipped, cancelled, refunded, etc.)\n   - Payment status and amounts (exact dollar figures)\n   - Tracking numbers and carrier names\n   - Shipping/delivery dates or estimated dates\n   - Product names, quantities, sizes, variants\n   - Customer name and email if visible\n   - Any error messages or warning text (copy exactly)\n   - Any action items, buttons, or options shown\n\n4. WHAT ISSUE THIS RELATES TO — Based on what you see, what is the customer's likely concern or question?\n\nWrite your response as a clear, structured report. Include every specific value — exact numbers, exact text, exact statuses. Do not summarize or paraphrase data — reproduce it exactly as shown. Plain text only, no markdown.` }
       ]}]});
-      const data = await callAnthropicAPIWithRetry(requestBody, ANTHROPIC_API_KEY);
+      const data = await callAnthropicAPIWithRetry(requestBody, ANTHROPIC_API_KEY, 1, 40000); 
       const analysis = data.content?.[0]?.text || '';
       console.log(`🖼️  [ImageAnalysis] Done — ${analysis.length} chars`);
       return res.json({ analysis });
@@ -351,12 +330,14 @@ module.exports = function createAiRoutes({ getCachedStore }) {
       const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
       if (!ANTHROPIC_API_KEY) {
         const fallback = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
-        if (detailedAnswerMode) return res.json({ detailedAnswers: detailedFromFallback(fallback), fallback: true, source: 'fallback' });
-        return res.json({ suggestions: fallback, fallback: true, source: 'fallback' });
+        if (detailedAnswerMode) return res.json({ detailedAnswers: detailedFromFallback(fallback), fallback: true, source: 'fallback', provider: 'none' });
+        return res.json({ suggestions: fallback, fallback: true, source: 'fallback', provider: 'none' });
       }
       const conversationState = analyzeConversationState(chatHistory, clientMessage, analysis);
       const isTrustQuestion = detectTrustQuestion(clientMessage);
       if (isTrustQuestion) console.log('✦ [AI] Trust/legitimacy question detected — proof-first mode');
+      const isSafetyDosing = detectSafetyDosingQuestion(clientMessage);
+      if (isSafetyDosing) console.log('✦ [AI] Safety/dosing question detected — honesty+provider gate on');
       const analysisBlock = buildEnhancedAnalysisBlock(analysis, conversationState, recentContext);
       const customerContext = buildCustomerContext(customerName, customerEmail, conversationState);
       const policyBlock = buildPolicyBlock();
@@ -365,11 +346,6 @@ module.exports = function createAiRoutes({ getCachedStore }) {
       if (adminStyle) console.log(`✦ [AI] Style: avg ${adminStyle.avgWords}w, ${adminStyle.sampleLines.length} samples, lowercase:${adminStyle.writesLowercase}`);
       else console.log(`✦ [AI] No style yet — not enough agent replies`);
 
-      // Intent-aware retrieval augmentation. Refund/complaint is checked FIRST so
-      // it wins over shipping when a message is both (e.g. "where's my package,
-      // I want a refund"). If shipping won, the refund policy would rank low and
-      // get truncated away before the model saw it -- which produced bare
-      // escalations with no alternative/timeline.
       let brainSearchTerms = clientMessage;
       const isRefundOrComplaint = REFUND_COMPLAINT_RE.test(clientMessage);
       if (isRefundOrComplaint) {
@@ -379,8 +355,6 @@ module.exports = function createAiRoutes({ getCachedStore }) {
         brainSearchTerms = `${clientMessage} shipping delivery handling time dispatch pickup collection in-person order fulfillment how long to arrive shipping policy`;
         console.log('✦ [AI] Shipping/pickup/location intent — augmenting brain retrieval query');
       }
-
-      // ── Run brain/DB lookups in parallel. ──
       let brainContext = '';
       let responseExamples = [];
       const needSettings = !brainSettings.length && !brainSettings.tone && !brainSettings.empathy;
@@ -404,12 +378,6 @@ module.exports = function createAiRoutes({ getCachedStore }) {
 
       if (exRes.status === 'fulfilled') responseExamples = Array.isArray(exRes.value.rows[0]?.examples) ? exRes.value.rows[0].examples : [];
       else console.error('🧠 [Brain] responseExamples fetch failed:', exRes.reason?.message);
-
-      // Priority-preserving truncation. A flat .slice() guillotines whatever
-      // ranked second -- for multi-intent messages that's often the rule that
-      // actually governs the reply. When the message is a refund/complaint,
-      // hoist the lines carrying refund/fulfillment policy to the FRONT so the
-      // slice can never delete them, then cut.
       if (brainContext.length > MAX_BRAIN_CHARS) {
         const before = brainContext.length;
 
@@ -433,49 +401,61 @@ module.exports = function createAiRoutes({ getCachedStore }) {
       const brainUserBlock = brainContext?.trim() ? `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nANSWER FROM BRAIN — BUILD YOUR REPLIES FROM THIS DATA FIRST\nIf the answer to the customer's question exists below, use it immediately.\nDo NOT say "let me check" or "let me get back to you" when the data is here.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${brainContext}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` : '';
 
       if (detailedAnswerMode) {
-        const brainSystemSection = brainContext?.trim() ? `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nBRAIN RULES — READ FIRST. Override all other guidelines.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${brainContext}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nUse brain data as the ONLY source of truth for product info, protocols, dosing, and policies.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` : '';
+        // const brainSystemSection = brainContext?.trim() ? `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nBRAIN RULES — READ FIRST. Override all other guidelines.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${brainContext}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nUse brain data as the ONLY source of truth for product info, protocols, dosing, and policies.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` : '';
+        const brainSystemSection = brainContext?.trim() ? `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        BRAIN RULES — READ FIRST.
+        Mandatory store-owner FACTS: products, doses, protocols, policies, prices, timeframes. These override every other source of FACTS, including chat history and your own knowledge. They do NOT override the voice instructions below, say these facts the way a real person talks, not like a spec sheet.
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        ${brainContext}
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        Use brain data as the ONLY source of truth for product info, protocols, dosing, and policies. Every number, dose, product name, and policy term must come verbatim from the matching brain rule, never invent or round, but restate them in plain conversational language, don't copy brain-rule sentences word-for-word.
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        ` : '';
         const imageSystemSection = imageAnalysis?.trim() ? `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nSCREENSHOT CONTEXT — uploaded by the agent:\n${imageAnalysis.trim()}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` : '';
         const trustSystemSection = isTrustQuestion ? `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nTRUST / "AM I GETTING SCAMMED" QUESTION — OVERRIDES LENGTH BELOW\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nThe customer fears being scammed (payment is likely e-transfer/crypto, no chargeback). A long, enthusiastic essay reads as overselling, which is a red flag here. Keep ALL three replies short and calm (2 to 4 sentences), NOT 8 to 15. Acknowledge the worry once and name why it is fair (the payment isn't reversible), then point ONLY to verification the brain data provides (whatever proof it lists, quoted exactly) that they can check before paying. NEVER bare-assert legitimacy ("we're safe/legit", "nothing to worry about", "100% safe"), NEVER invent a confirmation timeline, NEVER fabricate proof, review counts, years, or ratings. If the brain lists no verifiable proof, be honest and offer to send them what you have rather than inventing it.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` : '';
-        const systemPrompt = `${trustSystemSection}${brainSystemSection}${imageSystemSection}${adminStyleBlock ? `${adminStyleBlock}\n\n` : ''}You are ghostwriting detailed replies for a human support agent. All three styles must sound like the SAME person.\n\nWrite like a real person typing in a support chat, not like an AI. Never use em dashes or double hyphens (--) anywhere, use commas or periods instead. No essay-style transitions like "furthermore" or "moreover". Short, natural sentences.\n\nNO fake time promises: state a shipping, handling, or delivery timeframe ONLY if it appears in the brain data above, quoted exactly. If the brain gave no timeframe, do not state one, point to tracking or commit to the action instead. Never say "same day", "next day", "overnight", or infer speed from the customer's location. Never invent tracking status, stock, or pickup options.\n\nWrite three distinct, highly detailed replies (8–15 sentences each) in flowing paragraphs. No bullet points. Use real values from the conversation and brain only.\n\n${policyBlock ? `Policies:\n${policyBlock}\n` : ''}${customerContext ? `Customer context:\n${customerContext}\n` : ''}${analysisBlock ? `Conversation analysis:\n${analysisBlock}\n` : ''}\nEmpathetic: Deep emotional validation first, then full answer with warmth.\nThorough: Every product detail, step, policy, and expectation. Nothing unanswered.\nAbove & Beyond: Everything in Thorough plus extras — tips, related products, follow-up offer.\n\nThink through your answer first if you need to, but your response MUST END with the JSON object and nothing after it. The JSON is the last thing in your output. Return ONLY valid JSON:\n{\n  "detailedAnswers": [\n    { "label": "Empathetic",     "text": "..." },\n    { "label": "Thorough",       "text": "..." },\n    { "label": "Above & Beyond", "text": "..." }\n  ]\n}`;
+        const safetySystemSection = isSafetyDosing ? `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nDOSING / SAFETY QUESTION — HONESTY AND SAFETY GATES OVERRIDE EVERYTHING\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nState a dose, mg amount, frequency, or titration step ONLY if it appears in the brain data above for THIS product, quoted exactly. Confirm which product first if it isn't pinned down. Never carry a number over from your own knowledge, from the chat history, or infer it. Never say a dose "is safe" or "you'll be fine" and never promise an outcome ("you'll still see progress", "you'll lose weight") unless the brain states it. Never give titration advice as your own judgement, relay the brain's protocol exactly or don't state one. Whenever the customer raises getting sick, side effects, a health condition, pregnancy, other medications, or "is this safe for me", point them to their healthcare provider before changing dose, one line, fused in.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` : '';
+        const systemPrompt = `${trustSystemSection}${safetySystemSection}${brainSystemSection}${imageSystemSection}${adminStyleBlock ? `${adminStyleBlock}\n\n` : ''}You are ghostwriting detailed replies for a human support agent. All three styles must sound like the SAME person.\n\nWrite like a real person typing in a support chat, not like an AI. Never use em dashes or double hyphens (--) anywhere, use commas or periods instead. No essay-style transitions like "furthermore" or "moreover". Short, natural sentences.\n\nNO fake time promises: state a shipping, handling, or delivery timeframe ONLY if it appears in the brain data above, quoted exactly. If the brain gave no timeframe, do not state one, point to tracking or commit to the action instead. Never say "same day", "next day", "overnight", or infer speed from the customer's location. Never invent tracking status, stock, or pickup options.\n\nWrite three distinct, highly detailed replies (8–15 sentences each) in flowing paragraphs. No bullet points. Use real values from the conversation and brain only.\n\n${policyBlock ? `Policies:\n${policyBlock}\n` : ''}${customerContext ? `Customer context:\n${customerContext}\n` : ''}${analysisBlock ? `Conversation analysis:\n${analysisBlock}\n` : ''}\nEmpathetic: Deep emotional validation first, then full answer with warmth.\nThorough: Every product detail, step, policy, and expectation. Nothing unanswered.\nAbove & Beyond: Everything in Thorough plus extras — tips, related products, follow-up offer.\n\nThink through your answer first if you need to, but your response MUST END with the JSON object and nothing after it. The JSON is the last thing in your output. Return ONLY valid JSON:\n{\n  "detailedAnswers": [\n    { "label": "Empathetic",     "text": "..." },\n    { "label": "Thorough",       "text": "..." },\n    { "label": "Above & Beyond", "text": "..." }\n  ]\n}`;
         const userPrompt = `${brainUserBlock}Conversation history:\n${chatHistory || '(none)'}\n\nCustomer's message:\n${clientMessage}${adminNote ? `\nAdmin note: ${adminNote}` : ''}\n\nWrite 3 detailed replies. Your response must END with the JSON, nothing after it.`;
         const requestBody = JSON.stringify({ model: DETAILED_MODEL, max_tokens: 3000, temperature: 0.5, system: systemPrompt, messages: [{ role: 'user', content: userPrompt }] });
         console.time('✦ [AI] llmDetailed');
-        const anthropicData = await callAIForSuggestions(requestBody, ANTHROPIC_API_KEY);
+        // callAIForSuggestions now returns { data, provider } — see lib/ai-suggestions.js.
+        const { data: anthropicData, provider } = await callAIForSuggestions(requestBody, ANTHROPIC_API_KEY);
         console.timeEnd('✦ [AI] llmDetailed');
         const rawContent = anthropicData.content?.[0]?.text || '';
         console.log(`✦ [AI] Detailed raw (first 300): ${rawContent.substring(0, 300)}`);
         const parsed = parseAIResponse(rawContent, 'detailedAnswers');
         if (!parsed) {
           const fallback = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
-          return res.json({ detailedAnswers: detailedFromFallback(fallback), fallback: true, source: 'fallback' });
+          return res.json({ detailedAnswers: detailedFromFallback(fallback), fallback: true, source: 'fallback', provider });
         }
-        const detailedAnswers = Array.isArray(parsed.detailedAnswers) ? parsed.detailedAnswers.slice(0, 3) : [{ label: 'Empathetic', text: rawContent }, { label: 'Thorough', text: rawContent }, { label: 'Above & Beyond', text: rawContent }];
+        const detailedAnswers = Array.isArray(parsed.detailedAnswers) ? parsed.detailedAnswers.slice(0, 3) : null;
+        if (!detailedAnswers) {
+          console.warn('✦ [AI] Detailed parsed but detailedAnswers not an array — serving fallback');
+          const fallback = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote);
+          return res.json({ detailedAnswers: detailedFromFallback(fallback), fallback: true, source: 'fallback', provider });
+        }
         detailedAnswers.forEach(a => { if (a?.text) a.text = humanizeText(a.text); });
-        return res.json({ detailedAnswers, fallback: false, source: 'ai' });
+        return res.json({ detailedAnswers, fallback: false, source: 'ai', provider });
       }
-
-      // Fast path. buildSystemPrompt ends with a soft "respond only with JSON"
-      // line; JSON_HARDENING_SUFFIX makes it absolute for the reasoning model so
-      // it doesn't dump chain-of-thought ahead of (and instead of) the JSON.
-      const systemPrompt = buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness, brainContext, brainSettings, adminStyleBlock, imageAnalysis, conversationState?.sentiment || analysis?.sentiment || 'neutral', responseExamples, isTrustQuestion) + JSON_HARDENING_SUFFIX;
+      const systemPrompt = buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness, brainContext, brainSettings, adminStyleBlock, imageAnalysis, conversationState?.sentiment || analysis?.sentiment || 'neutral', responseExamples, isTrustQuestion, isSafetyDosing) + JSON_HARDENING_SUFFIX;
       const userPrompt = buildUserPrompt(chatHistory, clientMessage, messageEdited, adminNote, conversationState, recentContext, brainContext, imageAnalysis || '');
       const requestBody = JSON.stringify({ model: SUGGEST_MODEL, max_tokens: SUGGEST_MAX_TOKENS, temperature: 0.6, system: systemPrompt, messages: [{ role: 'user', content: userPrompt }] });
       console.log(`✦ [AI] Calling suggestions (DeepSeek primary / ${SUGGEST_MODEL} fallback) — brain: ${brainContext.length}c, style: ${adminStyleBlock.length}c, examples: ${responseExamples.length}, image: ${!!imageAnalysis}, maxTokens: ${SUGGEST_MAX_TOKENS}`);
       console.time('✦ [AI] llmSuggest');
-      const anthropicData = await callAIForSuggestions(requestBody, ANTHROPIC_API_KEY);
+      const { data: anthropicData, provider } = await callAIForSuggestions(requestBody, ANTHROPIC_API_KEY);
       console.timeEnd('✦ [AI] llmSuggest');
       const rawContent = anthropicData.content?.[0]?.text || '';
-      console.log(`✦ [AI] Raw (first 300): ${rawContent.substring(0, 300)}`);
+      console.log(`✦ [AI] Served by: ${provider} — Raw (first 300): ${rawContent.substring(0, 300)}`);
 
       let usedFallback = false;
 
       const parsed = parseAIResponse(rawContent, 'suggestions');
       if (!parsed) {
-        console.error('✦ [AI] JSON parse failed. Raw:', rawContent.substring(0, 500));
-        return res.json({ suggestions: generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote), fallback: true, source: 'fallback' });
+        console.error(`✦ [AI] JSON parse failed (provider=${provider}). Raw:`, rawContent.substring(0, 500));
+        return res.json({ suggestions: generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote), fallback: true, source: 'fallback', provider });
       }
 
-      let suggestions;
+let suggestions;
       if (Array.isArray(parsed.suggestions)) suggestions = parsed.suggestions.slice(0, 3);
       else if (Array.isArray(parsed)) suggestions = parsed.slice(0, 3);
       else { suggestions = generateSmartFallbackSuggestions(clientMessage, chatHistory, analysis, adminNote); usedFallback = true; }
@@ -493,14 +473,25 @@ module.exports = function createAiRoutes({ getCachedStore }) {
 
       suggestions = suggestions.map(humanizeText);
 
-      res.json({ suggestions, fallback: usedFallback, source: usedFallback ? 'fallback' : 'ai' });
+      let safetyReview = [];
+      if (isSafetyDosing && !usedFallback) {
+        console.log('✦ [AI] Running safety enforcement (flag mode)...');
+        const result = validateSafetyDosing(suggestions);
+        suggestions  = result.suggestions;   // pull the array out of the object
+        safetyReview = result.needsReview;
+      }
+
+      res.json({ suggestions, fallback: usedFallback, source: usedFallback ? 'fallback' : 'ai', provider, needsReview: safetyReview });
+
+
     } catch (error) {
       console.error('✦ [AI] Endpoint error:', error.message, error.stack);
+      // Nothing completed — no provider produced this. provider: 'none'.
       const fallback = generateSmartFallbackSuggestions(req.body?.clientMessage || '', req.body?.chatHistory || '', req.body?.analysis || {}, req.body?.adminNote || '');
       if (req.body?.detailedAnswerMode) {
-        return res.json({ detailedAnswers: detailedFromFallback(fallback), fallback: true, source: 'fallback' });
+        return res.json({ detailedAnswers: detailedFromFallback(fallback), fallback: true, source: 'fallback', provider: 'none' });
       }
-      res.json({ suggestions: fallback, fallback: true, source: 'fallback' });
+      res.json({ suggestions: fallback, fallback: true, source: 'fallback', provider: 'none' });
     }
   });
 
