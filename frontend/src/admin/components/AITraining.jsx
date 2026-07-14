@@ -1,9 +1,4 @@
 
-
-
-
-
-
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 
 const API_BASE = (import.meta.env.PROD
@@ -85,6 +80,9 @@ const PRODUCT_NAMES = [
   'ss-31','elamipretide','survodutide','tb-500','tb500',
   'tesamorelin','thymalin','tirzepatide','triptorelin','vip',
   'wolverine','glow blend',
+  // Short forms customers and agents actually type. PRODUCT_NAMES_SORTED sorts by
+  // length descending, so 'retatrutide' still wins over 'reta' when both appear.
+  'reta','tirz','sema',
 ];
 
 const PRODUCT_NAMES_SORTED = [...PRODUCT_NAMES].sort((a, b) => b.length - a.length);
@@ -97,6 +95,43 @@ function extractProductName(text) {
   return null;
 }
 
+// ─── Intent + concentration discriminators ─────────────────────────────────
+//
+// extractProductName stops two DIFFERENT products being flagged as duplicates. It
+// does nothing for two rules about the SAME product covering DIFFERENT FACTS.
+//
+// "Retatrutide unit conversions at 10mg/mL" and "Retatrutide unit conversions at
+// 5mg/mL" share ~60% of their tokens. They clear DUPE_THRESHOLD. Both carry source
+// 'admin-feedback', so srcSet.size === 1, the multi-master branch never fires,
+// resolvedKeeper() falls through to g.indexes[0], and defaultSelected() PRE-CHECKS
+// the other for deletion — with no conflict badge and no warning.
+//
+// Deleting the 5mg/mL table means anyone who reconstituted at 2mL is told 5 units
+// when they need 10. A silent 2x underdose, shipped by a dedupe tool.
+//
+// Two rules about the same product with different intents are not duplicates.
+// Two rules at different concentrations are REALLY not duplicates.
+
+const RULE_INTENTS = [
+  ['unit-math',      /\bunits?\s*[=(]|\d+\s*units?\s*=|unit conversion|per unit|on (?:a|an) .{0,20}insulin syringe/i],
+  ['reconstitution', /reconstitut|bacteriostatic|bac water|\bmg\s*\/\s*mL\b|add\s+[\d.]+\s*mL|\+\s*[\d.]+\s*mL/i],
+  ['escalation',     /\bWks?\s*\d|\bWeeks?\s*\d|escalation|titrat|taper|ramp/i],
+  ['storage',        /stor(?:e|age)|refrigerat|freeze|frozen|shelf life|expire|use within/i],
+  ['administration', /subcutaneous|intramuscular|\bSQ\b|\bIM\b|injection site|rotate sites|empty stomach/i],
+  ['safety',         /overdose|contraindicat|blood ?work|monitor|side effect|pregnan|chemical castration/i],
+];
+
+function extractIntent(text) {
+  const t = text || '';
+  for (const [name, re] of RULE_INTENTS) if (re.test(t)) return name;
+  return null;
+}
+
+function extractConcentration(text) {
+  const m = (text || '').match(/([\d.]+)\s*(?:mg|mcg|iu)\s*\/\s*mL/i);
+  return m ? m[0].replace(/\s+/g, '').toLowerCase() : null;
+}
+
 function tokenize(text) {
   return new Set(
     (text || '').toLowerCase()
@@ -106,8 +141,19 @@ function tokenize(text) {
   );
 }
 
-function jaccardSimFast(prodA, prodB, setA, setB) {
+function jaccardSimFast(prodA, prodB, setA, setB, intentA, intentB, concA, concB) {
+  // Different products: never duplicates.
   if (prodA && prodB && prodA !== prodB) return 0;
+
+  // Same product, different facts: never duplicates. Reconstitution volume, unit
+  // math, escalation ladder and storage are four rules, not four phrasings of one.
+  if (intentA && intentB && intentA !== intentB) return 0;
+
+  // Same product, same intent, different stated concentration: never duplicates.
+  // This is the 10mg/mL vs 5mg/mL case. Deleting one does not remove redundancy,
+  // it removes an answer.
+  if (concA && concB && concA !== concB) return 0;
+
   if (!setA.size && !setB.size) return 1;
   if (!setA.size || !setB.size) return 0;
   let inter = 0;
@@ -144,8 +190,12 @@ function detectDuplicates(brain) {
     const rules = brain[meta.brainKey] || [];
     const texts = rules.map(r => (typeof r === 'string' ? r : r.text) || '');
     if (texts.length < 2) continue;
+
     const tokenSets    = texts.map(t => tokenize(t));
     const productNames = texts.map(t => extractProductName(t));
+    const intents      = texts.map(t => extractIntent(t));
+    const concs        = texts.map(t => extractConcentration(t));
+
     const visited = new Set();
     const groups = [];
     for (let i = 0; i < texts.length; i++) {
@@ -153,9 +203,13 @@ function detectDuplicates(brain) {
       const group = [i];
       for (let j = i + 1; j < texts.length; j++) {
         if (visited.has(j)) continue;
-        if (jaccardSimFast(productNames[i], productNames[j], tokenSets[i], tokenSets[j]) >= DUPE_THRESHOLD) {
-          group.push(j); visited.add(j);
-        }
+        const sim = jaccardSimFast(
+          productNames[i], productNames[j],
+          tokenSets[i],    tokenSets[j],
+          intents[i],      intents[j],
+          concs[i],        concs[j],
+        );
+        if (sim >= DUPE_THRESHOLD) { group.push(j); visited.add(j); }
       }
       if (group.length > 1) {
         visited.add(i);
@@ -167,6 +221,12 @@ function detectDuplicates(brain) {
     }
   }
   return result;
+}
+
+/** Every rule in this group was admin-authored. Nothing gets pre-staged for deletion. */
+function isAllMasterGroup(g) {
+  const rules = g?.rules || [];
+  return rules.length > 0 && rules.every(r => isMasterRule(r));
 }
 
 
@@ -427,6 +487,12 @@ function ConsolidatePreviewModal({ onClose, onDone, showToast }) {
   const impactColor = i => i === 'critical' ? '#f87171' : i === 'high' ? '#fbbf24' : '#60a5fa';
   const impactBg    = i => i === 'critical' ? '#f8717118' : i === 'high' ? '#fbbf2418' : '#60a5fa18';
 
+  // A merge that swallows dosing numbers is how a 23-product reconstitution blob gets
+  // built — and how one product's ratio ends up next to another product's name.
+  const DOSING_RE = /reconstitut|bacteriostatic|bac water|\bmg\s*\/\s*mL\b|\d+\s*units?\b|\bmL\b/i;
+  const touchesDosing = (p) =>
+    DOSING_RE.test(p?.golden || '') || (p?.absorbedTexts || []).some(t => DOSING_RE.test(t));
+
   const Dots = ({ color = '#a78bfa' }) => (
     <div style={{ display: 'flex', gap: 7, justifyContent: 'center', padding: '32px 0' }}>
       {[0,1,2].map(i => (
@@ -481,8 +547,10 @@ function ConsolidatePreviewModal({ onClose, onDone, showToast }) {
             <span style={{ color: '#334155', fontSize: 20, flexShrink: 0 }}>→</span>
           </div>
 
-          <div style={{ background: '#fbbf2408', border: '1px solid #fbbf2420', borderRadius: 8, padding: '10px 14px', marginTop: 14 }}>
-            <p style={{ margin: 0, fontSize: 11, color: '#b45309', lineHeight: 1.5 }}>⚠️ A backup is always saved before any write. Revert is available on the result screen.</p>
+          <div style={{ background: '#f8717108', border: '1px solid #f8717125', borderRadius: 8, padding: '10px 14px', marginTop: 14 }}>
+            <p style={{ margin: 0, fontSize: 11, color: '#fca5a5', lineHeight: 1.55 }}>
+              ⚠️ Merging rules that contain doses, volumes, or unit conversions can silently attach one product's numbers to another product's name. Use <strong>Interactive review</strong> and reject any merge flagged 💊 <strong>dosing</strong>.
+            </p>
           </div>
         </div>
       </div>
@@ -505,12 +573,14 @@ function ConsolidatePreviewModal({ onClose, onDone, showToast }) {
 
   // ── Review ────────────────────────────────────────────────────────────────
   if (phase === 'review') {
+    const dosingCount = proposals.filter(touchesDosing).length;
     const fc = {
       all: proposals.length,
       pending: pending.length,
       approved: approved.length,
       rejected: rejected.length,
       critical: proposals.filter(p => p.impact === 'critical' || p.impact === 'high').length,
+      dosing: dosingCount,
     };
     return (
       <div style={OV}>
@@ -524,6 +594,7 @@ function ConsolidatePreviewModal({ onClose, onDone, showToast }) {
                   <div style={{ ...ICON_BOX('#a78bfa'), width: 32, height: 32, fontSize: 14 }}>🔀</div>
                   <span style={{ fontWeight: 700, fontSize: 16, color: '#e2e8f0' }}>Consolidation review</span>
                   <span style={{ fontSize: 11, color: '#a78bfa', background: '#a78bfa18', border: '1px solid #a78bfa30', borderRadius: 20, padding: '2px 10px', fontWeight: 700 }}>{proposals.length} proposals</span>
+                  {dosingCount > 0 && <span style={{ fontSize: 11, color: '#f87171', background: '#f8717118', border: '1px solid #f8717135', borderRadius: 20, padding: '2px 10px', fontWeight: 700 }}>💊 {dosingCount} touch dosing</span>}
                 </div>
                 <p style={{ margin: '0 0 0 42px', fontSize: 12, color: '#475569', lineHeight: 1.5 }}>
                   Approve, edit, or reject each merge. Nothing is saved until you commit.
@@ -569,7 +640,14 @@ function ConsolidatePreviewModal({ onClose, onDone, showToast }) {
                 </button>
               ))}
               <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-                <button onClick={approveAll} style={{ fontSize: 11, padding: '4px 12px', borderRadius: 6, cursor: 'pointer', background: '#34d39918', border: '1px solid #34d39935', color: '#34d399', fontWeight: 600 }}>✓ Approve all</button>
+                {/* "Approve all" would sweep dosing merges in with everything else, so it
+                    only touches proposals that don't touch dosing. */}
+                <button
+                  onClick={() => setProposals(prev => prev.map(p => touchesDosing(p) ? p : { ...p, _state: 'approved' }))}
+                  title={dosingCount > 0 ? `Skips the ${dosingCount} proposal(s) that touch dosing — review those individually` : 'Approve all proposals'}
+                  style={{ fontSize: 11, padding: '4px 12px', borderRadius: 6, cursor: 'pointer', background: '#34d39918', border: '1px solid #34d39935', color: '#34d399', fontWeight: 600 }}>
+                  ✓ Approve all{dosingCount > 0 ? ' (non-dosing)' : ''}
+                </button>
                 <button onClick={rejectAll}  style={{ fontSize: 11, padding: '4px 12px', borderRadius: 6, cursor: 'pointer', background: 'transparent', border: '1px solid #f8717130', color: '#f87171', fontWeight: 600 }}>✗ Reject all</button>
               </div>
             </div>
@@ -609,16 +687,16 @@ function ConsolidatePreviewModal({ onClose, onDone, showToast }) {
               const isRejected = p._state === 'rejected';
               const isEditing  = editingId === p.id;
               const isExpanded = expandedIds.has(p.id);
+              const isDosing   = touchesDosing(p);
               const SHOW = 3;
               const rest = (p.absorbedTexts || []).length - SHOW;
 
-              // Card left-border color
-              const borderAccent = isApproved ? '#34d399' : isRejected ? '#475569' : '#1e293b';
+              const borderAccent = isApproved ? '#34d399' : isRejected ? '#475569' : isDosing ? '#f87171' : '#1e293b';
 
               return (
                 <div key={p.id} style={{
                   borderRadius: 12,
-                  border: `1px solid ${isApproved ? '#34d39930' : isRejected ? '#1e293b' : '#1e293b'}`,
+                  border: `1px solid ${isApproved ? '#34d39930' : isDosing ? '#f8717125' : '#1e293b'}`,
                   borderLeft: `4px solid ${borderAccent}`,
                   marginBottom: 10,
                   background: isApproved ? '#34d39906' : '#0d1117',
@@ -629,15 +707,13 @@ function ConsolidatePreviewModal({ onClose, onDone, showToast }) {
 
                   {/* Card header row */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: '1px solid #0a0f1a' }}>
-                    {/* State icon */}
                     <div style={{ width: 22, height: 22, borderRadius: 6, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 900,
-                      background: isApproved ? '#34d399' : isRejected ? '#1e293b' : '#1e293b',
+                      background: isApproved ? '#34d399' : '#1e293b',
                       color: isApproved ? '#000' : '#334155',
                     }}>
                       {isApproved ? '✓' : isRejected ? '✗' : '·'}
                     </div>
 
-                    {/* Topic + meta */}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 600, fontSize: 14, color: isRejected ? '#475569' : '#e2e8f0', marginBottom: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {p.topic || p.category}
@@ -646,6 +722,11 @@ function ConsolidatePreviewModal({ onClose, onDone, showToast }) {
                         <span style={{ fontSize: 11, fontWeight: 700, padding: '1px 8px', borderRadius: 20, background: impactBg(p.impact), color: impactColor(p.impact) }}>
                           {p.impact}
                         </span>
+                        {isDosing && (
+                          <span style={{ fontSize: 11, fontWeight: 700, padding: '1px 8px', borderRadius: 20, background: '#f8717118', color: '#f87171', border: '1px solid #f8717135' }}>
+                            💊 dosing
+                          </span>
+                        )}
                         {p.absorbedCount > 0 && (
                           <span style={{ fontSize: 11, color: '#334155' }}>{p.absorbedCount} rules → 1</span>
                         )}
@@ -654,7 +735,6 @@ function ConsolidatePreviewModal({ onClose, onDone, showToast }) {
                       </div>
                     </div>
 
-                    {/* Action buttons */}
                     <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
                       <button
                         onClick={() => { setEditingId(isEditing ? null : p.id); setEditText(p.golden); }}
@@ -682,6 +762,15 @@ function ConsolidatePreviewModal({ onClose, onDone, showToast }) {
                       </button>
                     </div>
                   </div>
+
+                  {/* Dosing warning */}
+                  {isDosing && !isRejected && (
+                    <div style={{ padding: '9px 16px', background: '#f8717108', borderBottom: '1px solid #0a0f1a' }}>
+                      <p style={{ margin: 0, fontSize: 11, color: '#fca5a5', lineHeight: 1.55 }}>
+                        This merge contains doses, volumes, or unit conversions. Check that <strong>every number still sits beside the product it belongs to</strong>. A merged rule that puts one peptide's mL next to another peptide's name becomes a wrong dose in a syringe.
+                      </p>
+                    </div>
+                  )}
 
                   {/* Golden rule */}
                   <div style={{ padding: '14px 16px', borderBottom: (p.absorbedTexts?.length > 0) ? '1px solid #0a0f1a' : 'none' }}>
@@ -820,6 +909,12 @@ function ConsolidatePreviewModal({ onClose, onDone, showToast }) {
 
             {result?.message && <p style={{ fontSize: 12, color: '#475569', margin: '0 0 18px', lineHeight: 1.65 }}>{result.message}</p>}
 
+            <div style={{ background: '#fbbf2408', border: '1px solid #fbbf2420', borderRadius: 8, padding: '10px 14px', marginBottom: 14 }}>
+              <p style={{ margin: 0, fontSize: 11, color: '#b45309', lineHeight: 1.55 }}>
+                Spot-check any merged product rules in the Brain drawer. Confirm every dose, volume, and unit conversion is still attached to the right product before you rely on this.
+              </p>
+            </div>
+
             {revertConfirm ? (
               <div style={{ background: '#f8717110', border: '1px solid #f8717125', borderRadius: 10, padding: '14px', marginBottom: 12 }}>
                 <p style={{ margin: '0 0 12px', fontSize: 13, color: '#fca5a5', lineHeight: 1.6 }}>
@@ -917,10 +1012,19 @@ function DuplicatesModal({ brain, dupeGroups, onDeleteIndexes, onClose }) {
     });
   };
 
+  // SAFE DEFAULT. The old version pre-checked every non-keeper for deletion in every
+  // group. When all rules shared one source, srcSet.size === 1, the conflict branch
+  // never fired, resolvedKeeper fell through to g.indexes[0], and the rest arrived
+  // silently staged for deletion behind a tidy-looking list.
+  //
+  // If every rule in a group is admin-authored, stage NOTHING. Two admin rules that
+  // survived the intent and concentration guards are very likely two different facts,
+  // not two phrasings. Make the human click.
   const defaultSelected = () => {
     const s = new Set();
     groups.forEach(cat => {
       cat.groups.forEach((g, gi) => {
+        if (isAllMasterGroup(g)) return;   // ← nothing pre-staged
         const keeper = resolvedKeeper(cat, gi, g);
         g.indexes.forEach(idx => { if (idx !== keeper) s.add(`${cat.brainKey}:${idx}`); });
       });
@@ -932,6 +1036,7 @@ function DuplicatesModal({ brain, dupeGroups, onDeleteIndexes, onClose }) {
   const totalFlagged = groups.reduce((s, c) => s + c.groups.reduce((ss, g) => ss + g.indexes.length, 0), 0);
   const conflictCount = groups.reduce((s, cat) =>
     s + cat.groups.filter((g, gi) => isMultiMasterConflict(cat, gi, g)).length, 0);
+  const allMasterCount = groups.reduce((s, cat) => s + cat.groups.filter(isAllMasterGroup).length, 0);
 
   const allSelectableKeys = [];
   groups.forEach(cat => cat.groups.forEach((g, gi) => {
@@ -965,7 +1070,7 @@ function DuplicatesModal({ brain, dupeGroups, onDeleteIndexes, onClose }) {
           <div style={{ fontSize: 52, marginBottom: 16, opacity: 0.4 }}>✅</div>
           <div style={{ ...H3, marginBottom: 8 }}>No duplicates found</div>
           <p style={{ color: '#475569', fontSize: 13, lineHeight: 1.65, margin: '0 0 24px' }}>
-            No rules with ≥45% word overlap detected across any category. Your brain is clean.
+            No rules with ≥45% word overlap detected. Rules about the same product but different facts (reconstitution vs unit math vs escalation) are not counted as duplicates.
           </p>
           <button onClick={onClose} style={{ ...BTN_GREEN, fontSize: 13 }}>Close</button>
         </div>
@@ -1000,6 +1105,7 @@ function DuplicatesModal({ brain, dupeGroups, onDeleteIndexes, onClose }) {
         });
       });
     });
+    const masterDeletes = preview.filter(p => p.isMaster).length;
     return (
       <div style={OV}>
         <div style={{ ...MB, maxWidth: 580 }}>
@@ -1010,6 +1116,15 @@ function DuplicatesModal({ brain, dupeGroups, onDeleteIndexes, onClose }) {
               <div style={SUB}>This cannot be undone — review carefully</div>
             </div>
           </div>
+
+          {masterDeletes > 0 && (
+            <div style={{ margin: '14px 24px 0', background: '#f8717110', border: '1px solid #f8717130', borderRadius: 9, padding: '11px 14px' }}>
+              <p style={{ margin: 0, fontSize: 12, color: '#fca5a5', lineHeight: 1.6 }}>
+                👑 <strong>{masterDeletes} admin-authored rule{masterDeletes !== 1 ? 's' : ''}</strong> {masterDeletes !== 1 ? 'are' : 'is'} in this list. A human wrote {masterDeletes !== 1 ? 'these' : 'this'} on purpose. If any contain doses, volumes, or unit conversions, deleting {masterDeletes !== 1 ? 'them' : 'it'} removes an answer, not a redundancy.
+              </p>
+            </div>
+          )}
+
           <div style={{ maxHeight: 360, overflowY: 'auto', padding: '16px 24px' }}>
             <div style={{ fontSize: 11, color: '#475569', marginBottom: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
               {preview.length} rule{preview.length !== 1 ? 's' : ''} will be permanently deleted:
@@ -1055,9 +1170,10 @@ function DuplicatesModal({ brain, dupeGroups, onDeleteIndexes, onClose }) {
                 <span style={{ fontWeight: 700, fontSize: 15, color: '#e2e8f0' }}>Duplicate scanner</span>
                 <span style={{ fontSize: 11, color: '#f87171', background: '#f8717112', borderRadius: 20, padding: '2px 9px', border: '1px solid #f8717125', fontWeight: 700 }}>{totalFlagged} flagged</span>
                 {conflictCount > 0 && <span style={{ fontSize: 11, color: '#fbbf24', background: '#fbbf2412', borderRadius: 20, padding: '2px 9px', border: '1px solid #fbbf2430', fontWeight: 700 }}>👑 {conflictCount} conflict{conflictCount !== 1 ? 's' : ''}</span>}
+                {allMasterCount > 0 && <span style={{ fontSize: 11, color: '#60a5fa', background: '#60a5fa12', borderRadius: 20, padding: '2px 9px', border: '1px solid #60a5fa30', fontWeight: 700 }}>🔒 {allMasterCount} all-admin</span>}
               </div>
               <p style={{ margin: '0 0 0 42px', fontSize: 12, color: '#475569', lineHeight: 1.5 }}>
-                <span style={{ color: '#34d399', fontWeight: 600 }}>👑 Master</span> rules are admin-added and kept by default. Click any non-master rule to mark it for deletion.
+                <span style={{ color: '#34d399', fontWeight: 600 }}>👑 Master</span> rules are admin-added. Groups where <em>every</em> rule is admin-authored have <strong>nothing pre-selected</strong> — you must choose deliberately.
               </p>
             </div>
             <button onClick={onClose} style={X_BTN}>×</button>
@@ -1095,19 +1211,22 @@ function DuplicatesModal({ brain, dupeGroups, onDeleteIndexes, onClose }) {
 
               {/* Similarity groups */}
               {cat.groups.map((g, gi) => {
-                const keeper    = resolvedKeeper(cat, gi, g);
-                const conflict  = isMultiMasterConflict(cat, gi, g);
+                const keeper     = resolvedKeeper(cat, gi, g);
+                const conflict   = isMultiMasterConflict(cat, gi, g);
+                const allMaster  = isAllMasterGroup(g);
                 const masterIdxs = g.indexes.filter((_, ii) => isMasterRule(g.rules[ii]));
+                const accent     = conflict ? '#fbbf24' : allMaster ? '#60a5fa' : '#1e293b';
                 return (
-                  <div key={gi} style={{ marginBottom: 8, border: `1px solid ${conflict ? '#fbbf2430' : '#1e293b'}`, borderRadius: 10, overflow: 'hidden' }}>
+                  <div key={gi} style={{ marginBottom: 8, border: `1px solid ${conflict ? '#fbbf2430' : allMaster ? '#60a5fa25' : '#1e293b'}`, borderRadius: 10, overflow: 'hidden' }}>
                     {/* Group bar */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', background: conflict ? '#fbbf2406' : '#0a0e1a', borderBottom: `1px solid ${conflict ? '#fbbf2420' : '#0f172a'}` }}>
-                      <span style={{ fontSize: 10, color: conflict ? '#fbbf24' : '#334155', fontWeight: 700, letterSpacing: '0.07em' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', background: conflict ? '#fbbf2406' : allMaster ? '#60a5fa06' : '#0a0e1a', borderBottom: `1px solid ${conflict ? '#fbbf2420' : allMaster ? '#60a5fa18' : '#0f172a'}` }}>
+                      <span style={{ fontSize: 10, color: accent === '#1e293b' ? '#334155' : accent, fontWeight: 700, letterSpacing: '0.07em' }}>
                         GROUP {gi + 1}
                       </span>
                       <span style={{ fontSize: 10, color: '#1e293b' }}>·</span>
                       <span style={{ fontSize: 10, color: '#334155' }}>{g.indexes.length} similar rules</span>
                       {conflict && <span style={{ fontSize: 10, color: '#fbbf24', background: '#fbbf2415', border: '1px solid #fbbf2430', borderRadius: 4, padding: '1px 7px', fontWeight: 700 }}>👑 {masterIdxs.length} masters — click Keep to choose</span>}
+                      {allMaster && !conflict && <span style={{ fontSize: 10, color: '#60a5fa', background: '#60a5fa15', border: '1px solid #60a5fa30', borderRadius: 4, padding: '1px 7px', fontWeight: 700 }}>🔒 all admin-authored — nothing pre-selected</span>}
                       <button onClick={() => setSelected(prev => {
                         const s = new Set(prev);
                         const allChecked = g.indexes.filter(idx => idx !== keeper).every(idx => s.has(`${cat.brainKey}:${idx}`));
@@ -1148,8 +1267,8 @@ function DuplicatesModal({ brain, dupeGroups, onDeleteIndexes, onClose }) {
                                 <div style={{ width: 20, height: 20, borderRadius: 5, border: `2px solid ${isChecked ? '#f87171' : '#1e293b'}`, background: isChecked ? '#f87171' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.12s', flexShrink: 0 }}>
                                   {isChecked && <span style={{ color: '#000', fontSize: 11, fontWeight: 900 }}>✕</span>}
                                 </div>
-                                {conflict && (
-                                  <button onClick={e => { e.stopPropagation(); setGroupKeeper(cat, gi, idx); }} style={{ background: 'transparent', border: '1px solid #fbbf2430', color: '#fbbf24', borderRadius: 4, padding: '2px 6px', fontSize: 9, cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap', lineHeight: 1.4 }}>Keep →</button>
+                                {(conflict || allMaster) && (
+                                  <button onClick={e => { e.stopPropagation(); setGroupKeeper(cat, gi, idx); }} style={{ background: 'transparent', border: `1px solid ${conflict ? '#fbbf2430' : '#60a5fa30'}`, color: conflict ? '#fbbf24' : '#60a5fa', borderRadius: 4, padding: '2px 6px', fontSize: 9, cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap', lineHeight: 1.4 }}>Keep →</button>
                                 )}
                               </>
                             )}
@@ -1186,6 +1305,7 @@ function DuplicatesModal({ brain, dupeGroups, onDeleteIndexes, onClose }) {
         <div style={{ padding: '14px 24px', borderTop: '1px solid #0f172a', background: '#080b14', flexShrink: 0, display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ fontSize: 13 }}>
             {conflictCount > 0 && <span style={{ color: '#fbbf24', marginRight: 12 }}>👑 {conflictCount} conflict{conflictCount !== 1 ? 's' : ''} auto-resolved</span>}
+            {allMasterCount > 0 && <span style={{ color: '#60a5fa', marginRight: 12 }}>🔒 {allMasterCount} all-admin group{allMasterCount !== 1 ? 's' : ''} untouched</span>}
             <span style={{ color: selected.size > 0 ? '#f87171' : '#334155', fontWeight: selected.size > 0 ? 600 : 400 }}>
               {selected.size > 0 ? `${selected.size} rule${selected.size !== 1 ? 's' : ''} selected for deletion` : 'No rules selected'}
             </span>
@@ -1287,6 +1407,9 @@ function BrainDrawer({ brain, open, onClose, onRemoveRule, dirty, onSave, saving
               🔍 Find Dupes{dupeCount > 0 ? ` (${dupeCount})` : ''}
             </button>
           </div>
+          <p style={{ margin: '10px 0 0', fontSize: 10, color: '#334155', lineHeight: 1.5 }}>
+            Dosing numbers (reconstitution volumes, mg/mL, syringe units) live in <code style={{ color: '#475569' }}>lib/product-facts.js</code>, not here. Rules in this drawer never override them.
+          </p>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '14px 22px' }}>
           {Object.entries(CATEGORY_META).map(([cat, meta]) => {
@@ -1345,6 +1468,7 @@ function ReviewModal({ results, onAdd, onClose }) {
           {results.rules.map((rule, i) => {
             const meta = CATEGORY_META[rule.category] || CATEGORY_META.prefer;
             const isSel = selected.has(i);
+            const isDosing = /reconstitut|bac water|\bmg\s*\/\s*mL\b|\d+\s*units?\b|\bmL\b/i.test(rule.text || '');
             return (
               <div key={i} onClick={() => toggle(i)} style={{ display: 'flex', gap: 12, padding: '11px 13px', borderRadius: 9, marginBottom: 6, background: isSel ? meta.bg : '#0d1117', border: `1px solid ${isSel ? meta.color + '35' : '#0f172a'}`, cursor: 'pointer', transition: 'all 0.15s' }}>
                 <div style={{ width: 18, height: 18, borderRadius: 5, border: `2px solid ${isSel ? meta.color : '#1e293b'}`, background: isSel ? meta.color : 'transparent', flexShrink: 0, marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' }}>
@@ -1354,6 +1478,7 @@ function ReviewModal({ results, onAdd, onClose }) {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
                     <span style={{ fontSize: 10, color: meta.color, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em' }}>{meta.icon} {meta.label}</span>
                     {rule.confidence === 'high' && <span style={{ fontSize: 10, color: '#34d399', background: '#34d39915', borderRadius: 10, padding: '1px 6px' }}>⚡ high</span>}
+                    {isDosing && <span style={{ fontSize: 10, color: '#f87171', background: '#f8717112', border: '1px solid #f8717130', borderRadius: 10, padding: '1px 6px', fontWeight: 700 }}>💊 verify numbers</span>}
                   </div>
                   <p style={{ margin: 0, fontSize: 12, color: '#94a3b8', lineHeight: 1.45 }}>{rule.text}</p>
                 </div>
@@ -1450,6 +1575,10 @@ export default function AITraining({ onBrainUpdate }) {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, typing, interview]);
 
+  // NOTE: this PUTs the ENTIRE brain object from a React snapshot. If someone else
+  // (or a DB migration) changed the brain since this page loaded, that change is
+  // overwritten. It is why dosing numbers now live in lib/product-facts.js, out of
+  // reach of this autosave.
   useEffect(() => {
     if (!dirty) return;
     const timer = setTimeout(async () => {
@@ -1535,7 +1664,7 @@ export default function AITraining({ onBrainUpdate }) {
         setBrain(loaded); brainRef.current = loaded;
       }
       setDirty(false); onBrainUpdate?.();
-      addSystemMessage('🔀 Brain rules have been consolidated — merged and deduplicated.');
+      addSystemMessage('🔀 Brain rules have been consolidated — merged and deduplicated. Spot-check any merged product rules before relying on them.');
     } catch { /* silent */ }
   }, [onBrainUpdate]);
 
@@ -1617,7 +1746,13 @@ export default function AITraining({ onBrainUpdate }) {
           const loaded = { ...EMPTY_BRAIN, ...fresh.brain };
           setBrain(loaded); brainRef.current = loaded;
         }
-        if (data.ruleUpdates?.length > 0) showToast(`✅ ${data.ruleUpdates.length} rule${data.ruleUpdates.length > 1 ? 's' : ''} saved to brain`);
+        if (data.ruleUpdates?.length > 0) {
+          const dosing = data.ruleUpdates.filter(r => /reconstitut|bac water|\bmg\s*\/\s*mL\b|\d+\s*units?\b|\bmL\b/i.test(r.text || ''));
+          showToast(`✅ ${data.ruleUpdates.length} rule${data.ruleUpdates.length > 1 ? 's' : ''} saved to brain`);
+          if (dosing.length > 0) {
+            addSystemMessage(`💊 ${dosing.length} of those contain doses or volumes. These were rewritten by the extractor, not saved verbatim — open the Brain drawer and check every number against what you actually wrote.`);
+          }
+        }
       } catch { /* silent */ }
 
       setDirty(false); onBrainUpdate?.();
@@ -1654,6 +1789,12 @@ export default function AITraining({ onBrainUpdate }) {
         setDirty(false); onBrainUpdate?.();
         showToast(`✅ ${extractData.rules.length} rules extracted from "${file.name}" and saved`);
         addSystemMessage(`🧠 ${extractData.rules.length} rules extracted from "${file.name}" and saved to brain.`);
+
+        const dosing = extractData.rules.filter(r => /reconstitut|bac water|\bmg\s*\/\s*mL\b|\d+\s*units?\b|\bmL\b/i.test(r.text || ''));
+        if (dosing.length > 0) {
+          addSystemMessage(`💊 ${dosing.length} extracted rule${dosing.length !== 1 ? 's contain' : ' contains'} doses or volumes. Extraction paraphrases — a dropped decimal is a dosing error. Verify each number in the Brain drawer, or put it in lib/product-facts.js instead.`);
+        }
+
         setMessages(prev => [...prev, {
           id: Date.now(), role: 'ai',
           content: extractData.summary || `I've extracted ${extractData.rules.length} rules from **${file.name}** and saved them directly to the brain. They're active now.`,
@@ -1834,6 +1975,9 @@ export default function AITraining({ onBrainUpdate }) {
                       </button>
                     ))}
                   </div>
+                  <p style={{ fontSize: 11, color: '#334155', textAlign: 'center', maxWidth: 460, lineHeight: 1.6, margin: 0 }}>
+                    💊 Doses, reconstitution volumes, and unit conversions belong in <code style={{ color: '#475569' }}>lib/product-facts.js</code>. Anything taught here gets paraphrased by the extractor, and a paraphrased decimal is a dosing error.
+                  </p>
                 </div>
               )}
 
@@ -1930,7 +2074,7 @@ export default function AITraining({ onBrainUpdate }) {
                 }}>↑</button>
               </div>
               <p style={{ fontSize: 10, color: '#0f172a', textAlign: 'center', margin: '0 0 10px', letterSpacing: '0.02em' }}>
-                Ctrl+V to paste screenshots · Drag & drop images or docs · 📄 PDF / TXT / DOCX · Shift+Enter for new line
+                Ctrl+V to paste screenshots · Drag &amp; drop images or docs · 📄 PDF / TXT / DOCX · Shift+Enter for new line
               </p>
             </div>
           </>
@@ -2002,26 +2146,7 @@ export default function AITraining({ onBrainUpdate }) {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-// import ApiKeysPanel from './ApiKeysPanel';
 
 // const API_BASE = (import.meta.env.PROD
 //   ? import.meta.env.VITE_API_URL || 'https://chat-support-pro.onrender.com'
@@ -2141,7 +2266,18 @@ export default function AITraining({ onBrainUpdate }) {
 //   if (!rule) return false;
 //   if (isExplicitMaster(rule)) return true;
 //   const src = (typeof rule === 'string' ? '' : rule.source || '').toLowerCase().trim();
-//   return src === 'admin' || src === 'admin-chat' || src === 'manual' || src === '';
+//   return [
+//     // backend-golden sources (must match normaliseRule in brain-context.js)
+//     'admin-feedback',
+//     'admin-upload',
+//     'admin-training',
+//     'admin-consolidation-audit',
+//     'admin-chat',
+//     // frontend-only authored markers
+//     'admin',
+//     'manual',
+//     '',
+//   ].includes(src);
 // }
 
 // function detectDuplicates(brain) {
@@ -3603,13 +3739,7 @@ export default function AITraining({ onBrainUpdate }) {
 //     setMessages(prev => [...prev, userMsg]);
 //     setInput(''); setImages([]); setTyping(true);
 
-//     const history = messages
-//       .slice(-14)
-//       .filter(m => m.role === 'user' || m.role === 'ai')
-//       .map(m => ({
-//         role: m.role === 'ai' ? 'assistant' : 'user',
-//         content: (m.content || '').trim() || '[image attached]',
-//       }));
+//     const history = messages.slice(-14).map(m => ({ role: m.role === 'ai' ? 'assistant' : m.role, content: m.content || '' }));
 
 //     try {
 //       const data = await apiFetch('/ai/training/chat', {
@@ -3773,13 +3903,13 @@ export default function AITraining({ onBrainUpdate }) {
 //             </div>
 //           </div>
 //           <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
-//             {['chat', 'settings', 'apikeys'].map(tab => (
+//             {['chat', 'settings'].map(tab => (
 //               <button key={tab} className="at-tab" onClick={() => setActiveTab(tab)} style={{
 //                 background: activeTab === tab ? '#0f172a' : 'none',
 //                 border: `1px solid ${activeTab === tab ? '#1e293b' : 'transparent'}`,
 //                 color: activeTab === tab ? '#e2e8f0' : '#334155',
 //                 borderRadius: 7, padding: '5px 12px', fontSize: 12, cursor: 'pointer', fontWeight: activeTab === tab ? 600 : 400,
-//               }}>{tab === 'settings' ? '⚙️ Quality' : tab === 'apikeys' ? '🔁 Fallback' : '💬 Chat'}</button>
+//               }}>{tab === 'settings' ? '⚙️ Quality' : '💬 Chat'}</button>
 //             ))}
 //             <div style={{ width: 1, height: 20, background: '#0f172a', margin: '0 2px' }} />
 //             <button onClick={() => setDrawerOpen(true)} style={{ background: '#0f172a', border: '1px solid #1e293b', color: '#64748b', borderRadius: 7, padding: '5px 12px', fontSize: 12, cursor: 'pointer' }}>🧠 Brain</button>
@@ -3827,9 +3957,6 @@ export default function AITraining({ onBrainUpdate }) {
 //             </div>
 //           </div>
 //         )}
-
-//         {/* API Keys / Fallback tab */}
-//         {activeTab === 'apikeys' && <ApiKeysPanel />}
 
 //         {/* Chat tab */}
 //         {activeTab === 'chat' && (
