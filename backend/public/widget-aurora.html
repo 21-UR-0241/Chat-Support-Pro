@@ -349,7 +349,7 @@
     function presenceLine(fullText){
       var name = core.customerName ? '' : '';
       // Show a concise concierge line rather than the long greeting paragraph
-      return 'Online now · replies in ~15 min';
+      return 'Online now';
     }
     core.on('history',function(list){hello.classList.remove('on');hello.style.display='none';list.forEach(function(m){render(m,true);});setTimeout(scroll,80);});
     core.on('message',function(m){hello.classList.remove('on');hello.style.display='none';render(m,false);});
