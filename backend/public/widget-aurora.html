@@ -19,6 +19,7 @@
     --text:#1b2438;
     --muted:#6b7690;
     --honey:#e0a04a;          /* the human-agent signal — used sparingly */
+    --glow:rgba(224,160,74,.55);
     --honey-deep:#c9873a;
     --radius:14px;
     --app-height:100vh;
@@ -35,8 +36,9 @@
     padding:calc(18px + env(safe-area-inset-top)) 20px 0;}
   .hd-row{display:flex;align-items:center;gap:13px;}
   .hd-av{width:44px;height:44px;border-radius:12px;flex-shrink:0;position:relative;
-    background:linear-gradient(150deg,#2a3a63,#1a2440);display:flex;align-items:center;justify-content:center;
-    font-family:var(--display);font-weight:600;font-size:15px;color:#dbe3f5;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06);}
+    background:#fff;display:flex;align-items:center;justify-content:center;
+    box-shadow:0 1px 3px rgba(0,0,0,.18);}
+  .hd-av svg{width:26px;height:26px;}
   .hd-av .live{position:absolute;right:-2px;bottom:-2px;width:13px;height:13px;border-radius:50%;background:var(--honey);border:2.5px solid var(--ink);}
   .hd-av .live.off{background:#e05a5a;} .hd-av .live.wait{background:#e0a04a;}
   .hd-id{flex:1;min-width:0;}
@@ -51,7 +53,7 @@
   .ticker .pulse{width:7px;height:7px;border-radius:50%;background:var(--honey);flex-shrink:0;
     box-shadow:0 0 0 0 rgba(224,160,74,.6);animation:ring 2.4s infinite;}
   .ticker .pulse.off{background:#e05a5a;animation:none;box-shadow:none;} .ticker .pulse.wait{background:#e0a04a;animation:ring 1.2s infinite;}
-  @keyframes ring{0%{box-shadow:0 0 0 0 rgba(224,160,74,.55)}70%{box-shadow:0 0 0 7px rgba(224,160,74,0)}100%{box-shadow:0 0 0 0 rgba(224,160,74,0)}}
+  @keyframes ring{0%{box-shadow:0 0 0 0 var(--glow)}70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
   #tickertext{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 
   /* ── thread ────────────────────────────────────────────── */
@@ -154,7 +156,7 @@
 <body>
   <header class="hd">
     <div class="hd-row">
-      <div class="hd-av">CS<span class="live" id="live"></span></div>
+      <div class="hd-av"><span class="live" id="live"></span></div>
       <div class="hd-id"><h3 id="brand">Chat Support</h3><div class="role">Concierge desk</div></div>
       <button class="hd-x" id="close" type="button" aria-label="Close chat">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -212,8 +214,60 @@
     function appH(){var h=window.visualViewport?window.visualViewport.height:window.innerHeight;document.documentElement.style.setProperty('--app-height',h+'px');}
     appH();window.addEventListener('resize',appH);if(window.visualViewport){window.visualViewport.addEventListener('resize',appH);window.visualViewport.addEventListener('scroll',appH);}
 
-    function applyTheme(t){ if(!t)return; var r=document.documentElement;
-      r.style.setProperty('--honey',t.primary); r.style.setProperty('--honey-deep',t.dark); }
+    // ── brand theming: derive the whole palette from ONE shop colour ──
+    // No brand colour passed → keep the native ink+honey concierge look.
+    function hexToRgb(h){h=h.replace('#','');if(h.length===3)h=h[0]+h[0]+h[1]+h[1]+h[2]+h[2];return{r:parseInt(h.slice(0,2),16),g:parseInt(h.slice(2,4),16),b:parseInt(h.slice(4,6),16)};}
+    function rgbToHsl(r,g,b){r/=255;g/=255;b/=255;var mx=Math.max(r,g,b),mn=Math.min(r,g,b),h,s,l=(mx+mn)/2;if(mx===mn){h=s=0;}else{var d=mx-mn;s=l>0.5?d/(2-mx-mn):d/(mx+mn);switch(mx){case r:h=(g-b)/d+(g<b?6:0);break;case g:h=(b-r)/d+2;break;default:h=(r-g)/d+4;}h/=6;}return{h:h*360,s:s,l:l};}
+    function hslToHex(h,s,l){h/=360;var r,g,b;if(s===0){r=g=b=l;}else{var q=l<0.5?l*(1+s):l+s-l*s,p=2*l-q;var hue=function(t){if(t<0)t+=1;if(t>1)t-=1;if(t<1/6)return p+(q-p)*6*t;if(t<1/2)return q;if(t<2/3)return p+(q-p)*(2/3-t)*6;return p;};r=hue(h+1/3);g=hue(h);b=hue(h-1/3);}var to=function(x){var v=Math.round(x*255).toString(16);return v.length===1?'0'+v:v;};return'#'+to(r)+to(g)+to(b);}
+    function clamp(v,lo,hi){return Math.min(hi,Math.max(lo,v));}
+    function relLum(rgb){var a=[rgb.r,rgb.g,rgb.b].map(function(v){v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);});return 0.2126*a[0]+0.7152*a[1]+0.0722*a[2];}
+    function contrastRatio(a,b){var la=relLum(hexToRgb(a))+0.05,lb=relLum(hexToRgb(b))+0.05;return Math.max(la,lb)/Math.min(la,lb);}
+    function readableInk(hex){return contrastRatio(hex,'#12151f')>contrastRatio(hex,'#ffffff')?'#12151f':'#ffffff';}
+    function rgba(hex,a){var c=hexToRgb(hex);return'rgba('+c.r+','+c.g+','+c.b+','+a+')';}
+
+    // ── FAB/header icon: same index + colour algorithm as the launcher, so the
+    //    button on the page and this header show the exact same glyph & colour ──
+    function iconHash(s){var h=5381;for(var i=0;i<s.length;i++){h=((h<<5)+h)+s.charCodeAt(i);h|=0;}return Math.abs(h);}
+    function iconIdx(id){if(!id)return 0;var n=parseInt(id,10);if(!isNaN(n)&&String(n)===String(id)&&n>0)return (n-1)%10;return iconHash(String(id))%10;}
+    function iconColor(hex){var b=hexToRgb(hex),ink={r:27,g:36,b:56},c=b,t=0,f=function(o){var g=function(v){var s=Math.max(0,Math.min(255,Math.round(v))).toString(16);return s.length<2?'0'+s:s;};return'#'+g(o.r)+g(o.g)+g(o.b);};while((1.05/(relLum(c)+0.05))<3.2&&t<0.85){t+=0.12;c={r:b.r*(1-t)+ink.r*t,g:b.g*(1-t)+ink.g*t,b:b.b*(1-t)+ink.b*t};}return f(c);}
+    var ISVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">';
+    var ICONS=[
+      ISVG+'<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>',
+      ISVG+'<path d="M4 5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H9l-4 4v-4H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/><circle cx="8.5" cy="10.5" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="10.5" r="1" fill="currentColor" stroke="none"/><circle cx="15.5" cy="10.5" r="1" fill="currentColor" stroke="none"/></svg>',
+      ISVG+'<path d="M14 9a1 1 0 0 1-1 1H7l-3 3V4a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1z"/><path d="M18 8h1a1 1 0 0 1 1 1v9l-3-3h-6a1 1 0 0 1-1-1v-1"/></svg>',
+      ISVG+'<path d="M4 13a8 8 0 0 1 16 0"/><rect x="2" y="13" width="4" height="7" rx="1.5"/><rect x="18" y="13" width="4" height="7" rx="1.5"/><path d="M20 20a3 3 0 0 1-3 3h-3"/></svg>',
+      ISVG+'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>',
+      ISVG+'<circle cx="12" cy="12" r="9"/><path d="M9.2 9a2.8 2.8 0 0 1 5.4 1c0 1.8-2.6 2.6-2.6 2.6"/><circle cx="12" cy="17" r="1" fill="currentColor" stroke="none"/></svg>',
+      ISVG+'<path d="M21 12a8 8 0 0 1-11.4 7.2L3 21l1.8-6.6A8 8 0 1 1 21 12z"/><path d="M12 14.5s-2.6-1.7-2.6-3.3a1.5 1.5 0 0 1 2.6-1 1.5 1.5 0 0 1 2.6 1c0 1.6-2.6 3.3-2.6 3.3z" fill="currentColor" stroke="none"/></svg>',
+      ISVG+'<path d="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z"/><path d="M9 11h.01M15 11h.01"/><path d="M8.8 14.2a4 4 0 0 0 6.4 0"/></svg>',
+      ISVG+'<path d="M22 3 11 14"/><path d="M22 3 15 21l-4-7-7-4z"/></svg>',
+      ISVG+'<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.4"/><path d="M5.6 5.6 9.6 9.6M14.4 14.4l4 4M18.4 5.6 14.4 9.6M9.6 14.4l-4 4"/></svg>'
+    ];
+    function renderHeaderIcon(primary){
+      var col=iconColor(primary||'#e0a04a');
+      hdav.innerHTML=ICONS[iconIdx(core.storeId)]+'<span class="live" id="live"></span>';
+      hdav.style.color=col;
+      live=document.getElementById('live');   // re-bind after innerHTML swap
+    }
+
+    function applyTheme(t){
+      if(!t||!t.primary)return;                       // keep native palette
+      var rgb=hexToRgb(t.primary), hsl=rgbToHsl(rgb.r,rgb.g,rgb.b);
+      // accent: clamp into a mid band so it reads on BOTH the dark dock and the white thread
+      var accent    =hslToHex(hsl.h, Math.max(0.42,hsl.s), clamp(hsl.l,0.40,0.60));
+      var accentDeep=hslToHex(hsl.h, Math.max(0.42,hsl.s), clamp(hsl.l-0.12,0.28,0.52));
+      // ink surfaces: brand hue, forced dark so white text always passes contrast
+      var ink       =hslToHex(hsl.h, Math.min(hsl.s,0.42), 0.13);
+      var inkSoft   =hslToHex(hsl.h, Math.min(hsl.s,0.40), 0.22);
+      var r=document.documentElement;
+      r.style.setProperty('--honey',accent);
+      r.style.setProperty('--honey-deep',accentDeep);
+      r.style.setProperty('--ink',ink);
+      r.style.setProperty('--ink-soft',inkSoft);
+      r.style.setProperty('--glow',rgba(accent,0.55));
+      // the send icon sits on the accent button — flip it for contrast
+      var sb=document.querySelector('.go-send'); if(sb)sb.style.color=readableInk(accent);
+    }
 
     function scroll(){thread.scrollTop=thread.scrollHeight;}
     function updateDates(){
@@ -263,7 +317,7 @@
 
     core.on('ready',function(d){
       brand.textContent=d.brandName;
-      hdav.firstChild.textContent=R.getInitials(d.brandName);
+      renderHeaderIcon(d.theme && d.theme.primary);
       if(d.placeholder)box.placeholder=d.placeholder;
       if(d.greeting)hello.querySelector('p').innerHTML=d.greeting;
       applyTheme(d.theme);

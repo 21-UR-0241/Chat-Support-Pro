@@ -84,6 +84,14 @@
       var l = params.get('light') ? decodeURIComponent(params.get('light')) : p;
       return { primary: p, dark: d, light: l, glow: hexToRgba(p, 0.35) };
     }
+    // build a theme from a single hex (used for the DB primary_color fallback)
+    function themeFromHex(p) {
+      if (!p || typeof p !== 'string') return null;
+      p = p.trim();
+      if (!/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(p)) return null;
+      if (p.toLowerCase() === '#667eea') return null;   // API default = "unset" → keep native
+      return { primary: p, dark: p, light: p, glow: hexToRgba(p, 0.35) };
+    }
 
     // ---- fetch helpers --------------------------------------------------
     function fetchWithTimeout(url, options, timeout) {
@@ -477,13 +485,14 @@
 
     // ---- settings + init ------------------------------------------------
     async function loadSettings() {
-      var out = { brandName: 'Chat Support', greeting: null, placeholder: null, storeId: undefined };
+      var out = { brandName: 'Chat Support', greeting: null, placeholder: null, storeId: undefined, primaryColor: null };
       try {
         var r = await fetchWithRetry(API_URL + '/api/widget/settings?store=' + STORE_ID, {}, 15000, 2);
         if (r.ok) {
           storeSettings = await r.json();
           out.brandName = storeSettings.brandName || 'Chat Support';
           out.storeId = storeSettings.storeId;
+          out.primaryColor = storeSettings.primaryColor || null;
           if (storeSettings.widgetSettings) {
             out.greeting = storeSettings.widgetSettings.greeting || null;
             out.placeholder = storeSettings.widgetSettings.placeholder || null;
@@ -499,7 +508,8 @@
       try {
         detectMessageSource();
         var settings = await loadSettings();
-        emit('ready', { brandName: settings.brandName, greeting: settings.greeting, placeholder: settings.placeholder, theme: parseTheme() });
+        var theme = parseTheme() || themeFromHex(settings.primaryColor);
+        emit('ready', { brandName: settings.brandName, greeting: settings.greeting, placeholder: settings.placeholder, theme: theme });
         var det = autoDetectCustomer();
         if (det) {
           customerEmail = det.email; customerName = det.name || 'Guest';
