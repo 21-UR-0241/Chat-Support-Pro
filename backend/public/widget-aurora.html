@@ -253,17 +253,26 @@
     function applyTheme(t){
       if(!t||!t.primary)return;                       // keep native palette
       var rgb=hexToRgb(t.primary), hsl=rgbToHsl(rgb.r,rgb.g,rgb.b);
-      // accent: clamp into a mid band so it reads on BOTH the dark dock and the white thread
-      var accent    =hslToHex(hsl.h, Math.max(0.42,hsl.s), clamp(hsl.l,0.40,0.60));
-      var accentDeep=hslToHex(hsl.h, Math.max(0.42,hsl.s), clamp(hsl.l-0.12,0.28,0.52));
-      // ink surfaces: brand hue, forced dark so white text always passes contrast
-      var ink       =hslToHex(hsl.h, Math.min(hsl.s,0.42), 0.13);
-      var inkSoft   =hslToHex(hsl.h, Math.min(hsl.s,0.40), 0.22);
+      var h=hsl.h, s=hsl.s;
+      // header/dock take the brand colour AT ITS TRUE vividness — darkened only as
+      // far as needed so white header text still clears 4.5:1 (pale brands only).
+      function inkAt(l){
+        var sat=Math.min(s,0.95), hex=hslToHex(h,sat,l), g=0;
+        while(contrastRatio(hex,'#ffffff')<4.5 && l>0.06 && g<50){ l-=0.02; hex=hslToHex(h,sat,l); g++; }
+        return hex;
+      }
+      var ink     = inkAt(hsl.l);                     // = the store colour when it's dark enough
+      var inkSoft = inkAt(Math.min(hsl.l+0.08,0.55)); // customer bubble, a touch lighter
+      // accent brightens away from the header so the send button / rail / dot stay distinct,
+      // while still reading on the white thread.
+      var aL = clamp(hsl.l < 0.5 ? 0.56 : hsl.l, 0.50, 0.64);
+      var accent    = hslToHex(h, Math.max(0.55,s), aL);
+      var accentDeep= hslToHex(h, Math.max(0.55,s), clamp(aL-0.14,0.36,0.55));
       var r=document.documentElement;
-      r.style.setProperty('--honey',accent);
-      r.style.setProperty('--honey-deep',accentDeep);
       r.style.setProperty('--ink',ink);
       r.style.setProperty('--ink-soft',inkSoft);
+      r.style.setProperty('--honey',accent);
+      r.style.setProperty('--honey-deep',accentDeep);
       r.style.setProperty('--glow',rgba(accent,0.55));
       // the send icon sits on the accent button — flip it for contrast
       var sb=document.querySelector('.go-send'); if(sb)sb.style.color=readableInk(accent);
