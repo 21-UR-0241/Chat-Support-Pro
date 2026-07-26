@@ -157,7 +157,7 @@
   <header class="hd">
     <div class="hd-row">
       <div class="hd-av"><span class="live" id="live"></span></div>
-      <div class="hd-id"><h3 id="brand">Chat Support</h3><div class="role">Concierge desk</div></div>
+      <div class="hd-id"><h3 id="brand">Chat Support</h3><div class="role"></div></div>
       <button class="hd-x" id="close" type="button" aria-label="Close chat">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
@@ -342,7 +342,7 @@
     function presenceLine(fullText){
       var name = core.customerName ? '' : '';
       // Show a concise concierge line rather than the long greeting paragraph
-      return 'Online now · replies in ~15 min';
+      return 'Online now';
     }
     core.on('history',function(list){hello.classList.remove('on');hello.style.display='none';list.forEach(function(m){render(m,true);});setTimeout(scroll,80);});
     core.on('message',function(m){hello.classList.remove('on');hello.style.display='none';render(m,false);});
