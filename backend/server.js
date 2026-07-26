@@ -2862,7 +2862,8 @@ app.get('/widget.html', (req, res) => {
     'Cache-Control': 'no-cache, must-revalidate', 'Content-Security-Policy': "frame-ancestors *" });
   res.sendFile(__dirname + '/public/widget.html');
 });
-app.use(express.static('public'));
+// app.use(express.static('public'));
+app.use(express.static(__dirname + '/public'));
 
 
 
