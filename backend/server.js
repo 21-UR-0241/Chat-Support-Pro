@@ -2519,7 +2519,6 @@
 
 
 
-// npm install compression  ← run this if not already installed
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -3792,6 +3791,69 @@ app.get('/api/conversations/linked/:email', authenticateToken, async (req, res) 
   } catch (error) { console.error('❌ [linked-conversations] Error:', error); return res.status(500).json({ error: 'Failed to fetch linked conversations' }); }
 });
 
+
+app.get('/api/conversations/search', authenticateToken, async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim();
+    if (q.length < 2) return res.json([]);
+    const limit = Math.min(200, parseInt(req.query.limit) || 100);
+    const { storeGroup, storeId } = req.query;
+
+    const likeEscape = (s) => s.replace(/[\\%_]/g, (c) => '\\' + c);
+    const pattern = `%${likeEscape(q)}%`;
+
+    const params = [pattern, limit];
+    const scope = [];
+    if (storeGroup) {
+      params.push(storeGroup);
+      scope.push(`c.shop_id IN (SELECT id FROM stores WHERE store_group = $${params.length})`);
+    }
+    if (storeId) {
+      params.push(storeId);
+      scope.push(`(c.store_identifier = $${params.length} OR c.shop_domain = $${params.length})`);
+    }
+    const scopeSql = scope.length ? `AND ${scope.join(' AND ')}` : '';
+
+    // matched = ids hit by name/email/OR any message body; then enrich with the
+    // latest message so preview + sort match the normal list. Lateral aliases
+    // override same-named conversation columns (last-wins in node-pg).
+    const { rows } = await db.pool.query(`
+      WITH matched AS (
+        SELECT c.id
+        FROM conversations c
+        WHERE c.status NOT IN ('archived','blacklisted','blacklist')
+          ${scopeSql}
+          AND (
+            c.customer_name  ILIKE $1
+            OR c.customer_email ILIKE $1
+            OR EXISTS (
+              SELECT 1 FROM messages m
+              WHERE m.conversation_id = c.id AND m.content ILIKE $1
+            )
+          )
+      )
+      SELECT c.*,
+             lm.content     AS last_message,
+             lm.sender_type AS last_message_sender_type,
+             lm.sent_at     AS last_message_at
+      FROM conversations c
+      JOIN matched ON matched.id = c.id
+      LEFT JOIN LATERAL (
+        SELECT content, sender_type, sent_at
+        FROM messages WHERE conversation_id = c.id
+        ORDER BY sent_at DESC LIMIT 1
+      ) lm ON true
+      ORDER BY lm.sent_at DESC NULLS LAST
+      LIMIT $2
+    `, params);
+
+    res.json(rows.map(snakeToCamel));
+  } catch (error) {
+    console.error('Conversation search error:', error);
+    res.status(500).json({ error: 'Search failed' });
+  }
+});
+
 app.get('/api/conversations/archived', authenticateToken, async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
@@ -3979,33 +4041,6 @@ app.get('/api/conversations/:id/messages', authenticateToken, async (req, res) =
   } catch (error) { console.error('Error fetching messages:', error); res.status(500).json({ error: error.message }); }
 });
 
-// app.post('/api/messages', authenticateToken, async (req, res) => {
-//   try {
-//     const { conversationId, senderType, senderName, content, storeId, fileData } = req.body;
-//     if (!conversationId || !senderType) return res.status(400).json({ error: 'Missing required fields' });
-//     if (!content && !fileData) return res.status(400).json({ error: 'Message must have text or a file attachment' });
-//     const timestamp = new Date();
-//     const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-//     const tempMessage = { id: tempId, conversationId, storeId, senderType, senderName, content: content || '', fileData, createdAt: timestamp, pending: true };
-//     sendToConversation(conversationId, { type: 'new_message', message: snakeToCamel(tempMessage) });
-//     broadcastToAgents({ type: 'new_message', message: snakeToCamel(tempMessage), conversationId, storeId });
-//     res.json(snakeToCamel(tempMessage));
-//     setImmediate(async () => {
-//       try {
-//         const savedMessage = await db.saveMessage({
-//           conversation_id: conversationId, store_id: storeId, sender_type: senderType, sender_name: senderName,
-//           sender_id: senderType === 'agent' ? req.user.id : null,
-//           content: content || '', file_data: fileData ? JSON.stringify(fileData) : null, sent_at: timestamp
-//         });
-//         const updatedConversation = await db.getConversation(conversationId);
-//         sendToConversation(conversationId, { type: 'message_confirmed', tempId, message: snakeToCamel(savedMessage) });
-//         broadcastToAgents({ type: 'message_confirmed', tempId, message: snakeToCamel(savedMessage), conversationId, storeId, conversation: snakeToCamel(updatedConversation) });
-//         if (senderType === 'agent') handleOfflineEmailNotification(db.pool, savedMessage).catch(err => console.error('[Offline Email] Failed:', err));
-//       } catch (error) { console.error('Failed to save agent message:', error); sendToConversation(conversationId, { type: 'message_failed', tempId }); }
-//     });
-//   } catch (error) { console.error('Send message error:', error); res.status(500).json({ error: error.message }); }
-// });
-
 
 app.post('/api/messages', authenticateToken, async (req, res) => {
   try {
@@ -4014,9 +4049,6 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
     if (!content && !fileData) return res.status(400).json({ error: 'Message must have text or a file attachment' });
     const timestamp = new Date();
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    // clientMsgId travels on every event for this message so the sender can reconcile
-    // its optimistic bubble across new_message → HTTP return → message_confirmed
-    // without guessing by id (which changes) or name/content (which can mismatch).
     const tempMessage = { id: tempId, clientMsgId: clientMsgId || null, conversationId, storeId, senderType, senderName, content: content || '', fileData, createdAt: timestamp, pending: true };
     sendToConversation(conversationId, { type: 'new_message', message: snakeToCamel(tempMessage) });
     broadcastToAgents({ type: 'new_message', message: snakeToCamel(tempMessage), conversationId, storeId });
@@ -4499,6 +4531,10 @@ async function createPerformanceIndexes() {
     `CREATE INDEX IF NOT EXISTS idx_blacklist_email ON blacklist (email) WHERE removed_at IS NULL`,
     `CREATE INDEX IF NOT EXISTS idx_presence_conv ON customer_presence (conversation_id)`,
     `CREATE INDEX IF NOT EXISTS idx_conv_archived_at ON conversations (archived_at DESC NULLS LAST) WHERE status = 'archived'`,
+    `CREATE EXTENSION IF NOT EXISTS pg_trgm`,
+    `CREATE INDEX IF NOT EXISTS idx_messages_content_trgm ON messages USING gin (content gin_trgm_ops)`,
+    `CREATE INDEX IF NOT EXISTS idx_conv_email_trgm ON conversations USING gin (customer_email gin_trgm_ops)`,
+    `CREATE INDEX IF NOT EXISTS idx_conv_name_trgm  ON conversations USING gin (customer_name  gin_trgm_ops)`,
   ];
   const results = await Promise.allSettled(indexes.map(sql => db.pool.query(sql)));
   const created = results.filter(r => r.status === 'fulfilled').length;

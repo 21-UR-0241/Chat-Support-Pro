@@ -140,6 +140,13 @@ class ApiService {
   return this.fetch(`/api/conversations${params ? '?' + params : ''}`);
 }
 
+async searchConversations({ q, storeGroup, storeId } = {}) {
+    const params = new URLSearchParams({ q });
+    if (storeGroup) params.set('storeGroup', storeGroup);
+    if (storeId)    params.set('storeId', storeId);
+    return this.fetch(`/api/conversations/search?${params}`);
+  }
+  
   async getConversation(id) {
     return this.fetch(`/api/conversations/${id}`);
   }
