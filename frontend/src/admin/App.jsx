@@ -137,6 +137,8 @@ function DashboardContent({ employee, onLogout, selectedGroup, selectedGroupName
   const [storeGroups,         setStoreGroups]         = useState([]); // [{ storeGroup, storeGroupName, color }] for per-conversation group join
   const [loadingStores,       setLoadingStores]       = useState(true);
   const [error,               setError]               = useState(null);
+  const [wsStatus,            setWsStatus]            = useState('connecting'); // 'connecting' | 'live' | 'reconnecting'
+  const [wsReconnectAttempt,  setWsReconnectAttempt]  = useState(0);
   const [mobileMenuOpen,      setMobileMenuOpen]      = useState(false);
   const [showLogoutModal,     setShowLogoutModal]     = useState(false);
   const [showNotesModal,      setShowNotesModal]      = useState(false);
@@ -456,9 +458,10 @@ const handleTyping = (isTyping) => {
       }
     });
 
-    const u2  = ws.on('connected',             () => setError(null));
-    const u3  = ws.on('error',                 () => setError('WebSocket connection error. Retrying…'));
-    const u4  = ws.on('max_reconnect_reached',  () => setError('Unable to connect to server. Please refresh the page.'));
+    const u2  = ws.on('connected',    () => { setError(null); setWsStatus('live'); setWsReconnectAttempt(0); });
+    const u3  = ws.on('disconnected', () => setWsStatus('reconnecting'));
+    const u4  = ws.on('reconnecting', (d) => { setWsStatus('reconnecting'); setWsReconnectAttempt(d?.attempt || 0); });
+    const uE  = ws.on('error',        () => setWsStatus('reconnecting'));
 
     const u5  = ws.on('legal_threat_detected', (data) => {
       const h = handlersRef.current;
@@ -527,7 +530,7 @@ const handleTyping = (isTyping) => {
       });
     });
 
-    return () => { u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8(); u9(); u10(); u11(); };
+    return () => { u1(); u2(); u3(); u4(); uE(); u5(); u6(); u7(); u8(); u9(); u10(); u11(); };
 
   }, [ws]);
 
@@ -600,7 +603,7 @@ const handleTyping = (isTyping) => {
   };
 
   const getInitials = (name) => name ? name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : 'U';
-  const isConnected = (() => { try { return ws?.isConnected() ?? false; } catch { return false; } })();
+  const isLive = wsStatus === 'live';
   const navigateTo  = (page) => { setActivePage(page); setProfileDropdownOpen(false); };
 
   // ── Keep the live handler set fresh for the (once-registered) WS listeners ──
@@ -628,9 +631,9 @@ const handleTyping = (isTyping) => {
             <div className="header-stats">
               <span className="stat-pill"><span className="stat-dot open" />{stats.openConversations || 0} open</span>
               <span className="stat-pill">🏪 {stores.length} stores</span>
-              <span className={`stat-pill ${isConnected ? 'stat-connected' : 'stat-offline'}`}>
-                <span className={`status-dot ${isConnected ? '' : 'status-offline'}`} />
-                {isConnected ? 'Live' : 'Offline'}
+              <span className={`stat-pill ${isLive ? 'stat-connected' : 'stat-offline'}`}>
+                <span className={`status-dot ${isLive ? '' : 'status-offline'}`} />
+                {isLive ? 'Live' : wsStatus === 'connecting' ? 'Connecting…' : 'Reconnecting…'}
               </span>
             </div>
           )}
@@ -772,8 +775,14 @@ const handleTyping = (isTyping) => {
         onPageChange={(page) => { setActivePage(page); setMobileMenuOpen(false); }}
         onRefresh={() => { refreshConversations(); setMobileMenuOpen(false); }}
         onLogout={() => setShowLogoutModal(true)}
-        stats={stats} isConnected={isConnected}
+        stats={stats} isConnected={isLive}
       />
+
+      {wsStatus === 'reconnecting' && wsReconnectAttempt >= 3 && (
+        <div className="error-banner">
+          <span>🔄 Reconnecting to server…</span>
+        </div>
+      )}
 
       {error && (
         <div className="error-banner">
