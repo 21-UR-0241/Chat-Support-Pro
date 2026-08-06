@@ -1595,3 +1595,44 @@
   width: 18px;
   text-align: center;
 }
+
+/* Load more button */
+.conversation-list .conv-load-more-wrap {
+  padding: 12px 16px 16px;
+  display: flex;
+  justify-content: center;
+}
+.conversation-list .conv-load-more-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--group-accent, #00a884);
+  background: rgba(var(--group-accent-rgb, 0, 168, 132), 0.08);
+  border: 1px solid rgba(var(--group-accent-rgb, 0, 168, 132), 0.35);
+  border-radius: 20px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.conversation-list .conv-load-more-btn:hover:not(:disabled) {
+  background: var(--group-accent, #00a884);
+  border-color: var(--group-accent, #00a884);
+  color: #fff;
+}
+.conversation-list .conv-load-more-btn:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.conversation-list .conv-load-more-spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(var(--group-accent-rgb, 0, 168, 132), 0.3);
+  border-top-color: var(--group-accent, #00a884);
+  border-radius: 50%;
+  animation: convLoadMoreSpin 0.7s linear infinite;
+}
+@keyframes convLoadMoreSpin {
+  to { transform: rotate(360deg); }
+}

@@ -2642,9 +2642,15 @@ async function getCachedStore(identifier) {
 
 function invalidateStoreCache(identifier) {
   if (identifier) appCache.invalidate(`store:${identifier}`);
-  appCache.invalidate('stores:active');
+  appCache.invalidatePrefix('stores:active');   // was: appCache.invalidate('stores:active')
   appCache.invalidate('stores:all');
 }
+
+// function invalidateStoreCache(identifier) {
+//   if (identifier) appCache.invalidate(`store:${identifier}`);
+//   appCache.invalidate('stores:active');
+//   appCache.invalidate('stores:all');
+// }
 
 // ============ DEBOUNCED READ BROADCAST ============
 // Collapses rapid-fire conversation_read events into a single broadcast.
@@ -2923,6 +2929,22 @@ app.get('/health', async (req, res) => {
 
 // ============ WIDGET API ENDPOINTS ============
 
+// app.get('/api/stores/groups', authenticateToken, async (req, res) => {
+//   try {
+//     const { rows } = await db.pool.query(`
+//       SELECT store_group, store_group_name, COUNT(*)::int AS store_count
+//       FROM stores
+//       WHERE is_active = true AND store_group IS NOT NULL
+//       GROUP BY store_group, store_group_name
+//       ORDER BY store_group_name NULLS LAST, store_group ASC
+//     `);
+//     res.json(rows.map(snakeToCamel));
+//   } catch (error) {
+//     console.error('Get store groups error:', error);
+//     res.status(500).json({ error: 'Failed to fetch store groups' });
+//   }
+// });
+
 app.get('/api/stores/verify', async (req, res) => {
   try {
     const { domain } = req.query;
@@ -2932,6 +2954,8 @@ app.get('/api/stores/verify', async (req, res) => {
     res.json({ storeId: store.id, storeIdentifier: store.store_identifier, shopDomain: store.shop_domain, brandName: store.brand_name, active: store.is_active, verified: true });
   } catch (error) { console.error('Store verification error:', error); res.status(500).json({ error: 'Verification failed' }); }
 });
+
+
 
 app.get('/api/widget/settings', async (req, res) => {
   try {
@@ -2986,6 +3010,126 @@ app.get('/api/widget/conversation/lookup', async (req, res) => {
     return res.status(500).json({ error: 'Lookup failed' });
   }
 });
+
+
+
+
+app.get('/api/stores/groups', authenticateToken, async (req, res) => {
+  try {
+    const groups = await db.getAllStoreGroups();
+    res.json(groups.map(snakeToCamel));
+  } catch (error) {
+    console.error('Get store groups error:', error);
+    res.status(500).json({ error: 'Failed to fetch store groups' });
+  }
+});
+
+// app.post('/api/stores/groups', authenticateToken, async (req, res) => {
+//   try {
+//     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+//     const { groupKey, groupName } = req.body;
+//     if (!groupKey?.trim())  return res.status(400).json({ error: 'groupKey is required' });
+//     if (!groupName?.trim()) return res.status(400).json({ error: 'groupName is required' });
+//     const group = await db.createStoreGroup({ group_key: groupKey.trim(), group_name: groupName.trim() });
+//     res.status(201).json(snakeToCamel({ ...group, store_count: 0 }));
+//   } catch (error) {
+//     if (error.code === '23505') return res.status(409).json({ error: 'A group with that key already exists' });
+//     res.status(500).json({ error: error.message });
+//   }
+// });
+
+// app.put('/api/stores/groups/:id', authenticateToken, async (req, res) => {
+//   try {
+//     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+//     const { groupKey, groupName } = req.body;
+//     if (!groupKey?.trim())  return res.status(400).json({ error: 'groupKey is required' });
+//     if (!groupName?.trim()) return res.status(400).json({ error: 'groupName is required' });
+//     const group = await db.updateStoreGroup(req.params.id, { group_key: groupKey.trim(), group_name: groupName.trim() });
+//     if (!group) return res.status(404).json({ error: 'Group not found' });
+//     appCache.invalidatePrefix('stores:active');
+//     appCache.invalidate('stores:all');
+//     res.json(snakeToCamel(group));
+//   } catch (error) {
+//     if (error.code === '23505') return res.status(409).json({ error: 'A group with that key already exists' });
+//     res.status(500).json({ error: error.message });
+//   }
+// });
+
+
+async function resolveGroupId(identifier) {
+  if (identifier == null) return null;
+  if (/^\d+$/.test(String(identifier))) return parseInt(identifier, 10); // already an id
+  const { rows } = await db.pool.query(
+    `SELECT id FROM store_groups WHERE group_key = $1 LIMIT 1`,
+    [String(identifier)]
+  );
+  return rows[0]?.id ?? null;
+}
+
+app.post('/api/stores/groups', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+    const { groupKey, groupName, color } = req.body;
+    if (!groupKey?.trim())  return res.status(400).json({ error: 'groupKey is required' });
+    if (!groupName?.trim()) return res.status(400).json({ error: 'groupName is required' });
+    const group = await db.createStoreGroup({ group_key: groupKey.trim(), group_name: groupName.trim(), color });
+    res.status(201).json(snakeToCamel({ ...group, store_count: 0 }));
+  } catch (error) {
+    if (error.code === '23505') return res.status(409).json({ error: 'A group with that key already exists' });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/stores/groups/:id', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+    const { groupKey, groupName, color } = req.body;
+    if (!groupKey?.trim())  return res.status(400).json({ error: 'groupKey is required' });
+    if (!groupName?.trim()) return res.status(400).json({ error: 'groupName is required' });
+
+    const id = await resolveGroupId(req.params.id);
+    if (id == null) return res.status(404).json({ error: 'Group not found' });
+
+    const group = await db.updateStoreGroup(id, { group_key: groupKey.trim(), group_name: groupName.trim(), color });
+    if (!group) return res.status(404).json({ error: 'Group not found' });
+
+    // keep the denormalised name on stores in sync with the renamed group
+    await db.pool.query(
+      `UPDATE stores SET store_group_name = $2, updated_at = NOW() WHERE store_group = $1`,
+      [groupKey.trim(), groupName.trim()]
+    );
+
+    appCache.invalidatePrefix('stores:active');
+    appCache.invalidate('stores:all');
+    res.json(snakeToCamel(group));
+  } catch (error) {
+    if (error.code === '23505') return res.status(409).json({ error: 'A group with that key already exists' });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/stores/groups/:id', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+    const force = req.query.force === 'true';
+
+    const id = await resolveGroupId(req.params.id);
+    if (id == null) return res.status(404).json({ error: 'Group not found' });
+
+    const result = await db.deleteStoreGroup(id, { force });
+    if (result.reason === 'not_found') return res.status(404).json({ error: 'Group not found' });
+    if (result.reason === 'has_stores') {
+      return res.status(409).json({
+        error: `Group has ${result.storeCount} store(s) assigned. Pass ?force=true to unassign them and delete anyway.`,
+        storeCount: result.storeCount,
+      });
+    }
+    appCache.invalidatePrefix('stores:active');
+    appCache.invalidate('stores:all');
+    res.json({ success: true, unassignedStores: result.unassignedStores || 0 });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
 
 // ============ AUTHENTICATION ENDPOINTS ============
 
@@ -3282,14 +3426,19 @@ app.post('/pepstack', async (req, res) => {
 
 app.get('/api/stores', authenticateToken, async (req, res) => {
   try {
-    const cached = appCache.get('stores:active');
+    const { storeGroup } = req.query;
+    const cacheKey = storeGroup ? `stores:active:${storeGroup}` : 'stores:active';
+    const cached = appCache.get(cacheKey);
     if (cached) return res.json(cached);
-    const stores = await db.getAllActiveStores();
+    const stores = storeGroup
+      ? await db.getStoresByFilters({ storeGroup })
+      : await db.getAllActiveStores();
     const result = stores.map(snakeToCamel);
-    appCache.set('stores:active', result);
+    appCache.set(cacheKey, result);
     res.json(result);
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
+
 
 app.get('/api/stores/all', authenticateToken, async (req, res) => {
   try {
@@ -3303,13 +3452,18 @@ app.get('/api/stores/all', authenticateToken, async (req, res) => {
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
+
+
 app.post('/api/stores', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
-    const { storeIdentifier, shopDomain, brandName, isActive } = req.body;
+    const { storeIdentifier, shopDomain, brandName, isActive, storeGroup, storeGroupName } = req.body;
     if (!storeIdentifier || !shopDomain || !brandName) return res.status(400).json({ error: 'storeIdentifier, shopDomain, and brandName are required' });
-    const result = await db.pool.query(`INSERT INTO stores (store_identifier, shop_domain, brand_name, is_active, access_token, installed_at, updated_at) VALUES ($1, $2, $3, $4, '', NOW(), NOW()) RETURNING *`, [storeIdentifier, shopDomain, brandName, isActive !== false]);
-    // Invalidate store list caches
+    const result = await db.pool.query(
+      `INSERT INTO stores (store_identifier, shop_domain, brand_name, is_active, store_group, store_group_name, access_token, installed_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, '', NOW(), NOW()) RETURNING *`,
+      [storeIdentifier, shopDomain, brandName, isActive !== false, storeGroup ?? 'peptides-group', storeGroupName ?? null]
+    );
     appCache.invalidate('stores:active');
     appCache.invalidate('stores:all');
     res.status(201).json(snakeToCamel(result.rows[0]));
@@ -3319,11 +3473,45 @@ app.post('/api/stores', authenticateToken, async (req, res) => {
   }
 });
 
+
+// app.post('/api/stores', authenticateToken, async (req, res) => {
+//   try {
+//     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+//     const { storeIdentifier, shopDomain, brandName, isActive } = req.body;
+//     if (!storeIdentifier || !shopDomain || !brandName) return res.status(400).json({ error: 'storeIdentifier, shopDomain, and brandName are required' });
+//     const result = await db.pool.query(`INSERT INTO stores (store_identifier, shop_domain, brand_name, is_active, access_token, installed_at, updated_at) VALUES ($1, $2, $3, $4, '', NOW(), NOW()) RETURNING *`, [storeIdentifier, shopDomain, brandName, isActive !== false]);
+//     // Invalidate store list caches
+//     appCache.invalidate('stores:active');
+//     appCache.invalidate('stores:all');
+//     res.status(201).json(snakeToCamel(result.rows[0]));
+//   } catch (error) {
+//     if (error.code === '23505') return res.status(409).json({ error: 'A store with that identifier or domain already exists' });
+//     res.status(500).json({ error: error.message });
+//   }
+// });
+
+// app.put('/api/stores/:id', authenticateToken, async (req, res) => {
+//   try {
+//     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+//     const { shopDomain, brandName, isActive } = req.body;
+//     const result = await db.pool.query(`UPDATE stores SET shop_domain = $1, brand_name = $2, is_active = $3, updated_at = NOW() WHERE id = $4 RETURNING *`, [shopDomain, brandName, isActive !== false, req.params.id]);
+//     if (!result.rows[0]) return res.status(404).json({ error: 'Store not found' });
+//     // Invalidate all store caches for this store
+//     invalidateStoreCache(result.rows[0].store_identifier);
+//     invalidateStoreCache(result.rows[0].shop_domain);
+//     res.json(snakeToCamel(result.rows[0]));
+//   } catch (error) { res.status(500).json({ error: error.message }); }
+// });
+
+
 app.put('/api/stores/:id', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
-    const { shopDomain, brandName, isActive } = req.body;
-    const result = await db.pool.query(`UPDATE stores SET shop_domain = $1, brand_name = $2, is_active = $3, updated_at = NOW() WHERE id = $4 RETURNING *`, [shopDomain, brandName, isActive !== false, req.params.id]);
+    const { shopDomain, brandName, isActive, storeGroup, storeGroupName } = req.body;
+    const result = await db.pool.query(
+      `UPDATE stores SET shop_domain = $1, brand_name = $2, is_active = $3, store_group = $4, store_group_name = $5, updated_at = NOW() WHERE id = $6 RETURNING *`,
+      [shopDomain, brandName, isActive !== false, storeGroup ?? null, storeGroupName ?? null, req.params.id]
+    );
     if (!result.rows[0]) return res.status(404).json({ error: 'Store not found' });
     // Invalidate all store caches for this store
     invalidateStoreCache(result.rows[0].store_identifier);
@@ -3331,6 +3519,28 @@ app.put('/api/stores/:id', authenticateToken, async (req, res) => {
     res.json(snakeToCamel(result.rows[0]));
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
+
+
+app.patch('/api/stores/:id/group', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+    const { storeGroup, storeGroupName } = req.body;
+    const result = await db.pool.query(
+      `UPDATE stores
+         SET store_group = COALESCE($1, store_group),
+             store_group_name = COALESCE($2, store_group_name),
+             updated_at = NOW()
+       WHERE id = $3
+       RETURNING *`,
+      [storeGroup ?? null, storeGroupName ?? null, req.params.id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Store not found' });
+    invalidateStoreCache(result.rows[0].store_identifier);
+    invalidateStoreCache(result.rows[0].shop_domain);
+    res.json(snakeToCamel(result.rows[0]));
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
 
 app.delete('/api/stores/:id', authenticateToken, async (req, res) => {
   try {
@@ -3471,17 +3681,42 @@ app.delete('/api/conversation-notes/:noteId', authenticateToken, async (req, res
 
 // ============ CONVERSATION ENDPOINTS ============
 
+// app.get('/api/conversations', authenticateToken, async (req, res) => {
+//   try {
+//     const { storeId, status, limit, offset } = req.query;
+//     const filters = {};
+//     if (storeId) filters.storeId = parseInt(storeId);
+//     if (status) filters.status = status;
+//     else filters.excludeArchived = true;
+//     if (limit) filters.limit = parseInt(limit);
+//     if (offset) filters.offset = parseInt(offset);
+
+//     const cacheKey = `convs:${storeId || 'all'}:${status || 'open'}:${limit || 'def'}:${offset || '0'}`;
+//     const cached = appCache.get(cacheKey);
+//     if (cached) return res.json(cached);
+
+//     const conversations = await db.getConversations(filters);
+//     const result = conversations.map(snakeToCamel);
+//     appCache.set(cacheKey, result);
+//     setTimeout(() => appCache.invalidate(cacheKey), 10 * 1000);
+
+//     res.json(result);
+//   } catch (error) { console.error('Get conversations error:', error); res.status(500).json({ error: error.message }); }
+// });
+
+
 app.get('/api/conversations', authenticateToken, async (req, res) => {
   try {
-    const { storeId, status, limit, offset } = req.query;
+    const { storeId, status, limit, offset, storeGroup } = req.query;
     const filters = {};
     if (storeId) filters.storeId = parseInt(storeId);
     if (status) filters.status = status;
     else filters.excludeArchived = true;
     if (limit) filters.limit = parseInt(limit);
     if (offset) filters.offset = parseInt(offset);
+    if (storeGroup) filters.storeGroup = storeGroup;
 
-    const cacheKey = `convs:${storeId || 'all'}:${status || 'open'}:${limit || 'def'}:${offset || '0'}`;
+    const cacheKey = `convs:${storeId || 'all'}:${status || 'open'}:${limit || 'def'}:${offset || '0'}:${storeGroup || 'allgroups'}`;
     const cached = appCache.get(cacheKey);
     if (cached) return res.json(cached);
 
@@ -3493,6 +3728,7 @@ app.get('/api/conversations', authenticateToken, async (req, res) => {
     res.json(result);
   } catch (error) { console.error('Get conversations error:', error); res.status(500).json({ error: error.message }); }
 });
+
 
 app.get('/api/widget/history', async (req, res) => {
   try {
@@ -3743,14 +3979,45 @@ app.get('/api/conversations/:id/messages', authenticateToken, async (req, res) =
   } catch (error) { console.error('Error fetching messages:', error); res.status(500).json({ error: error.message }); }
 });
 
+// app.post('/api/messages', authenticateToken, async (req, res) => {
+//   try {
+//     const { conversationId, senderType, senderName, content, storeId, fileData } = req.body;
+//     if (!conversationId || !senderType) return res.status(400).json({ error: 'Missing required fields' });
+//     if (!content && !fileData) return res.status(400).json({ error: 'Message must have text or a file attachment' });
+//     const timestamp = new Date();
+//     const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+//     const tempMessage = { id: tempId, conversationId, storeId, senderType, senderName, content: content || '', fileData, createdAt: timestamp, pending: true };
+//     sendToConversation(conversationId, { type: 'new_message', message: snakeToCamel(tempMessage) });
+//     broadcastToAgents({ type: 'new_message', message: snakeToCamel(tempMessage), conversationId, storeId });
+//     res.json(snakeToCamel(tempMessage));
+//     setImmediate(async () => {
+//       try {
+//         const savedMessage = await db.saveMessage({
+//           conversation_id: conversationId, store_id: storeId, sender_type: senderType, sender_name: senderName,
+//           sender_id: senderType === 'agent' ? req.user.id : null,
+//           content: content || '', file_data: fileData ? JSON.stringify(fileData) : null, sent_at: timestamp
+//         });
+//         const updatedConversation = await db.getConversation(conversationId);
+//         sendToConversation(conversationId, { type: 'message_confirmed', tempId, message: snakeToCamel(savedMessage) });
+//         broadcastToAgents({ type: 'message_confirmed', tempId, message: snakeToCamel(savedMessage), conversationId, storeId, conversation: snakeToCamel(updatedConversation) });
+//         if (senderType === 'agent') handleOfflineEmailNotification(db.pool, savedMessage).catch(err => console.error('[Offline Email] Failed:', err));
+//       } catch (error) { console.error('Failed to save agent message:', error); sendToConversation(conversationId, { type: 'message_failed', tempId }); }
+//     });
+//   } catch (error) { console.error('Send message error:', error); res.status(500).json({ error: error.message }); }
+// });
+
+
 app.post('/api/messages', authenticateToken, async (req, res) => {
   try {
-    const { conversationId, senderType, senderName, content, storeId, fileData } = req.body;
+    const { conversationId, senderType, senderName, content, storeId, fileData, clientMsgId } = req.body;
     if (!conversationId || !senderType) return res.status(400).json({ error: 'Missing required fields' });
     if (!content && !fileData) return res.status(400).json({ error: 'Message must have text or a file attachment' });
     const timestamp = new Date();
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    const tempMessage = { id: tempId, conversationId, storeId, senderType, senderName, content: content || '', fileData, createdAt: timestamp, pending: true };
+    // clientMsgId travels on every event for this message so the sender can reconcile
+    // its optimistic bubble across new_message → HTTP return → message_confirmed
+    // without guessing by id (which changes) or name/content (which can mismatch).
+    const tempMessage = { id: tempId, clientMsgId: clientMsgId || null, conversationId, storeId, senderType, senderName, content: content || '', fileData, createdAt: timestamp, pending: true };
     sendToConversation(conversationId, { type: 'new_message', message: snakeToCamel(tempMessage) });
     broadcastToAgents({ type: 'new_message', message: snakeToCamel(tempMessage), conversationId, storeId });
     res.json(snakeToCamel(tempMessage));
@@ -3761,14 +4028,16 @@ app.post('/api/messages', authenticateToken, async (req, res) => {
           sender_id: senderType === 'agent' ? req.user.id : null,
           content: content || '', file_data: fileData ? JSON.stringify(fileData) : null, sent_at: timestamp
         });
+        const confirmed = { ...snakeToCamel(savedMessage), clientMsgId: clientMsgId || null };
         const updatedConversation = await db.getConversation(conversationId);
-        sendToConversation(conversationId, { type: 'message_confirmed', tempId, message: snakeToCamel(savedMessage) });
-        broadcastToAgents({ type: 'message_confirmed', tempId, message: snakeToCamel(savedMessage), conversationId, storeId, conversation: snakeToCamel(updatedConversation) });
+        sendToConversation(conversationId, { type: 'message_confirmed', tempId, clientMsgId: clientMsgId || null, message: confirmed });
+        broadcastToAgents({ type: 'message_confirmed', tempId, clientMsgId: clientMsgId || null, message: confirmed, conversationId, storeId, conversation: snakeToCamel(updatedConversation) });
         if (senderType === 'agent') handleOfflineEmailNotification(db.pool, savedMessage).catch(err => console.error('[Offline Email] Failed:', err));
-      } catch (error) { console.error('Failed to save agent message:', error); sendToConversation(conversationId, { type: 'message_failed', tempId }); }
+      } catch (error) { console.error('Failed to save agent message:', error); sendToConversation(conversationId, { type: 'message_failed', tempId, clientMsgId: clientMsgId || null }); }
     });
   } catch (error) { console.error('Send message error:', error); res.status(500).json({ error: error.message }); }
 });
+
 
 app.post('/api/widget/messages', async (req, res) => {
   try {

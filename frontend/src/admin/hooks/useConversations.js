@@ -1,9 +1,12 @@
 
+
 // import { useState, useEffect, useCallback, useRef } from 'react';
 // import api from '../services/api';
-// import { useWebSocket } from './useWebSocket';
 
-// export function useConversations(employeeId) {
+// // NOTE: `ws` is now passed in from the single useWebSocket() owner (App).
+// // This hook no longer calls useWebSocket() itself, so there is exactly ONE
+// // socket connection in the tree — no more connect/disconnect stomping.
+// export function useConversations(employeeId, ws) {
 //   const [conversations, setConversations] = useState([]);
 //   const [loading, setLoading] = useState(true);
 //   const [error, setError] = useState(null);
@@ -15,7 +18,6 @@
 //   });
 
 //   const activeConversationIdRef = useRef(null);
-//   const ws = useWebSocket(employeeId);
 
 //   const loadConversations = useCallback(async (showLoading = true) => {
 //     try {
@@ -237,32 +239,43 @@
 // }
 
 
+
+
 import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../services/api';
 
 // NOTE: `ws` is now passed in from the single useWebSocket() owner (App).
 // This hook no longer calls useWebSocket() itself, so there is exactly ONE
 // socket connection in the tree — no more connect/disconnect stomping.
-export function useConversations(employeeId, ws) {
+export function useConversations(employeeId, ws, initialFilters = {}) {
   const [conversations, setConversations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [hasMore, setHasMore]         = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [filters, setFilters] = useState({
     status: 'open',
     storeId: '',
     priority: '',
     search: '',
+    storeGroup: '',
+    limit: 50,
+    ...initialFilters,
   });
 
   const activeConversationIdRef = useRef(null);
+  const offsetRef = useRef(0);   // rows loaded so far = offset for the next page
 
   const loadConversations = useCallback(async (showLoading = true) => {
     try {
       if (showLoading) setLoading(true);
       setError(null);
-      const data = await api.getConversations(filters);
+      const pageSize = filters.limit || 50;
+      const data = await api.getConversations({ ...filters, offset: 0 });
       console.log('📥 [useConversations] Loaded conversations:', data.length);
       setConversations(data);
+      offsetRef.current = data.length;
+      setHasMore(data.length >= pageSize);   // full page back → assume more exists
     } catch (err) {
       console.error('Failed to load conversations:', err);
       setError(err.message);
@@ -271,8 +284,40 @@ export function useConversations(employeeId, ws) {
     }
   }, [filters]);
 
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore) return;
+    try {
+      setLoadingMore(true);
+      setError(null);
+      const pageSize = filters.limit || 50;
+      const data = await api.getConversations({ ...filters, offset: offsetRef.current });
+      console.log('📥 [useConversations] Loaded more:', data.length, 'at offset', offsetRef.current);
+      setConversations(prev => {
+        const seen = new Set(prev.map(c => c.id));
+        const fresh = data.filter(c => !seen.has(c.id));   // drop dups from live-insert drift
+        return [...prev, ...fresh].sort((a, b) =>
+          new Date(b.lastMessageAt || b.updatedAt || 0) -
+          new Date(a.lastMessageAt || a.updatedAt || 0)
+        );
+      });
+      offsetRef.current += data.length;
+      setHasMore(data.length >= pageSize);
+    } catch (err) {
+      console.error('Failed to load more conversations:', err);
+      setError(err.message);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [filters, hasMore, loadingMore]);
+
   useEffect(() => {
     loadConversations(true);
+  }, [loadConversations]);
+
+    const refetchTimer = useRef(null);
+  const scheduleRefetch = useCallback(() => {
+    clearTimeout(refetchTimer.current);
+    refetchTimer.current = setTimeout(() => loadConversations(false), 1500);
   }, [loadConversations]);
 
   const updateConversationFromData = useCallback((conversationData) => {
@@ -326,11 +371,13 @@ export function useConversations(employeeId, ws) {
         );
       } else {
         console.log('🆕 [useConversations] New conversation detected, refreshing...');
-        loadConversations(false);
+        // loadConversations(false);
+        scheduleRefetch();  
         return prev;
       }
     });
-  }, [loadConversations]);
+  // }, [loadConversations]);
+    }, [scheduleRefetch]);  
 
   const addNewConversation = useCallback((conversationData) => {
     setConversations(prev => {
@@ -405,7 +452,9 @@ export function useConversations(employeeId, ws) {
       if (data.conversation) {
         addNewConversation(data.conversation);
       } else {
-        loadConversations(false);
+        // loadConversations(false);
+        scheduleRefetch(); 
+
       }
     });
 
@@ -414,6 +463,7 @@ export function useConversations(employeeId, ws) {
       unsubMessage();
       unsubRead();
       unsubNewConv();
+      clearTimeout(refetchTimer.current);
     };
   }, [ws, updateConversationFromData, updateConversationFromMessage, addNewConversation, loadConversations]);
 
@@ -456,6 +506,9 @@ export function useConversations(employeeId, ws) {
     conversations,
     loading,
     error,
+    hasMore,
+    loadingMore,
+    loadMore,
     filters,
     updateFilters,
     refresh,

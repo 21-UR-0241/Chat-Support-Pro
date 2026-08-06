@@ -2860,6 +2860,18 @@ function ArchiveModal({ conversation, storeName, onClose, onConfirm }) {
 }
 
 // ============ HELPERS ============
+
+const hexToRgba = (hex, alpha) => {
+  if (!hex || typeof hex !== 'string') return null;
+  const clean = hex.replace('#', '');
+  if (clean.length !== 6) return null;
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  if ([r, g, b].some(Number.isNaN)) return null;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
 const parseFileData = (raw) => {
   if (!raw) return null;
   if (typeof raw === 'object') return raw;
@@ -3008,6 +3020,7 @@ function ChatWindow({
   onMarkAsUnread,
   onArchive,
   onBlacklist,
+  groupColor = '#00a884', 
 }) {
   const [messages,          setMessages]          = useState([]);
   const [loading,           setLoading]           = useState(true);
@@ -3343,24 +3356,57 @@ function ChatWindow({
   };
 
   // ============ INCOMING MESSAGE / NOTIFICATIONS ============
-  const handleIncomingMessage = (message, currentConv, currentEmployeeName) => {
+  // const handleIncomingMessage = (message, currentConv, currentEmployeeName) => {
+  //   const msgId  = message.id;
+  //   const convId = message.conversationId || message.conversation_id;
+  //   if (!convId || String(convId) !== String(currentConv?.id)) return;
+  //   if (msgId && displayedMessageIds.current.has(String(msgId))) return;
+  //   // Skip our own agent echo (we already render it optimistically on send)
+  //   if (message.senderType === 'agent' && currentEmployeeName && message.senderName === currentEmployeeName) {
+  //     if (msgId) displayedMessageIds.current.add(String(msgId));
+  //     return;
+  //   }
+  //   if (msgId) displayedMessageIds.current.add(String(msgId));
+  //   const normalized = normalizeMessage(message);
+  //   setMessages(prev => {
+  //     if (prev.some(m => String(m.id) === String(msgId))) return prev;
+  //     return [...prev, { ...normalized, sending: false, _optimistic: false }];
+  //   });
+  //   if (message.senderType === 'customer') showNotification(message);
+  // };
+
+const handleIncomingMessage = (message, currentConv) => {
     const msgId  = message.id;
     const convId = message.conversationId || message.conversation_id;
     if (!convId || String(convId) !== String(currentConv?.id)) return;
     if (msgId && displayedMessageIds.current.has(String(msgId))) return;
-    // Skip our own agent echo (we already render it optimistically on send)
-    if (message.senderType === 'agent' && currentEmployeeName && message.senderName === currentEmployeeName) {
-      if (msgId) displayedMessageIds.current.add(String(msgId));
-      return;
-    }
-    if (msgId) displayedMessageIds.current.add(String(msgId));
+
+    const cmid = message.clientMsgId || message.client_msg_id || null;
     const normalized = normalizeMessage(message);
+
     setMessages(prev => {
-      if (prev.some(m => String(m.id) === String(msgId))) return prev;
+      if (msgId && prev.some(m => String(m.id) === String(msgId))) return prev;
+
+      // Echo of a message WE sent → reconcile by clientMsgId (stable both sides).
+      if (cmid) {
+        const idx = prev.findIndex(m => m.clientMsgId === cmid);
+        if (idx !== -1) {
+          if (msgId) displayedMessageIds.current.add(String(msgId));
+          const next = [...prev];
+          next[idx] = { ...normalized, sending: false, _optimistic: false,
+            fileData: normalized.fileData || next[idx].fileData,
+            fileUrl:  normalized.fileUrl  || next[idx].fileUrl };
+          return next;
+        }
+      }
+
+      if (msgId) displayedMessageIds.current.add(String(msgId));
       return [...prev, { ...normalized, sending: false, _optimistic: false }];
     });
+
     if (message.senderType === 'customer') showNotification(message);
   };
+
 
   // CHANGED: inbound sound is owned by useConversations (one place). Here we only
   // raise a desktop notification, and only when the agent isn't actively looking
@@ -3436,15 +3482,40 @@ function ChatWindow({
       if (data.message) handleIncomingMessage(data.message, conversationRef.current, employeeNameRef.current);
     });
 
+    // const offConfirmed = ws.on('message_confirmed', (data) => {
+    //   if (!data.tempId || !data.message) return;
+    //   const confirmedMsg = normalizeMessage(data.message);
+    //   setMessages(prev => prev.map(msg =>
+    //     String(msg.id) === String(data.tempId)
+    //       ? { ...confirmedMsg, fileData: confirmedMsg.fileData || msg.fileData, fileUrl: confirmedMsg.fileUrl || msg.fileUrl, sending: false, _optimistic: false }
+    //       : msg
+    //   ));
+    //   if (data.message.id) displayedMessageIds.current.add(String(data.message.id));
+    // });
+
     const offConfirmed = ws.on('message_confirmed', (data) => {
-      if (!data.tempId || !data.message) return;
+      if (!data.message) return;
       const confirmedMsg = normalizeMessage(data.message);
-      setMessages(prev => prev.map(msg =>
-        String(msg.id) === String(data.tempId)
-          ? { ...confirmedMsg, fileData: confirmedMsg.fileData || msg.fileData, fileUrl: confirmedMsg.fileUrl || msg.fileUrl, sending: false, _optimistic: false }
-          : msg
-      ));
+      const cmid = data.clientMsgId || data.message.clientMsgId || null;
       if (data.message.id) displayedMessageIds.current.add(String(data.message.id));
+      setMessages(prev => {
+        if (prev.some(m => String(m.id) === String(data.message.id))) {
+          // real row already present → drop any leftover temp/optimistic twin
+          return prev.filter(m =>
+            !((cmid && m.clientMsgId === cmid) || String(m.id) === String(data.tempId)) ||
+            String(m.id) === String(data.message.id)
+          );
+        }
+        let done = false;
+        const next = prev.map(m => {
+          if (!done && ((cmid && m.clientMsgId === cmid) || String(m.id) === String(data.tempId))) {
+            done = true;
+            return { ...confirmedMsg, fileData: confirmedMsg.fileData || m.fileData, fileUrl: confirmedMsg.fileUrl || m.fileUrl, sending: false, _optimistic: false };
+          }
+          return m;
+        });
+        return done ? next : [...next, confirmedMsg];
+      });
     });
 
     const offFailed = ws.on('message_failed', (data) => {
@@ -3586,6 +3657,8 @@ function ChatWindow({
   const scrollToBottom = () => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); };
 
   // ============ SEND ============
+
+  // ============ SEND ============
   const handleSend = async (e) => {
     if (e) { e.preventDefault(); e.stopPropagation(); }
     const text       = getMessageContent();
@@ -3609,8 +3682,10 @@ function ChatWindow({
       setShowEmojiPicker(false);
       onTyping && onTyping(false);
 
+      const clientMsgId = `c-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       const optimisticMessage = {
         id:             `temp-${Date.now()}`,
+        clientMsgId,                          // stable cross-event key
         conversationId: conversation.id,
         senderType:     'agent',
         senderName:     employeeName || 'Agent',
@@ -3624,18 +3699,26 @@ function ChatWindow({
       setMessages(prev => [...prev, optimisticMessage]);
       clearAllNotifications(conversation.id);
 
-      const sentMessage = await onSendMessage(conversation, text, fileData);
+      const sentMessage = await onSendMessage(conversation, text, fileData, clientMsgId);
       if (sentMessage.id) displayedMessageIds.current.add(String(sentMessage.id));
       const normalizedSent = normalizeMessage(sentMessage);
       const mergedMessage  = {
         ...normalizedSent,
+        clientMsgId,
         fileUrl:  normalizedSent.fileUrl  || fileUrl,
         fileData: normalizedSent.fileData || fileData,
         sending:  false,
       };
-      setMessages(prev => prev.map(msg =>
-        msg._optimistic && msg.id === optimisticMessage.id ? mergedMessage : msg
-      ));
+      setMessages(prev => {
+        // Reconcile by clientMsgId — identical on the optimistic bubble AND every
+        // server event for this message. If the echo already swapped it in, drop
+        // our optimistic twin; otherwise upgrade it in place.
+        const already = prev.some(m => m.clientMsgId === clientMsgId && !m._optimistic);
+        if (already) return prev.filter(m => !(m._optimistic && m.clientMsgId === clientMsgId));
+        return prev.map(m =>
+          (m._optimistic && m.clientMsgId === clientMsgId) ? mergedMessage : m
+        );
+      });
     } catch (error) {
       console.error('❌ Failed to send message:', error);
       setMessages(prev => prev.filter(msg => !msg._optimistic));
@@ -3645,6 +3728,8 @@ function ChatWindow({
       setSending(false);
     }
   };
+
+
 
   const handleDeleteClick    = () => setShowDeleteModal(true);
   const handleCancelDelete   = () => setShowDeleteModal(false);
@@ -3708,6 +3793,9 @@ function ChatWindow({
   const storeName   = storeDetails?.brandName || conversation.storeName || conversation.storeIdentifier;
   const storeDomain = storeDetails?.domain || storeDetails?.url || storeDetails?.storeDomain || storeDetails?.shopDomain || storeDetails?.myshopify_domain || conversation.domain || conversation.storeDomain || null;
 
+  const accent       = groupColor || '#00a884';
+  const accentSoft   = hexToRgba(accent, 0.4) || 'rgba(0,168,132,0.4)';
+  const accentShadow = hexToRgba(accent, 0.3) || 'rgba(0,168,132,0.3)';
   const legalBannerBg    = legalAlert?.severity === 'critical' ? '#dc2626' : legalAlert?.severity === 'high' ? '#d97706' : '#2563eb';
   const legalBannerEmoji = legalAlert?.severity === 'critical' ? '🚨'      : legalAlert?.severity === 'high' ? '⚠️'      : '🔔';
 
@@ -3921,6 +4009,7 @@ function ChatWindow({
                         isFirstInGroup={message.isFirstInGroup}
                         isLastInGroup={message.isLastInGroup}
                         sending={message.sending || message._optimistic}
+                        groupColor={accent}  
                         actionButton={
                           isAdmin && !message._optimistic && message.senderType === 'agent' ? (
                             <button
@@ -3994,13 +4083,13 @@ function ChatWindow({
           {filePreview.type === 'image' ? (
             <img src={filePreview.url} alt="Preview" style={{ width: '60px', height: '60px', objectFit: 'cover', borderRadius: '8px' }} />
           ) : (
-            <div style={{ width: '60px', height: '60px', backgroundColor: '#00a884', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px' }}>📎</div>
+            <div style={{ width: '60px', height: '60px', backgroundColor: accent, borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px' }}>📎</div>
           )}
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: '14px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{filePreview.name}</div>
             {filePreview.size && <div style={{ fontSize: '12px', color: '#667781' }}>{filePreview.size}</div>}
           </div>
-          {uploading && <div style={{ fontSize: '12px', color: '#00a884' }}>{uploadProgress}%</div>}
+          {uploading && <div style={{ fontSize: '12px', color: accent }}>{uploadProgress}%</div>}
           <button
             onClick={handleRemoveFile} disabled={uploading} type="button"
             style={{ background: 'none', border: 'none', fontSize: '20px', cursor: uploading ? 'not-allowed' : 'pointer', color: '#667781', padding: '4px 8px' }}
@@ -4033,7 +4122,7 @@ function ChatWindow({
             border: 'none', borderRadius: '50%', background: 'transparent',
             cursor: 'pointer', display: 'flex', alignItems: 'center',
             justifyContent: 'center', fontSize: '20px', padding: 0,
-            color: showQuickReplies ? '#00a884' : '#54656f',
+            color: showQuickReplies ? accent : '#54656f',
           }}
         >⚡</button>
 
@@ -4113,7 +4202,7 @@ function ChatWindow({
             border: 'none', borderRadius: '50%', background: 'transparent',
             cursor: 'pointer', display: 'flex', alignItems: 'center',
             justifyContent: 'center', fontSize: '20px', padding: 0,
-            color: showEmojiPicker ? '#00a884' : '#54656f',
+            color: showEmojiPicker ? accent : '#54656f',
           }}
         >😊</button>
 
@@ -4138,12 +4227,12 @@ function ChatWindow({
             width: '44px', height: '44px', minWidth: '44px', flexShrink: 0,
             border: 'none', borderRadius: '50%',
             background: (!hasText && !selectedFile) || sending || uploading
-              ? 'rgba(0,168,132,0.4)' : '#00a884',
+              ? accentSoft : accent,
             cursor: (!hasText && !selectedFile) || sending || uploading
               ? 'not-allowed' : 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontSize: '20px', padding: 0, color: 'white',
-            boxShadow: '0 2px 6px rgba(0,168,132,0.3)',
+            boxShadow: '0 2px 6px ' + accentShadow,
           }}
         >{sending ? '⏳' : '➤'}</button>
       </div>

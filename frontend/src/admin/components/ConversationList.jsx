@@ -1,4 +1,7 @@
 
+
+
+
 // import React, { useMemo, useEffect, useRef, useState, useCallback } from 'react';
 // import '../styles/ConversationList.css';
 
@@ -33,6 +36,26 @@
 //   const [dismissTick, setDismissTick] = useState(0);
 
 //   const acknowledgedGroupsRef = useRef(new Set());
+
+//   // ── Store index: build O(1) lookups ONCE per `stores` change ───────────────
+//   // Replaces the per-conversation stores.find() calls that were O(n × m) and
+//   // ran on every WebSocket update (the main source of list-render lag).
+//   const storeIndex = useMemo(() => {
+//     const byIdentifier = new Map();
+//     const byId = new Map();
+//     (stores || []).forEach((s) => {
+//       if (s.storeIdentifier) byIdentifier.set(s.storeIdentifier, s);
+//       if (s.id != null)      byId.set(String(s.id), s);
+//       if (s.shop_id != null) byId.set(String(s.shop_id), s);
+//     });
+//     return { byIdentifier, byId };
+//   }, [stores]);
+
+//   const findStore = useCallback((conv) => {
+//     return (conv.storeIdentifier && storeIndex.byIdentifier.get(conv.storeIdentifier))
+//         || (conv.shopId != null   && storeIndex.byId.get(String(conv.shopId)))
+//         || null;
+//   }, [storeIndex]);
 
 //   useEffect(() => {
 //     if ('Notification' in window) {
@@ -126,8 +149,11 @@
 //     const previousConversations = previousConversationsRef.current;
 
 //     if (previousConversations) {
+//       // Index previous by id once — was previousConversations.find() inside the
+//       // loop (O(n²)). Now O(n).
+//       const prevById = new Map(previousConversations.map(c => [c.id, c]));
 //       conversations.forEach((currentConv) => {
-//         const previousConv = previousConversations.find(c => c.id === currentConv.id);
+//         const previousConv = prevById.get(currentConv.id);
 //         if (previousConv) {
 //           const hasNewMessage =
 //             (currentConv.unreadCount > previousConv.unreadCount) ||
@@ -157,16 +183,10 @@
 
 //   // ── FIX 1: Resolve canonical store ID to prevent same store appearing twice ──
 //   const resolveStoreId = useCallback((conv) => {
-//     if (stores?.length) {
-//       const match = stores.find(s =>
-//         s.storeIdentifier === conv.storeIdentifier ||
-//         s.id === conv.shopId ||
-//         String(s.id) === String(conv.shopId)
-//       );
-//       if (match) return match.storeIdentifier || String(match.id);
-//     }
+//     const match = findStore(conv);
+//     if (match) return match.storeIdentifier || String(match.id);
 //     return conv.storeIdentifier || String(conv.shopId || '') || '';
-//   }, [stores]);
+//   }, [findStore]);
 
 //   const groupedConversations = useMemo(() => {
 //     if (!conversations) return [];
@@ -202,7 +222,7 @@
 //       const timeB = new Date(b.mostRecent.lastMessageAt || 0);
 //       return timeB - timeA;
 //     });
-//   }, [conversations, stores, resolveStoreId]); // ← added stores
+//   }, [conversations, resolveStoreId]);
 
 //   const adminHasReplied = useCallback((group) => {
 //     if (acknowledgedGroupsRef.current.has(group.groupKey)) return true;
@@ -261,9 +281,7 @@
 //       const conv = group.mostRecent;
 //       const search = filters.search?.toLowerCase();
 //       if (search) {
-//         const storeName = stores?.find(s =>
-//           s.storeIdentifier === conv.storeIdentifier || s.id === conv.shopId
-//         )?.name || conv.storeName || '';
+//         const storeName = findStore(conv)?.name || conv.storeName || '';
 //         const matchesSearch =
 //           group.conversations.some(c => c.customerName?.toLowerCase().includes(search)) ||
 //           conv.customerEmail?.toLowerCase().includes(search) ||
@@ -278,11 +296,8 @@
 //         if (!group.conversations.some(c => c.status === filters.status)) return false;
 //       }
 //       if (filters.storeId) {
-//         const matchesStore = stores?.find(s =>
-//           (s.storeIdentifier === filters.storeId) &&
-//           (s.storeIdentifier === conv.storeIdentifier || s.id === conv.shopId)
-//         );
-//         if (!matchesStore) return false;
+//         const match = findStore(conv);
+//         if (!match || match.storeIdentifier !== filters.storeId) return false;
 //       }
 //       if (filters.priority) {
 //         if (!group.conversations.some(c => c.priority === filters.priority)) return false;
@@ -295,7 +310,7 @@
 //       }
 //       return true;
 //     });
-//   }, [groupedConversations, filters, stores, getGroupUnread]);
+//   }, [groupedConversations, filters, findStore, getGroupUnread]);
 
 //   const totalUnread = useMemo(() => {
 //     if (!conversations) return 0;
@@ -392,13 +407,7 @@
 //   };
 
 //   const resolveStoreName = (conv) => {
-//     if (!stores || !stores.length) return conv.storeName || '';
-//     const match = stores.find(s =>
-//       s.storeIdentifier === conv.storeIdentifier ||
-//       s.id === conv.shopId ||
-//       s.shop_id === conv.shopId ||
-//       String(s.id) === String(conv.shopId)
-//     );
+//     const match = findStore(conv);
 //     return (
 //       match?.name ||
 //       match?.storeName ||
@@ -838,13 +847,57 @@
 //   );
 // }
 
-// export default ConversationList;
+// export default React.memo(ConversationList);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
 
 import React, { useMemo, useEffect, useRef, useState, useCallback } from 'react';
 import '../styles/ConversationList.css';
+
+// "#rrggbb" → "r, g, b" (or null for non-6-digit-hex / named colors, so callers
+// can fall back cleanly — pass full hex from the store_group table).
+function hexToTriple(hex) {
+  if (!hex || typeof hex !== 'string') return null;
+  const clean = hex.replace('#', '');
+  if (clean.length !== 6) return null;
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  if ([r, g, b].some(Number.isNaN)) return null;
+  return `${r}, ${g}, ${b}`;
+}
+
+// "#rrggbb" + alpha → "rgba(r, g, b, a)" (or null when the hex can't be parsed).
+function hexToRgba(hex, alpha) {
+  const triple = hexToTriple(hex);
+  return triple ? `rgba(${triple}, ${alpha})` : null;
+}
 
 function ConversationList({
   conversations,
@@ -858,6 +911,11 @@ function ConversationList({
   onFilterChange,
   stores,
   loading,
+  groupColor,            // ← store group's color, passed down from App
+  storeGroups,           // ← list of { storeGroup, storeGroupName, color } from App
+  loadMore,              // ← fetch the next page of older conversations
+  hasMore = false,       // ← server has more beyond what's loaded
+  loadingMore = false,   // ← a page fetch is in flight
 }) {
   const [notificationPermission, setNotificationPermission] = useState('default');
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
@@ -897,6 +955,40 @@ function ConversationList({
         || (conv.shopId != null   && storeIndex.byId.get(String(conv.shopId)))
         || null;
   }, [storeIndex]);
+
+  // ── Store group join ───────────────────────────────────────────────────────
+  // Map of store-group slug → { name, color }, built from the groups list passed
+  // down from App (same source as the group picker). Lets each conversation
+  // resolve *its own* group — color + label — even in the "All Stores" view where
+  // rows can belong to different groups.
+  const storeGroupMap = useMemo(() => {
+    const m = new Map();
+    (storeGroups || []).forEach((g) => {
+      const slug = g.storeGroup || g.store_group || g.slug;
+      if (!slug) return;
+      m.set(slug, {
+        name: g.storeGroupName || g.store_group_name || g.name || slug,
+        color: g.color || null,
+      });
+    });
+    return m;
+  }, [storeGroups]);
+
+  // Resolve a conversation's store group by joining through its store record
+  // (store → storeGroup slug → group). Falls back to a group slug carried
+  // directly on the conversation, if the API puts one there.
+  const resolveStoreGroup = useCallback((conv) => {
+    const store = findStore(conv);
+    const slug =
+      store?.storeGroup ||
+      store?.store_group ||
+      store?.groupSlug ||
+      store?.group ||
+      conv.storeGroup ||
+      conv.store_group ||
+      null;
+    return (slug && storeGroupMap.get(slug)) || null;
+  }, [findStore, storeGroupMap]);
 
   useEffect(() => {
     if ('Notification' in window) {
@@ -1028,6 +1120,27 @@ function ConversationList({
     if (match) return match.storeIdentifier || String(match.id);
     return conv.storeIdentifier || String(conv.shopId || '') || '';
   }, [findStore]);
+
+  // ── Store color: prefer a color carried on the store record (e.g. inherited
+  // from its store group), else fall back to the active group's color passed
+  // down from App. Lets the "All Stores" view show per-group tints when the
+  // store API returns colors; otherwise every badge uses the current group color.
+  // Color for a conversation's store badge: the joined store-group color wins (so
+  // every row matches its group), then any color carried on the store record,
+  // then the active group color passed from App.
+  const resolveStoreColor = useCallback((conv) => {
+    const grp = resolveStoreGroup(conv);
+    if (grp?.color) return grp.color;
+    const match = findStore(conv);
+    return (
+      match?.color ||
+      match?.groupColor ||
+      match?.storeGroupColor ||
+      match?.store_group_color ||
+      groupColor ||
+      null
+    );
+  }, [resolveStoreGroup, findStore, groupColor]);
 
   const groupedConversations = useMemo(() => {
     if (!conversations) return [];
@@ -1167,6 +1280,42 @@ function ConversationList({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupedConversations, adminHasReplied, dismissTick]);
 
+  // ── Windowing ───────────────────────────────────────────────────────────────
+  // Rendering a DOM node per conversation is the main list-side cost on big
+  // groups. Urgent items always render (there are few); the "normal" bulk is
+  // capped and grows as the user scrolls near the bottom. Partition once here so
+  // the scroll handler can see the full normal length.
+  const { urgentGroups, normalGroups } = useMemo(() => {
+    const u = [], n = [];
+    (filteredGroupedConversations || []).forEach((g) => {
+      const isUrgent = !adminHasReplied(g) && g.conversations.some(c => c.legalFlag || c.priority === 'urgent');
+      (isUrgent ? u : n).push(g);
+    });
+    return { urgentGroups: u, normalGroups: n };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredGroupedConversations, adminHasReplied, dismissTick]);
+
+  const NORMAL_CHUNK = 60;
+  const itemsScrollRef = useRef(null);
+  const [visibleNormal, setVisibleNormal] = useState(NORMAL_CHUNK);
+
+  // Reset the window whenever the filtered set is re-scoped (search/filter/tab).
+  useEffect(() => {
+    setVisibleNormal(NORMAL_CHUNK);
+    if (itemsScrollRef.current) itemsScrollRef.current.scrollTop = 0;
+  }, [filters.search, filters.status, filters.priority, filters.storeId, filters.readStatus]);
+
+  const handleItemsScroll = (e) => {
+    const el = e.currentTarget;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 500) {
+      if (visibleNormal < normalGroups.length) {
+        setVisibleNormal((v) => v + NORMAL_CHUNK);          // reveal already-fetched rows first
+      } else if (hasMore && !loadingMore && typeof loadMore === 'function') {
+        loadMore();                                          // then pull the next page from the server
+      }
+    }
+  };
+
   const formatTime = (date) => {
     if (!date) return '';
     try {
@@ -1276,8 +1425,100 @@ function ConversationList({
     return { text: group.mostRecent.lastMessage || '', conv: group.mostRecent };
   }, []);
 
+  // Expose the group color (and its rgb triple, for translucent tints) as CSS
+  // vars on the list root so the styles below — and any child CSS — can key off it.
+  const accentTriple = hexToTriple(groupColor);
+  const listStyle = groupColor
+    ? (accentTriple
+        ? { '--group-accent': groupColor, '--group-accent-rgb': accentTriple }
+        : { '--group-accent': groupColor })
+    : undefined;
+
   return (
-    <div className="conversation-list">
+    <div className="conversation-list" style={listStyle}>
+      {/* Group-color theming for the list. Parent-class prefixes out-specify the
+          base stylesheet (no !important needed); solids use var(--group-accent),
+          translucent washes use var(--group-accent-rgb). Everything falls back to
+          the original teal when no group color is set. Legal/urgent rows set their
+          border + background with !important in the base sheet, so they keep their
+          red/amber regardless. */}
+      <style>{`
+        .conversation-list .conversation-item.active {
+          border-left-color: var(--group-accent, #00a884);
+          background: rgba(var(--group-accent-rgb, 0, 168, 132), 0.12);
+        }
+        .conversation-list .conversation-item.unread {
+          border-left-color: var(--group-accent, #00a884);
+          background: rgba(var(--group-accent-rgb, 0, 168, 132), 0.07);
+        }
+        .conversation-list .conversation-item.unread:hover {
+          background: rgba(var(--group-accent-rgb, 0, 168, 132), 0.12);
+        }
+        .conversation-list .conversation-item.unread .conversation-time,
+        .conversation-list .conversation-item.unread .you-label {
+          color: var(--group-accent, #00a884);
+        }
+        .conversation-list .conversation-item.unread .conversation-avatar::after {
+          border-color: rgba(var(--group-accent-rgb, 0, 168, 132), 0.5);
+        }
+
+        /* Read-status tabs (All / Unread / Read) */
+        .conversation-list .read-status-tabs .read-status-tab:hover {
+          color: var(--group-accent, #00a884);
+        }
+        .conversation-list .read-status-tabs .read-status-tab.active {
+          color: var(--group-accent, #00a884);
+          border-bottom-color: var(--group-accent, #00a884);
+          background: rgba(var(--group-accent-rgb, 0, 168, 132), 0.08);
+        }
+        .conversation-list .read-status-tabs .read-status-tab .tab-badge {
+          background: var(--group-accent, #00a884);
+          color: #fff;
+        }
+        .conversation-list .read-status-tabs .read-status-tab.active .tab-badge {
+          background: #fff;
+          color: var(--group-accent, #00a884);
+        }
+
+        /* Store filter dropdown */
+        .conversation-list .conversation-filters .filter-select:hover,
+        .conversation-list .conversation-filters .filter-select:focus {
+          border-color: var(--group-accent, #00a884);
+        }
+        .conversation-list .conversation-filters .filter-select:focus {
+          box-shadow: 0 0 0 3px rgba(var(--group-accent-rgb, 0, 168, 132), 0.1);
+        }
+
+        /* Clear button — colored text at rest, filled on hover */
+        .conversation-list .conversation-filters .filter-clear {
+          color: var(--group-accent, #00a884);
+        }
+        .conversation-list .conversation-filters .filter-clear:hover {
+          background: var(--group-accent, #00a884);
+          border-color: var(--group-accent, #00a884);
+          color: #fff;
+        }
+
+        /* Search field focus */
+        .conversation-list .conversation-search .search-input:focus {
+          border-color: var(--group-accent, #00a884);
+          box-shadow: 0 0 0 3px rgba(var(--group-accent-rgb, 0, 168, 132), 0.1);
+        }
+
+        /* Unread count badges (header total + per-row) */
+        .conversation-list .total-unread-badge,
+        .conversation-list .unread-badge {
+          background: var(--group-accent, #00a884);
+        }
+
+        /* Keyboard focus rings in this cluster */
+        .conversation-list .read-status-tab:focus-visible,
+        .conversation-list .filter-clear:focus-visible,
+        .conversation-list .search-clear:focus-visible {
+          outline-color: var(--group-accent, #00a884);
+        }
+      `}</style>
+
       <div className="conversation-list-header">
         <h2>
           Chats
@@ -1379,7 +1620,7 @@ function ConversationList({
         {hasActiveFilters && <button className="filter-clear" onClick={clearFilters}>Clear</button>}
       </div>
 
-      <div className="conversation-items">
+      <div className="conversation-items" ref={itemsScrollRef} onScroll={handleItemsScroll}>
         {loading ? (
           <div className="loading-state">
             <div className="spinner"></div>
@@ -1393,15 +1634,6 @@ function ConversationList({
           </div>
         ) : (
           (() => {
-            const urgentGroups = filteredGroupedConversations.filter(g =>
-              !adminHasReplied(g) &&
-              g.conversations.some(c => c.legalFlag || c.priority === 'urgent')
-            );
-            const normalGroups = filteredGroupedConversations.filter(g =>
-              adminHasReplied(g) ||
-              !g.conversations.some(c => c.legalFlag || c.priority === 'urgent')
-            );
-
             const renderGroup = (group) => {
               const conversation = group.mostRecent;
               const isActive = group.conversations.some(c => c.id === activeConversation?.id);
@@ -1415,6 +1647,18 @@ function ConversationList({
               const isUrgentItem = isLegal || isUrgent;
 
               const storeName = resolveStoreName(conversation);
+              const storeGroupInfo = resolveStoreGroup(conversation); // { name, color } | null
+
+              // ── Store/group color applied to the badges ──
+              const storeColor = resolveStoreColor(conversation);
+              const storeBadgeStyle = storeColor
+                ? {
+                    background: hexToRgba(storeColor, 0.12) || undefined,
+                    color: storeColor,
+                    border: `1px solid ${hexToRgba(storeColor, 0.35) || 'transparent'}`,
+                  }
+                : undefined;
+
               const displayName = group.conversations
                 .map(c => (c.customerName || '').trim())
                 .filter(Boolean)
@@ -1502,10 +1746,36 @@ function ConversationList({
                     )}
 
                     <div className="conversation-meta">
-                      {storeName && <span className="store-badge">🏪 {storeName}</span>}
+                      {storeName && <span className="store-badge" style={storeBadgeStyle}>🏪 {storeName}</span>}
+                      {storeGroupInfo?.name && (
+                        <span
+                          className="conv-group-pill"
+                          title={`Group: ${storeGroupInfo.name}`}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: '2px 7px',
+                            borderRadius: '8px',
+                            fontSize: '10px',
+                            fontWeight: 600,
+                            flexShrink: 0,
+                            maxWidth: '110px',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            color: storeColor || '#475569',
+                            background: hexToRgba(storeColor, 0.10) || '#f1f5f9',
+                            border: `1px solid ${hexToRgba(storeColor, 0.30) || '#e2e8f0'}`,
+                          }}
+                        >
+                          <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: storeColor || '#94a3b8', flexShrink: 0 }} />
+                          {storeGroupInfo.name}
+                        </span>
+                      )}
                       {conversation.customerEmail && (
                         <>
-                          {storeName && <span className="meta-separator">•</span>}
+                          {(storeName || storeGroupInfo?.name) && <span className="meta-separator">•</span>}
                           <span className="customer-email">{conversation.customerEmail}</span>
                         </>
                       )}
@@ -1537,7 +1807,7 @@ function ConversationList({
               );
             };
 
-            return (
+return (
               <>
                 {urgentGroups.length > 0 && (
                   <>
@@ -1551,7 +1821,38 @@ function ConversationList({
                     )}
                   </>
                 )}
-                {normalGroups.map(renderGroup)}
+                {normalGroups.slice(0, visibleNormal).map(renderGroup)}
+                {(() => {
+                  const moreWindowed = normalGroups.length > visibleNormal;       // fetched, not yet shown
+                  const canFetch     = hasMore && typeof loadMore === 'function';  // server has older pages
+                  if (!moreWindowed && !canFetch && !loadingMore) return null;
+
+                  const onLoadMore = () => {
+                    if (loadingMore) return;
+                    if (moreWindowed) setVisibleNormal((v) => v + NORMAL_CHUNK);
+                    else if (canFetch) loadMore();
+                  };
+
+                  const label = loadingMore
+                    ? 'Loading older chats…'
+                    : moreWindowed
+                      ? `Load more (${visibleNormal} of ${normalGroups.length})`
+                      : 'Load older chats';
+
+                  return (
+                    <div className="conv-load-more-wrap">
+                      <button
+                        type="button"
+                        className="conv-load-more-btn"
+                        onClick={onLoadMore}
+                        disabled={loadingMore}
+                      >
+                        {loadingMore && <span className="conv-load-more-spinner" />}
+                        {label}
+                      </button>
+                    </div>
+                  );
+                })()}
               </>
             );
           })()

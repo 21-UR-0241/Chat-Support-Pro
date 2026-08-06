@@ -130,10 +130,15 @@ class ApiService {
 
   // ============ Conversations ============
 
+  // async getConversations(filters = {}) {
+  //   const params = new URLSearchParams(filters).toString();
+  //   return this.fetch(`/api/conversations${params ? '?' + params : ''}`);
+  // }
+
   async getConversations(filters = {}) {
-    const params = new URLSearchParams(filters).toString();
-    return this.fetch(`/api/conversations${params ? '?' + params : ''}`);
-  }
+  const params = new URLSearchParams(filters).toString();
+  return this.fetch(`/api/conversations${params ? '?' + params : ''}`);
+}
 
   async getConversation(id) {
     return this.fetch(`/api/conversations/${id}`);
@@ -241,14 +246,43 @@ class ApiService {
 
   // ============ Stores ============
 
-  async getStores() {
-    return this.fetch('/api/stores');
+  // async getStores() {
+  //   return this.fetch('/api/stores');
+  // }
+
+  // async getStore(id) {
+  //   return this.fetch(`/api/stores/${id}`);
+  // }
+  async getStores(filters = {}) {
+    const params = new URLSearchParams(filters).toString();
+    return this.fetch(`/api/stores${params ? '?' + params : ''}`);
   }
 
   async getStore(id) {
     return this.fetch(`/api/stores/${id}`);
   }
 
+  async getStoreGroups() {
+    return this.fetch('/api/stores/groups');
+  }
+
+  async createStoreGroup({ groupKey, groupName, color }) {
+    return this.fetch('/api/stores/groups', {
+      method: 'POST',
+      body: JSON.stringify({ groupKey, groupName, color }),
+    });
+  }
+
+  async updateStoreGroup(id, { groupKey, groupName, color }) {
+    return this.fetch(`/api/stores/groups/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ groupKey, groupName, color }),
+    });
+  }
+
+  async deleteStoreGroup(id, { force = false } = {}) {
+    return this.fetch(`/api/stores/groups/${id}${force ? '?force=true' : ''}`, { method: 'DELETE' });
+  }
   // ============ Customer Context ============
 
   async getCustomerContext(storeId, email) {
