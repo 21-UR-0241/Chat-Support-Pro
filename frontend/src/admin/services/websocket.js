@@ -305,6 +305,7 @@ const HEARTBEAT_INTERVAL = 25000; // < Render's ~60s idle timeout
 const MAX_RECONNECT_DELAY = 30000; // backoff caps here, but never gives up
 const HANDSHAKE_TIMEOUT   = 10000; // must reach OPEN within this or we retry
 const PONG_TIMEOUT        = 10000; // must see a pong within this of a ping
+const STALE_AFTER         = 30000; // OPEN-but-silent longer than this ⇒ treat as dead
 
 class WebSocketService {
   constructor() {
@@ -316,11 +317,17 @@ class WebSocketService {
     this.queue = [];
     this.isConnecting = false;
     this.intentionalClose = false;
+    this.authenticated = false;
+    this.connectionId = null;
 
     this.heartbeatTimer  = null;
     this.reconnectTimer  = null;
     this.connectTimeout  = null;  // handshake watchdog
     this.pongTimer       = null;  // liveness watchdog
+
+    // Timestamp of the last inbound frame of ANY kind. Proof of life that
+    // doesn't depend on readyState (which lies for half-open sockets).
+    this.lastInboundAt = 0;
 
     // Only enforce pong-liveness once we've actually seen the server reply to a
     // ping. If the server never speaks 'pong', we never arm the death timer, so
@@ -375,6 +382,7 @@ class WebSocketService {
         if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
         this.reconnectAttempts = 0;
         this.isConnecting = false;
+        this.lastInboundAt = Date.now(); // opening counts as proof of life
 
         // Authenticate as agent using JWT
         const token = localStorage.getItem('token');
@@ -388,6 +396,9 @@ class WebSocketService {
       };
 
       this.ws.onmessage = (event) => {
+        // ANY inbound frame is proof the connection is alive. Record it first,
+        // before parsing, so even malformed frames refresh liveness.
+        this.lastInboundAt = Date.now();
         try {
           const data = JSON.parse(event.data);
           if (data.type === 'pong') {
@@ -433,8 +444,6 @@ class WebSocketService {
         this.clearConnectTimeout();
         this.isConnecting = false;
         this.authenticated = false;
-        this.stopHeartbeat();
-        
         this.stopHeartbeat();
 
         // Intentional close (logout/unmount): do NOT reconnect.
@@ -485,6 +494,30 @@ class WebSocketService {
   }
 
   /**
+   * Tear down the current socket and immediately rebuild it. Used when the
+   * socket reports OPEN but is provably dead (half-open) — readyState won't
+   * fire onclose for us, so we drive the rebuild ourselves. Detaches the old
+   * handlers first so a late onclose from the zombie can't double-fire into
+   * the reconnect path.
+   */
+  forceReconnect(reason) {
+    console.warn('Forcing reconnect:', reason);
+    const old = this.ws;
+    if (old) {
+      old.onopen = old.onmessage = old.onerror = old.onclose = null;
+      try { old.close(); } catch { /* ignore */ }
+    }
+    this.ws = null;
+    this.isConnecting = false;
+    this.authenticated = false;
+    this.stopHeartbeat();
+    this.clearConnectTimeout();
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+    this.reconnectAttempts = 0;
+    this.connect(this.employeeId);
+  }
+
+  /**
    * Disconnect WebSocket (intentional — will not auto-reconnect).
    */
   disconnect() {
@@ -516,8 +549,6 @@ class WebSocketService {
           this.pongTimer = setTimeout(() => {
             console.warn('No pong within timeout — connection is stale, forcing reconnect');
             this.pongTimer = null;
-            this.authenticated   = false; // true once server confirms auth_ok
-    this.connectionId    = null;  // assigned by server's pre-auth ack
             try { this.ws.close(); } catch { /* ignore */ } // → onclose → reconnect
           }, PONG_TIMEOUT);
         }
@@ -533,11 +564,23 @@ class WebSocketService {
   /**
    * Re-establish realtime after a network drop or tab refocus. Resets the
    * backoff so recovery is immediate rather than waiting out a long delay.
+   *
+   * Crucially, does NOT trust readyState alone: a socket can report OPEN while
+   * actually dead (half-open) after sleep, a silent dyno drop, or a blip with
+   * no close frame. If it looks OPEN but we haven't heard anything recently,
+   * OPEN is a lie — rebuild it.
    */
   handleNetworkBack() {
-    if (this.intentionalClose) return;
-    if (!this.employeeId) return;
-    if (this.isConnected() || this.isConnecting) return;
+    if (this.intentionalClose || !this.employeeId) return;
+
+    if (this.isConnected()) {
+      const quietMs = Date.now() - (this.lastInboundAt || 0);
+      if (quietMs < STALE_AFTER) return;                 // proven alive recently
+      this.forceReconnect(`silent ${Math.round(quietMs / 1000)}s — half-open`);
+      return;
+    }
+    if (this.isConnecting) return;
+
     console.log('🔌 Network/visibility regained — reconnecting');
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     this.reconnectAttempts = 0;

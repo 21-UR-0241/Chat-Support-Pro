@@ -151,6 +151,7 @@ function DashboardContent({ employee, onLogout, selectedGroup, selectedGroupName
   const conversationsRef            = useRef([]);
   const pendingUnblacklistEmailsRef = useRef(new Set());
   const handlersRef                 = useRef(null);
+  const wsAuthedOnceRef             = useRef(false);
 
 
   const groupAccent    = selectedGroupColor || DEFAULT_GROUP_COLOR;
@@ -458,7 +459,11 @@ const handleTyping = (isTyping) => {
       }
     });
 
-    const u2  = ws.on('connected',    () => { setError(null); setWsStatus('live'); setWsReconnectAttempt(0); });
+    const u2  = ws.on('connected', () => {
+      setError(null); setWsStatus('live'); setWsReconnectAttempt(0);
+      if (wsAuthedOnceRef.current) handlersRef.current.refreshConversations();
+      else wsAuthedOnceRef.current = true;
+    });
     const u3  = ws.on('disconnected', () => setWsStatus('reconnecting'));
     const u4  = ws.on('reconnecting', (d) => { setWsStatus('reconnecting'); setWsReconnectAttempt(d?.attempt || 0); });
     const uE  = ws.on('error',        () => setWsStatus('reconnecting'));
