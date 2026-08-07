@@ -185,8 +185,8 @@
   </header>
 
   <div class="thread" id="thread">
-    <!-- email gate -->
-    <div id="gate">
+    <!-- email gate (shown first, before chat) -->
+    <div id="gate" class="on">
       <div class="gate-icon" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3.5 7l8.5 6 8.5-6"/></svg>
       </div>
@@ -255,7 +255,7 @@
         eyebrow=$('eyebrow'), headline=$('headline'), agentav=$('agentav'), agentname=$('agentname'), agentrole=$('agentrole'),
         dot=$('dot'), welcometext=$('welcometext'), chips=$('chips'),
         light=$('light'), lightimg=$('lightimg');
-    var selectedFile=null, uploading=false, typingTO=null, typingDeb=null, defaultRole='Typically replies in a few minutes';
+    var selectedFile=null, uploading=false, typingTO=null, typingDeb=null, defaultRole='Typically replies in a few minutes', emailCaptured=false;
 
     function appH(){var h=window.visualViewport?window.visualViewport.height:window.innerHeight;document.documentElement.style.setProperty('--app-height',h+'px');}
     appH();window.addEventListener('resize',appH);if(window.visualViewport){window.visualViewport.addEventListener('resize',appH);window.visualViewport.addEventListener('scroll',appH);}
@@ -380,17 +380,16 @@
       if(d.agentAvatar) agentav.innerHTML='<img src="'+d.agentAvatar+'" alt="">'+'<span class="dot" id="dot"></span>', dot=$('dot');
       renderChips(d.quickReplies);
     });
+    function enterChat(){ emailCaptured=true; gate.classList.remove('on'); dock.classList.add('on'); if(hasMsgs()){hideIntro();}else{showIntro();} box.focus(); }
     core.on('stage',function(s){
-      if(s==='email'){ gate.classList.add('on'); intro.classList.remove('on'); dock.classList.remove('on'); }
-      else{
-        gate.classList.remove('on'); dock.classList.add('on');
-        if(hasMsgs()){ hideIntro(); } else { showIntro(); }
-        box.focus();
-      }
+      // Email + name are collected first. Until that's done we keep the gate up,
+      // regardless of what stage the backend reports.
+      if(!emailCaptured || s==='email'){ gate.classList.add('on'); intro.classList.remove('on'); dock.classList.remove('on'); return; }
+      enterChat();
     });
     core.on('status',function(s){ setPresence(s.state); if(s.state!=='online'&&s.text) agentrole.textContent=s.text; });
-    core.on('history',function(list){ hideIntro(); list.forEach(function(m){render(m,true);}); setTimeout(scroll,80); });
-    core.on('message',function(m){ hideIntro(); render(m,false); });
+    core.on('history',function(list){ if(list&&list.length){enterChat();} hideIntro(); list.forEach(function(m){render(m,true);}); setTimeout(scroll,80); });
+    core.on('message',function(m){ if(!emailCaptured)enterChat(); hideIntro(); render(m,false); });
     core.on('message:update',function(u){
       var el=[].find.call(thread.querySelectorAll('.m'),function(e){return e.dataset.messageId===u.tempId;}); if(!el)return;
       if(u.status==='confirmed'){el.dataset.messageId=u.id||u.tempId;el.classList.remove('pending');}
@@ -408,7 +407,7 @@
       var em=$('gem').value.trim(), nm=$('gnm').value.trim();
       if(!core.isValidEmail(em)){$('gem').classList.add('err');return;}
       var b=gform.querySelector('.go'); b.disabled=true; b.innerHTML='<span class="spin"></span>Connecting…';
-      core.submitEmail(em,nm).catch(function(){b.disabled=false;b.textContent='Start chatting';});
+      core.submitEmail(em,nm).then(function(){ enterChat(); }).catch(function(){b.disabled=false;b.textContent='Start chatting';});
     });
 
     /* ── composer ── */
