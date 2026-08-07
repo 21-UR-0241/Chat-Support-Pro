@@ -1070,6 +1070,43 @@ async function handleJoin(ws, connectionId, message) {
   ws.send(JSON.stringify({ type: 'error', message: `Invalid role: ${effectiveRole}` }));
 }
 
+// async function handleTyping(connectionId, message) {
+//   const conn = connections.get(connectionId);
+//   if (!conn || !conn.conversationId) {
+//     console.warn(`⚠️ Typing indicator from unknown connection: ${connectionId}`);
+//     return;
+//   }
+
+//   const { conversationId, isTyping, senderType, senderName } = message;
+
+//   console.log(`⌨️ Typing indicator: ${connectionId}, conversation: ${conversationId}, typing: ${isTyping}`);
+
+//   const typingMessage = {
+//     type: 'typing',
+//     conversationId,
+//     isTyping: isTyping !== false, // Default to true if not specified
+//     senderType: senderType || conn.role,
+//     senderName: senderName || conn.employeeName || conn.customerName || 'Unknown',
+//     timestamp: new Date().toISOString()
+//   };
+
+//   // Send typing indicator to all other participants in the conversation
+//   let sent = 0;
+//   for (const [id, c] of connections.entries()) {
+//     if (id !== connectionId &&
+//         c.conversationId === conversationId &&
+//         c.ws.readyState === WebSocket.OPEN) {
+//       c.ws.send(JSON.stringify(typingMessage));
+//       sent++;
+//     }
+//   }
+
+//   console.log(`✅ Typing indicator sent to ${sent} participant(s)`);
+
+//   // Also publish to Redis for multi-server setups
+//   await redisManager.publishMessage(`conversation:${conversationId}`, typingMessage);
+// }
+
 async function handleTyping(connectionId, message) {
   const conn = connections.get(connectionId);
   if (!conn || !conn.conversationId) {
@@ -1079,14 +1116,26 @@ async function handleTyping(connectionId, message) {
 
   const { conversationId, isTyping, senderType, senderName } = message;
 
+  // Guard: only relay typing for the conversation this socket is actually joined to.
+  // Blocks a stale/spoofed conversationId (e.g. sent after a join swap) from
+  // fanning a typing event into a conversation this socket no longer belongs to.
+  if (String(conversationId) !== String(conn.conversationId)) {
+    console.warn(`⚠️ Typing conversationId mismatch: joined=${conn.conversationId} claimed=${conversationId}`);
+    return;
+  }
+
   console.log(`⌨️ Typing indicator: ${connectionId}, conversation: ${conversationId}, typing: ${isTyping}`);
+
+  const resolvedName =
+    senderName || conn.employeeName || conn.customerName ||
+    (conn.role === 'agent' ? 'Agent' : 'Customer'); // was 'Unknown' — collapses distinct senders in the client's name-keyed Set
 
   const typingMessage = {
     type: 'typing',
     conversationId,
     isTyping: isTyping !== false, // Default to true if not specified
     senderType: senderType || conn.role,
-    senderName: senderName || conn.employeeName || conn.customerName || 'Unknown',
+    senderName: resolvedName,
     timestamp: new Date().toISOString()
   };
 
@@ -1094,7 +1143,7 @@ async function handleTyping(connectionId, message) {
   let sent = 0;
   for (const [id, c] of connections.entries()) {
     if (id !== connectionId &&
-        c.conversationId === conversationId &&
+        String(c.conversationId) === String(conversationId) && // string-safe: one client may send numeric id, another a string
         c.ws.readyState === WebSocket.OPEN) {
       c.ws.send(JSON.stringify(typingMessage));
       sent++;
@@ -1106,6 +1155,7 @@ async function handleTyping(connectionId, message) {
   // Also publish to Redis for multi-server setups
   await redisManager.publishMessage(`conversation:${conversationId}`, typingMessage);
 }
+
 
 // ============ PRESENCE HANDLERS ============
 

@@ -1249,7 +1249,23 @@ const handleIncomingMessage = (message, currentConv) => {
     } catch (error) {}
   };
 
+  // const handleTypingIndicator = (data) => {
+  //   if (data.senderType === 'agent') return;
+  //   const senderName = data.senderName || 'Customer';
+  //   if (data.isTyping) {
+  //     setTypingUsers(prev => new Set([...prev, senderName]));
+  //     setTimeout(() => setTypingUsers(prev => {
+  //       const next = new Set(prev); next.delete(senderName); return next;
+  //     }), 5000);
+  //   } else {
+  //     setTypingUsers(prev => { const next = new Set(prev); next.delete(senderName); return next; });
+  //   }
+  // };
+
+
   const handleTypingIndicator = (data) => {
+    const convId = data.conversationId ?? data.conversation_id ?? null;
+    if (convId != null && String(convId) !== String(conversationRef.current?.id)) return;
     if (data.senderType === 'agent') return;
     const senderName = data.senderName || 'Customer';
     if (data.isTyping) {
@@ -1262,6 +1278,7 @@ const handleIncomingMessage = (message, currentConv) => {
     }
   };
 
+
   useEffect(() => {
     if (!ws) return;
 
@@ -1270,30 +1287,40 @@ const handleIncomingMessage = (message, currentConv) => {
     });
 
 
-    const offConfirmed = ws.on('message_confirmed', (data) => {
-      if (!data.message) return;
-      const confirmedMsg = normalizeMessage(data.message);
-      const cmid = data.clientMsgId || data.message.clientMsgId || null;
-      if (data.message.id) displayedMessageIds.current.add(String(data.message.id));
-      setMessages(prev => {
-        if (prev.some(m => String(m.id) === String(data.message.id))) {
-          // real row already present → drop any leftover temp/optimistic twin
-          return prev.filter(m =>
-            !((cmid && m.clientMsgId === cmid) || String(m.id) === String(data.tempId)) ||
-            String(m.id) === String(data.message.id)
-          );
-        }
-        let done = false;
-        const next = prev.map(m => {
-          if (!done && ((cmid && m.clientMsgId === cmid) || String(m.id) === String(data.tempId))) {
-            done = true;
-            return { ...confirmedMsg, fileData: confirmedMsg.fileData || m.fileData, fileUrl: confirmedMsg.fileUrl || m.fileUrl, sending: false, _optimistic: false };
-          }
-          return m;
-        });
-        return done ? next : [...next, confirmedMsg];
-      });
-    });
+    // const offConfirmed = ws.on('message_confirmed', (data) => {
+    //   if (!data.message) return;
+    //   const confirmedMsg = normalizeMessage(data.message);
+    //   const cmid = data.clientMsgId || data.message.clientMsgId || null;
+    //   if (data.message.id) displayedMessageIds.current.add(String(data.message.id));
+    //   setMessages(prev => {
+    //     if (prev.some(m => String(m.id) === String(data.message.id))) {
+    //       // real row already present → drop any leftover temp/optimistic twin
+    //       return prev.filter(m =>
+    //         !((cmid && m.clientMsgId === cmid) || String(m.id) === String(data.tempId)) ||
+    //         String(m.id) === String(data.message.id)
+    //       );
+    //     }
+    //     let done = false;
+    //     const next = prev.map(m => {
+    //       if (!done && ((cmid && m.clientMsgId === cmid) || String(m.id) === String(data.tempId))) {
+    //         done = true;
+    //         return { ...confirmedMsg, fileData: confirmedMsg.fileData || m.fileData, fileUrl: confirmedMsg.fileUrl || m.fileUrl, sending: false, _optimistic: false };
+    //       }
+    //       return m;
+    //     });
+    //     return done ? next : [...next, confirmedMsg];
+    //   });
+    // });
+
+    // const offFailed = ws.on('message_failed', (data) => {
+    //   if (!data.tempId) return;
+    //   setMessages(prev => prev.map(msg =>
+    //     String(msg.id) === String(data.tempId)
+    //       ? { ...msg, sending: false, failed: true, _optimistic: false }
+    //       : msg
+    //   ));
+    // });
+
 
     const offFailed = ws.on('message_failed', (data) => {
       if (!data.tempId) return;
@@ -1304,8 +1331,56 @@ const handleIncomingMessage = (message, currentConv) => {
       ));
     });
 
+    const offConfirmed = ws.on('message_confirmed', (data) => {
+  if (!data.message) return;
+
+  const convId = data.message.conversationId ?? data.message.conversation_id
+    ?? data.conversationId ?? data.conversation_id ?? null;
+  // Guard: ignore confirms for a different conversation.
+  if (convId != null && String(convId) !== String(conversationRef.current?.id)) return;
+
+  const confirmedMsg = normalizeMessage(data.message);
+  const cmid = data.clientMsgId || data.message.clientMsgId || null;
+  if (data.message.id) displayedMessageIds.current.add(String(data.message.id));
+
+  setMessages(prev => {
+    if (prev.some(m => String(m.id) === String(data.message.id))) {
+      return prev.filter(m =>
+        !((cmid && m.clientMsgId === cmid) || String(m.id) === String(data.tempId)) ||
+        String(m.id) === String(data.message.id)
+      );
+    }
+    let done = false;
+    const next = prev.map(m => {
+      if (!done && ((cmid && m.clientMsgId === cmid) || String(m.id) === String(data.tempId))) {
+        done = true;
+        return { ...confirmedMsg, fileData: confirmedMsg.fileData || m.fileData, fileUrl: confirmedMsg.fileUrl || m.fileUrl, sending: false, _optimistic: false };
+      }
+      return m;
+    });
+    if (done) return next;
+    // Only append a brand-new confirmed row if we can PROVE it's this conversation.
+    if (convId != null && String(convId) === String(conversationRef.current?.id)) {
+      return [...next, confirmedMsg];
+    }
+    return prev; // couldn't attribute it → don't pollute the open thread
+  });
+});
+
+
+    // const offDeleted = ws.on('message_deleted', (data) => {
+    //   if (!data.messageId) return;
+    //   displayedMessageIds.current.delete(String(data.messageId));
+    //   setMessages(prev => {
+    //     if (!prev.some(m => String(m.id) === String(data.messageId))) return prev; // already gone → no re-render
+    //     return prev.filter(m => String(m.id) !== String(data.messageId));
+    //   });
+    // });
+
     const offDeleted = ws.on('message_deleted', (data) => {
       if (!data.messageId) return;
+      const convId = data.conversationId ?? data.conversation_id ?? null;
+      if (convId != null && String(convId) !== String(conversationRef.current?.id)) return;
       displayedMessageIds.current.delete(String(data.messageId));
       setMessages(prev => {
         if (!prev.some(m => String(m.id) === String(data.messageId))) return prev; // already gone → no re-render
@@ -1355,6 +1430,7 @@ const handleIncomingMessage = (message, currentConv) => {
     if (conversation) { displayedMessageIds.current.clear(); loadMessages(); }
     else { setMessages([]); setLoading(false); }
     dismissLegalAlert();
+    setTypingUsers(new Set());   // ← add
     setShowEmailModal(false);
     setShowBlacklistModal(false);
     setShowArchiveModal(false);
