@@ -180,7 +180,7 @@
     <button class="hd-x" id="close" type="button" aria-label="Close chat">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
     </button>
-    <div class="eyebrow" id="eyebrow">Live support</div>
+    <div class="eyebrow" id="eyebrow">Our Store</div>
     <h1 class="headline" id="headline">We're here to help.</h1>
   </header>
 
@@ -369,11 +369,11 @@
     /* ── core events ────────────────────────────────────────── */
     core.on('ready',function(d){
       applyTheme(d.theme);
-      if(d.eyebrow) eyebrow.textContent=d.eyebrow;
+      // store name drives the header eyebrow AND the intro card name
+      var storeName = d.storeName || d.agentName || '';
+      if(storeName){ eyebrow.textContent=storeName; agentname.textContent=storeName; }
+      else if(d.eyebrow) eyebrow.textContent=d.eyebrow;
       if(d.headline) headline.textContent=d.headline;
-      // store name sits at the top of the intro card (falls back to a supplied agent name)
-      if(d.storeName) agentname.textContent=d.storeName;
-      else if(d.agentName) agentname.textContent=d.agentName;
       if(d.agentRole){ agentrole.textContent=d.agentRole; defaultRole=d.agentRole; }
       if(d.greeting) welcometext.innerHTML=d.greeting;
       if(d.placeholder) box.placeholder=d.placeholder;
@@ -454,7 +454,7 @@
 
     // Brand colour + store name also arrive on the iframe URL (?primary=<hex>&store=<name>)
     // from the theme.liquid launcher — apply up-front so the widget brands before `ready`.
-    try{ var _q=new URLSearchParams(location.search); var _p=_q.get('primary'); if(_p)applyTheme({primary:_p}); var _s=_q.get('store'); if(_s)agentname.textContent=_s; }catch(e){}
+    try{ var _q=new URLSearchParams(location.search); var _p=_q.get('primary'); if(_p)applyTheme({primary:_p}); var _s=_q.get('store'); if(_s){agentname.textContent=_s;eyebrow.textContent=_s;} }catch(e){}
 
     core.init();
   })();
