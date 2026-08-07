@@ -881,6 +881,7 @@ function ChatWindow({
   const conversationRef    = useRef(conversation);
   const employeeNameRef    = useRef(employeeName);
 
+
   useEffect(() => { loadTemplates(); }, []);
   useEffect(() => { conversationRef.current = conversation; }, [conversation]);
   useEffect(() => { employeeNameRef.current = employeeName; }, [employeeName]);
@@ -1198,10 +1199,6 @@ const handleIncomingMessage = (message, currentConv) => {
     if (message.senderType === 'customer') showNotification(message);
   };
 
-
-  // CHANGED: inbound sound is owned by useConversations (one place). Here we only
-  // raise a desktop notification, and only when the agent isn't actively looking
-  // at this tab — no double sound, no redundant toast for the open conversation.
   const showNotification = (message) => {
     if (!message || message.senderType === 'agent') return;
     if (!document.hidden) return;
@@ -1249,20 +1246,6 @@ const handleIncomingMessage = (message, currentConv) => {
     } catch (error) {}
   };
 
-  // const handleTypingIndicator = (data) => {
-  //   if (data.senderType === 'agent') return;
-  //   const senderName = data.senderName || 'Customer';
-  //   if (data.isTyping) {
-  //     setTypingUsers(prev => new Set([...prev, senderName]));
-  //     setTimeout(() => setTypingUsers(prev => {
-  //       const next = new Set(prev); next.delete(senderName); return next;
-  //     }), 5000);
-  //   } else {
-  //     setTypingUsers(prev => { const next = new Set(prev); next.delete(senderName); return next; });
-  //   }
-  // };
-
-
   const handleTypingIndicator = (data) => {
     const convId = data.conversationId ?? data.conversation_id ?? null;
     if (convId != null && String(convId) !== String(conversationRef.current?.id)) return;
@@ -1279,48 +1262,12 @@ const handleIncomingMessage = (message, currentConv) => {
   };
 
 
-  useEffect(() => {
+useEffect(() => {
     if (!ws) return;
 
     const offNew = ws.on('new_message', (data) => {
       if (data.message) handleIncomingMessage(data.message, conversationRef.current, employeeNameRef.current);
     });
-
-
-    // const offConfirmed = ws.on('message_confirmed', (data) => {
-    //   if (!data.message) return;
-    //   const confirmedMsg = normalizeMessage(data.message);
-    //   const cmid = data.clientMsgId || data.message.clientMsgId || null;
-    //   if (data.message.id) displayedMessageIds.current.add(String(data.message.id));
-    //   setMessages(prev => {
-    //     if (prev.some(m => String(m.id) === String(data.message.id))) {
-    //       // real row already present → drop any leftover temp/optimistic twin
-    //       return prev.filter(m =>
-    //         !((cmid && m.clientMsgId === cmid) || String(m.id) === String(data.tempId)) ||
-    //         String(m.id) === String(data.message.id)
-    //       );
-    //     }
-    //     let done = false;
-    //     const next = prev.map(m => {
-    //       if (!done && ((cmid && m.clientMsgId === cmid) || String(m.id) === String(data.tempId))) {
-    //         done = true;
-    //         return { ...confirmedMsg, fileData: confirmedMsg.fileData || m.fileData, fileUrl: confirmedMsg.fileUrl || m.fileUrl, sending: false, _optimistic: false };
-    //       }
-    //       return m;
-    //     });
-    //     return done ? next : [...next, confirmedMsg];
-    //   });
-    // });
-
-    // const offFailed = ws.on('message_failed', (data) => {
-    //   if (!data.tempId) return;
-    //   setMessages(prev => prev.map(msg =>
-    //     String(msg.id) === String(data.tempId)
-    //       ? { ...msg, sending: false, failed: true, _optimistic: false }
-    //       : msg
-    //   ));
-    // });
-
 
     const offFailed = ws.on('message_failed', (data) => {
       if (!data.tempId) return;
@@ -1332,50 +1279,38 @@ const handleIncomingMessage = (message, currentConv) => {
     });
 
     const offConfirmed = ws.on('message_confirmed', (data) => {
-  if (!data.message) return;
+      if (!data.message) return;
 
-  const convId = data.message.conversationId ?? data.message.conversation_id
-    ?? data.conversationId ?? data.conversation_id ?? null;
-  // Guard: ignore confirms for a different conversation.
-  if (convId != null && String(convId) !== String(conversationRef.current?.id)) return;
+      const convId = data.message.conversationId ?? data.message.conversation_id
+        ?? data.conversationId ?? data.conversation_id ?? null;
+      if (convId != null && String(convId) !== String(conversationRef.current?.id)) return;
 
-  const confirmedMsg = normalizeMessage(data.message);
-  const cmid = data.clientMsgId || data.message.clientMsgId || null;
-  if (data.message.id) displayedMessageIds.current.add(String(data.message.id));
+      const confirmedMsg = normalizeMessage(data.message);
+      const cmid = data.clientMsgId || data.message.clientMsgId || null;
+      if (data.message.id) displayedMessageIds.current.add(String(data.message.id));
 
-  setMessages(prev => {
-    if (prev.some(m => String(m.id) === String(data.message.id))) {
-      return prev.filter(m =>
-        !((cmid && m.clientMsgId === cmid) || String(m.id) === String(data.tempId)) ||
-        String(m.id) === String(data.message.id)
-      );
-    }
-    let done = false;
-    const next = prev.map(m => {
-      if (!done && ((cmid && m.clientMsgId === cmid) || String(m.id) === String(data.tempId))) {
-        done = true;
-        return { ...confirmedMsg, fileData: confirmedMsg.fileData || m.fileData, fileUrl: confirmedMsg.fileUrl || m.fileUrl, sending: false, _optimistic: false };
-      }
-      return m;
+      setMessages(prev => {
+        if (prev.some(m => String(m.id) === String(data.message.id))) {
+          return prev.filter(m =>
+            !((cmid && m.clientMsgId === cmid) || String(m.id) === String(data.tempId)) ||
+            String(m.id) === String(data.message.id)
+          );
+        }
+        let done = false;
+        const next = prev.map(m => {
+          if (!done && ((cmid && m.clientMsgId === cmid) || String(m.id) === String(data.tempId))) {
+            done = true;
+            return { ...confirmedMsg, fileData: confirmedMsg.fileData || m.fileData, fileUrl: confirmedMsg.fileUrl || m.fileUrl, sending: false, _optimistic: false };
+          }
+          return m;
+        });
+        if (done) return next;
+        if (convId != null && String(convId) === String(conversationRef.current?.id)) {
+          return [...next, confirmedMsg];
+        }
+        return prev;
+      });
     });
-    if (done) return next;
-    // Only append a brand-new confirmed row if we can PROVE it's this conversation.
-    if (convId != null && String(convId) === String(conversationRef.current?.id)) {
-      return [...next, confirmedMsg];
-    }
-    return prev; // couldn't attribute it → don't pollute the open thread
-  });
-});
-
-
-    // const offDeleted = ws.on('message_deleted', (data) => {
-    //   if (!data.messageId) return;
-    //   displayedMessageIds.current.delete(String(data.messageId));
-    //   setMessages(prev => {
-    //     if (!prev.some(m => String(m.id) === String(data.messageId))) return prev; // already gone → no re-render
-    //     return prev.filter(m => String(m.id) !== String(data.messageId));
-    //   });
-    // });
 
     const offDeleted = ws.on('message_deleted', (data) => {
       if (!data.messageId) return;
@@ -1383,7 +1318,7 @@ const handleIncomingMessage = (message, currentConv) => {
       if (convId != null && String(convId) !== String(conversationRef.current?.id)) return;
       displayedMessageIds.current.delete(String(data.messageId));
       setMessages(prev => {
-        if (!prev.some(m => String(m.id) === String(data.messageId))) return prev; // already gone → no re-render
+        if (!prev.some(m => String(m.id) === String(data.messageId))) return prev;
         return prev.filter(m => String(m.id) !== String(data.messageId));
       });
     });
@@ -1395,8 +1330,6 @@ const handleIncomingMessage = (message, currentConv) => {
       const alert = data.alert;
       if (!alert) return;
       const cur = conversationRef.current;
-      // Only the banner + alarm for the conversation currently on screen.
-      // Cross-conversation desktop notifications are owned by App.
       if (String(alert.conversationId) === String(cur?.id)) {
         console.warn(`🚨 [LEGAL] ${alert.severity?.toUpperCase()} — "${alert.matchedTerm}" in conv #${alert.conversationId}`);
         playNotificationSound();
@@ -1405,13 +1338,17 @@ const handleIncomingMessage = (message, currentConv) => {
       }
     });
 
+    const offReconnect = ws.on('connected', () => {
+      if (conversationRef.current?.id) loadMessages();
+    });
+
     return () => {
       offNew(); offConfirmed(); offFailed(); offDeleted();
       offTyping(); offLeft(); offLegal();
+      offReconnect();
     };
   }, [ws]);
 
-  // Connection dot driven by the shared socket's lifecycle events.
   useEffect(() => {
     if (!ws) { setWsConnected(false); return; }
     setWsConnected(!!(ws.isConnected && ws.isConnected()));

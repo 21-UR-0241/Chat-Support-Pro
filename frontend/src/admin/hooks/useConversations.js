@@ -1,31 +1,39 @@
 
-
 // import { useState, useEffect, useCallback, useRef } from 'react';
 // import api from '../services/api';
 
 // // NOTE: `ws` is now passed in from the single useWebSocket() owner (App).
 // // This hook no longer calls useWebSocket() itself, so there is exactly ONE
 // // socket connection in the tree — no more connect/disconnect stomping.
-// export function useConversations(employeeId, ws) {
+// export function useConversations(employeeId, ws, initialFilters = {}) {
 //   const [conversations, setConversations] = useState([]);
 //   const [loading, setLoading] = useState(true);
 //   const [error, setError] = useState(null);
+//   const [hasMore, setHasMore]         = useState(true);
+//   const [loadingMore, setLoadingMore] = useState(false);
 //   const [filters, setFilters] = useState({
 //     status: 'open',
 //     storeId: '',
 //     priority: '',
 //     search: '',
+//     storeGroup: '',
+//     limit: 50,
+//     ...initialFilters,
 //   });
 
 //   const activeConversationIdRef = useRef(null);
+//   const offsetRef = useRef(0);   // rows loaded so far = offset for the next page
 
 //   const loadConversations = useCallback(async (showLoading = true) => {
 //     try {
 //       if (showLoading) setLoading(true);
 //       setError(null);
-//       const data = await api.getConversations(filters);
+//       const pageSize = filters.limit || 50;
+//       const data = await api.getConversations({ ...filters, offset: 0 });
 //       console.log('📥 [useConversations] Loaded conversations:', data.length);
 //       setConversations(data);
+//       offsetRef.current = data.length;
+//       setHasMore(data.length >= pageSize);   // full page back → assume more exists
 //     } catch (err) {
 //       console.error('Failed to load conversations:', err);
 //       setError(err.message);
@@ -34,8 +42,40 @@
 //     }
 //   }, [filters]);
 
+//   const loadMore = useCallback(async () => {
+//     if (loadingMore || !hasMore) return;
+//     try {
+//       setLoadingMore(true);
+//       setError(null);
+//       const pageSize = filters.limit || 50;
+//       const data = await api.getConversations({ ...filters, offset: offsetRef.current });
+//       console.log('📥 [useConversations] Loaded more:', data.length, 'at offset', offsetRef.current);
+//       setConversations(prev => {
+//         const seen = new Set(prev.map(c => c.id));
+//         const fresh = data.filter(c => !seen.has(c.id));   // drop dups from live-insert drift
+//         return [...prev, ...fresh].sort((a, b) =>
+//           new Date(b.lastMessageAt || b.updatedAt || 0) -
+//           new Date(a.lastMessageAt || a.updatedAt || 0)
+//         );
+//       });
+//       offsetRef.current += data.length;
+//       setHasMore(data.length >= pageSize);
+//     } catch (err) {
+//       console.error('Failed to load more conversations:', err);
+//       setError(err.message);
+//     } finally {
+//       setLoadingMore(false);
+//     }
+//   }, [filters, hasMore, loadingMore]);
+
 //   useEffect(() => {
 //     loadConversations(true);
+//   }, [loadConversations]);
+
+//     const refetchTimer = useRef(null);
+//   const scheduleRefetch = useCallback(() => {
+//     clearTimeout(refetchTimer.current);
+//     refetchTimer.current = setTimeout(() => loadConversations(false), 1500);
 //   }, [loadConversations]);
 
 //   const updateConversationFromData = useCallback((conversationData) => {
@@ -89,11 +129,13 @@
 //         );
 //       } else {
 //         console.log('🆕 [useConversations] New conversation detected, refreshing...');
-//         loadConversations(false);
+//         // loadConversations(false);
+//         scheduleRefetch();  
 //         return prev;
 //       }
 //     });
-//   }, [loadConversations]);
+//   // }, [loadConversations]);
+//     }, [scheduleRefetch]);  
 
 //   const addNewConversation = useCallback((conversationData) => {
 //     setConversations(prev => {
@@ -168,7 +210,9 @@
 //       if (data.conversation) {
 //         addNewConversation(data.conversation);
 //       } else {
-//         loadConversations(false);
+//         // loadConversations(false);
+//         scheduleRefetch(); 
+
 //       }
 //     });
 
@@ -176,7 +220,9 @@
 //       console.log('🔇 [useConversations] Cleaning up WebSocket listeners');
 //       unsubMessage();
 //       unsubRead();
+//       unsubReconnect(); 
 //       unsubNewConv();
+//       clearTimeout(refetchTimer.current);
 //     };
 //   }, [ws, updateConversationFromData, updateConversationFromMessage, addNewConversation, loadConversations]);
 
@@ -219,6 +265,9 @@
 //     conversations,
 //     loading,
 //     error,
+//     hasMore,
+//     loadingMore,
+//     loadMore,
 //     filters,
 //     updateFilters,
 //     refresh,
@@ -314,7 +363,7 @@ export function useConversations(employeeId, ws, initialFilters = {}) {
     loadConversations(true);
   }, [loadConversations]);
 
-    const refetchTimer = useRef(null);
+  const refetchTimer = useRef(null);
   const scheduleRefetch = useCallback(() => {
     clearTimeout(refetchTimer.current);
     refetchTimer.current = setTimeout(() => loadConversations(false), 1500);
@@ -371,13 +420,11 @@ export function useConversations(employeeId, ws, initialFilters = {}) {
         );
       } else {
         console.log('🆕 [useConversations] New conversation detected, refreshing...');
-        // loadConversations(false);
-        scheduleRefetch();  
+        scheduleRefetch();
         return prev;
       }
     });
-  // }, [loadConversations]);
-    }, [scheduleRefetch]);  
+  }, [scheduleRefetch]);
 
   const addNewConversation = useCallback((conversationData) => {
     setConversations(prev => {
@@ -400,7 +447,13 @@ export function useConversations(employeeId, ws, initialFilters = {}) {
 
     console.log('👂 [useConversations] Setting up WebSocket listeners...');
 
-    const unsubMessage = ws.on('new_message', (data) => {
+    // Collect every unsubscribe here. Teardown iterates whatever's in the array,
+    // so adding/removing a listener is a single push() with no separate teardown
+    // line to keep in sync — this structurally prevents the "off() references an
+    // undeclared handler" ReferenceError.
+    const subs = [];
+
+    subs.push(ws.on('new_message', (data) => {
       // Skip preview update for auto-replies — conversation_updated corrects it
       if (data.message?.isAutoReply === true) {
         console.log('🤖 [useConversations] Auto-reply skipped, waiting for conversation_updated');
@@ -425,9 +478,9 @@ export function useConversations(employeeId, ws, initialFilters = {}) {
       }
 
       playNotificationSound();
-    });
+    }));
 
-    const unsubRead = ws.on('conversation_read', (data) => {
+    subs.push(ws.on('conversation_read', (data) => {
       console.log('📖 [useConversations] Conversation read:', { conversationId: data.conversationId });
       if (data.conversation) {
         const readConversation = {
@@ -445,27 +498,34 @@ export function useConversations(employeeId, ws, initialFilters = {}) {
           lastReadAt: new Date().toISOString(),
         });
       }
-    });
+    }));
 
-    const unsubNewConv = ws.on('new_conversation', (data) => {
+    subs.push(ws.on('new_conversation', (data) => {
       console.log('🆕 [useConversations] New conversation:', data);
       if (data.conversation) {
         addNewConversation(data.conversation);
       } else {
-        // loadConversations(false);
-        scheduleRefetch(); 
-
+        scheduleRefetch();
       }
-    });
+    }));
+
+    // ── Gap recovery for the LIST ─────────────────────────────────────────
+    // While the socket was dead (inactive tab, sleep, edge drop), customers may
+    // have messaged conversations that weren't open. Reconnect resumes the live
+    // stream but does NOT replay the gap — so re-pull the list to refresh unread
+    // badges, previews, and ordering. Debounced (scheduleRefetch) + no spinner
+    // (loadConversations(false)), so it's invisible to the agent.
+    subs.push(ws.on('connected', () => {
+      console.log('🔌 [useConversations] Reconnected — refreshing list to backfill gap');
+      scheduleRefetch();
+    }));
 
     return () => {
       console.log('🔇 [useConversations] Cleaning up WebSocket listeners');
-      unsubMessage();
-      unsubRead();
-      unsubNewConv();
+      subs.forEach(unsub => { try { unsub && unsub(); } catch (e) {} });
       clearTimeout(refetchTimer.current);
     };
-  }, [ws, updateConversationFromData, updateConversationFromMessage, addNewConversation, loadConversations]);
+  }, [ws, updateConversationFromData, updateConversationFromMessage, addNewConversation, scheduleRefetch]);
 
   const updateFilters = useCallback((newFilters) => {
     setFilters(prev => ({ ...prev, ...newFilters }));
