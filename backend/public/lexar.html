@@ -369,8 +369,11 @@
     /* ── core events ────────────────────────────────────────── */
     core.on('ready',function(d){
       applyTheme(d.theme);
-      // store name drives the header eyebrow AND the intro card name
-      var storeName = d.storeName || d.agentName || '';
+      // Actual store name comes from stores.brand_name in the DB (NOT store_identifier,
+      // which is the handle e.g. "hc4ajx-co"). Accept the common shapes it may arrive in.
+      var storeName = d.brandName || d.brand_name || d.storeName
+                   || (d.store && (d.store.brand_name || d.store.brandName))
+                   || d.agentName || '';
       if(storeName){ eyebrow.textContent=storeName; agentname.textContent=storeName; }
       else if(d.eyebrow) eyebrow.textContent=d.eyebrow;
       if(d.headline) headline.textContent=d.headline;
