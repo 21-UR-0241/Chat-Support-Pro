@@ -1798,7 +1798,7 @@ const handleTyping = (isTyping) => {
 
       {wsStatus === 'reconnecting' && wsReconnectAttempt >= 3 && (
         <div className="error-banner">
-          <span>🔄 Reconnecting to server…</span>
+          {/* <span>🔄 Reconnecting to server…</span> */}
         </div>
       )}
 
