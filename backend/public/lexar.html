@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
-<title>Chat Widget — Concierge</title>
+<title>Chat Support</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;1,500&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -58,7 +58,7 @@
   .thread::-webkit-scrollbar{width:6px;}.thread::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:3px;}
   .thread::-webkit-scrollbar-track{background:transparent;}
 
-  /* ── intro (agent card + concierge welcome + quick replies) ── */
+  /* ── intro (brand card + welcome + quick replies) ── */
   #intro{display:none;flex-direction:column;padding-top:6px;}
   #intro.on{display:flex;}
   .agent{display:flex;align-items:center;gap:13px;margin-bottom:16px;}
@@ -84,13 +84,16 @@
   .chip:active{transform:scale(.97);}
 
   /* ── email gate ── */
-  #gate{display:none;flex-direction:column;padding:16px 2px 8px;}
+  #gate{display:none;flex-direction:column;align-items:center;padding:22px 2px 8px;}
   #gate.on{display:flex;}
-  #gate .eyebrow{margin-bottom:12px;}
-  #gate h2{font-family:var(--serif);font-weight:600;font-size:22px;line-height:1.2;color:#fff;margin-bottom:8px;max-width:20ch;}
-  #gate .sub{font-size:13.5px;color:var(--muted);margin-bottom:20px;line-height:1.5;max-width:34ch;}
+  .gate-icon{width:66px;height:66px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin-bottom:20px;background:var(--surface);border:1px solid var(--line-soft);color:var(--accent);box-shadow:0 8px 24px var(--glow);}
+  .gate-icon svg{width:30px;height:30px;}
+  #gate h2{font-family:var(--serif);font-weight:600;font-size:22px;line-height:1.26;color:#fff;margin-bottom:10px;max-width:22ch;text-align:center;}
+  #gate .sub{font-size:13.5px;color:var(--text-dim);margin-bottom:22px;line-height:1.55;max-width:32ch;text-align:center;}
+  #gate .gform{width:100%;}
   .gf{margin-bottom:12px;}
   .gf label{display:block;font-size:12px;font-weight:600;color:var(--text-dim);margin-bottom:6px;}
+  .gf label .req{color:var(--accent);}.gf label .opt{color:var(--muted);font-weight:400;}
   .gf input{width:100%;padding:13px 15px;border:1.4px solid var(--line);border-radius:12px;font-size:16px;font-family:var(--body);background:var(--surface);color:var(--text);outline:none;transition:border-color .16s,box-shadow .16s;}
   .gf input::placeholder{color:var(--muted);}
   .gf input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--glow);}
@@ -177,25 +180,27 @@
     <button class="hd-x" id="close" type="button" aria-label="Close chat">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
     </button>
-    <div class="eyebrow" id="eyebrow">Concierge</div>
-    <h1 class="headline" id="headline">How can we help today?</h1>
+    <div class="eyebrow" id="eyebrow">Live support</div>
+    <h1 class="headline" id="headline">We're here to help.</h1>
   </header>
 
   <div class="thread" id="thread">
     <!-- email gate -->
     <div id="gate">
-      <div class="eyebrow">Live support</div>
-      <h2>Talk to a real person, usually within minutes.</h2>
-      <p class="sub">Leave your email so we can pick up right where you are.</p>
+      <div class="gate-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3.5 7l8.5 6 8.5-6"/></svg>
+      </div>
+      <h2>The best products and support on the market, backed by a brand that stands behind every order.</h2>
+      <p class="sub">Drop your email below and we'll connect you with the team. It only takes a moment.</p>
       <form class="gform" id="gform">
-        <div class="gf"><label for="gem">Email address</label><input type="email" id="gem" placeholder="you@email.com" required></div>
-        <div class="gf"><label for="gnm">Name <span style="color:var(--muted);font-weight:400;">(optional)</span></label><input type="text" id="gnm" placeholder="First name"></div>
-        <button type="submit" class="go">Start the chat</button>
-        <p class="gnote">Encrypted end to end. We never share your details.</p>
+        <div class="gf"><label for="gem">Email address <span class="req">*</span></label><input type="email" id="gem" placeholder="you@email.com" required></div>
+        <div class="gf"><label for="gnm">Name <span class="opt">(optional)</span></label><input type="text" id="gnm" placeholder="Your name"></div>
+        <button type="submit" class="go">Start chatting</button>
+        <p class="gnote">Your details stay private and are never shared.</p>
       </form>
     </div>
 
-    <!-- concierge intro -->
+    <!-- brand intro -->
     <div id="intro">
       <div class="agent">
         <div class="agent-av" id="agentav">
@@ -203,12 +208,12 @@
           <span class="dot" id="dot"></span>
         </div>
         <div class="agent-meta">
-          <div class="agent-name" id="agentname">Maya</div>
-          <div class="agent-role" id="agentrole">Product specialist · replies fast</div>
+          <div class="agent-name" id="agentname">Our Store</div>
+          <div class="agent-role" id="agentrole">Typically replies in a few minutes</div>
         </div>
       </div>
       <div class="welcome">
-        <p id="welcometext">Hey — welcome in. Ask me anything about sizing, shipping, or what to pair with what you're viewing.</p>
+        <p id="welcometext">Hi! How can we help you today? Ask us about your order, shipping, sizing, or anything else.</p>
         <div class="wtime">just now</div>
       </div>
       <div class="chips" id="chips"></div>
@@ -223,7 +228,7 @@
 
   <div class="dock" id="dock">
     <div class="inputwrap">
-      <textarea id="box" placeholder="Write a message…" rows="1"></textarea>
+      <textarea id="box" placeholder="Type your message…" rows="1"></textarea>
       <input type="file" id="file" accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.heic,.heif" style="display:none;">
       <button class="clip" id="clip" type="button" aria-label="Attach a file">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21.4 11.05 12.25 20.2a5 5 0 0 1-7.07-7.07l8.49-8.49a3 3 0 0 1 4.24 4.24l-8.49 8.49a1 1 0 0 1-1.41-1.41l7.78-7.78"/></svg>
@@ -250,7 +255,7 @@
         eyebrow=$('eyebrow'), headline=$('headline'), agentav=$('agentav'), agentname=$('agentname'), agentrole=$('agentrole'),
         dot=$('dot'), welcometext=$('welcometext'), chips=$('chips'),
         light=$('light'), lightimg=$('lightimg');
-    var selectedFile=null, uploading=false, typingTO=null, typingDeb=null, defaultRole='Product specialist · replies fast';
+    var selectedFile=null, uploading=false, typingTO=null, typingDeb=null, defaultRole='Typically replies in a few minutes';
 
     function appH(){var h=window.visualViewport?window.visualViewport.height:window.innerHeight;document.documentElement.style.setProperty('--app-height',h+'px');}
     appH();window.addEventListener('resize',appH);if(window.visualViewport){window.visualViewport.addEventListener('resize',appH);window.visualViewport.addEventListener('scroll',appH);}
@@ -300,10 +305,10 @@
       human: CI+'<path d="M4 13a8 8 0 0 1 16 0"/><rect x="2" y="13" width="4" height="7" rx="1.5"/><rect x="18" y="13" width="4" height="7" rx="1.5"/><path d="M20 20a3 3 0 0 1-3 3h-3"/></svg>'
     };
     var DEFAULT_CHIPS=[
-      {label:"Where's my order", icon:'order'},
-      {label:"Size help",        icon:'size'},
-      {label:"Recommend something", icon:'rec'},
-      {label:"Talk to a human",  icon:'human'}
+      {label:"Track my order",       icon:'order'},
+      {label:"Sizing help",          icon:'size'},
+      {label:"Recommend something",  icon:'rec'},
+      {label:"Talk to a human",      icon:'human'}
     ];
     function renderChips(list){
       chips.innerHTML='';
@@ -366,7 +371,9 @@
       applyTheme(d.theme);
       if(d.eyebrow) eyebrow.textContent=d.eyebrow;
       if(d.headline) headline.textContent=d.headline;
-      if(d.agentName) agentname.textContent=d.agentName;
+      // store name sits at the top of the intro card (falls back to a supplied agent name)
+      if(d.storeName) agentname.textContent=d.storeName;
+      else if(d.agentName) agentname.textContent=d.agentName;
       if(d.agentRole){ agentrole.textContent=d.agentRole; defaultRole=d.agentRole; }
       if(d.greeting) welcometext.innerHTML=d.greeting;
       if(d.placeholder) box.placeholder=d.placeholder;
@@ -401,7 +408,7 @@
       var em=$('gem').value.trim(), nm=$('gnm').value.trim();
       if(!core.isValidEmail(em)){$('gem').classList.add('err');return;}
       var b=gform.querySelector('.go'); b.disabled=true; b.innerHTML='<span class="spin"></span>Connecting…';
-      core.submitEmail(em,nm).catch(function(){b.disabled=false;b.textContent='Start the chat';});
+      core.submitEmail(em,nm).catch(function(){b.disabled=false;b.textContent='Start chatting';});
     });
 
     /* ── composer ── */
@@ -446,9 +453,9 @@
       finally{uploading=false;box.disabled=false;clip.disabled=false;updateSend();box.focus();}
     }
 
-    // Brand colour also arrives on the iframe URL (?primary=<hex>) from the theme.liquid
-    // launcher — apply it up-front so the widget themes even before `ready`.
-    try{ var _qp=new URLSearchParams(location.search).get('primary'); if(_qp)applyTheme({primary:_qp}); }catch(e){}
+    // Brand colour + store name also arrive on the iframe URL (?primary=<hex>&store=<name>)
+    // from the theme.liquid launcher — apply up-front so the widget brands before `ready`.
+    try{ var _q=new URLSearchParams(location.search); var _p=_q.get('primary'); if(_p)applyTheme({primary:_p}); var _s=_q.get('store'); if(_s)agentname.textContent=_s; }catch(e){}
 
     core.init();
   })();
