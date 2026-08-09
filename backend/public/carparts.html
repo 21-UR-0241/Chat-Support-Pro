@@ -99,18 +99,12 @@
       position: relative; text-align: center; flex-shrink: 0;
       margin-bottom: -2px; z-index: 1;
     }
-    /* Store name badge — populated from ?brand= or ?source= */
-    #fh-store-badge {
-      font-size: 11px; font-weight: 600; letter-spacing: .8px;
-      color: rgba(255,255,255,.6); text-transform: uppercase;
-      padding: 10px 0 0; min-height: 26px;
-    }
     .fh-avatar {
       width: 68px; height: 68px; border-radius: 50%;
       background: rgba(255,255,255,.18);
       border: 2px solid rgba(255,255,255,.4);
       display: flex; align-items: center; justify-content: center;
-      margin: 8px auto 10px;
+      margin: 18px auto 10px;
     }
     .fh-title { color: #fff; font-size: 20px; font-weight: 700; margin-bottom: 5px; }
     .fh-sub   { color: rgba(255,255,255,.8); font-size: 13px; display: flex; align-items: center; justify-content: center; gap: 6px; padding-bottom: 14px; }
@@ -306,7 +300,6 @@
     <!-- ══════════════════ FORM VIEW ══════════════════ -->
     <div id="form-view">
       <div id="form-header">
-        <p id="fh-store-badge"></p>
         <div class="fh-avatar">
           <i class="ti ti-headset" style="font-size:32px;color:#fff" aria-hidden="true"></i>
         </div>
@@ -438,10 +431,10 @@
 
   function applyStoreName(name) {
     if (!name) return;
-    var badge   = $('fh-store-badge');
-    var chLabel = $('ch-store-label');
-    var chName  = $('ch-name-el');
-    if (badge)   badge.textContent   = name;
+    var fhTitle = document.querySelector('.fh-title');  // form header main title
+    var chLabel = $('ch-store-label');                  // chat header micro-label
+    var chName  = $('ch-name-el');                      // chat header agent name
+    if (fhTitle) fhTitle.textContent = name;
     if (chLabel) chLabel.textContent = name;
     if (chName)  chName.textContent  = name + ' Support';
   }
