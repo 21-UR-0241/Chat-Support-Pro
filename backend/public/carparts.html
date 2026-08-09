@@ -85,7 +85,8 @@
       background: var(--brand);
       padding-bottom: 26px;
       position: relative; text-align: center; flex-shrink: 0;
-      margin-bottom: -6px; /* FIX: was -2px, increased to seal wave seam */
+      /* FIX: -8px overlap + wave at bottom:-2px seals the subpixel seam */
+      margin-bottom: -8px;
       z-index: 1;
     }
     .fh-avatar {
@@ -100,7 +101,9 @@
     .online-dot { width: 7px; height: 7px; border-radius: 50%; background: #4ade80; flex-shrink: 0;
       animation: pulse-ring 2.4s infinite; box-shadow: 0 0 0 0 rgba(74,222,128,.5); }
     @keyframes pulse-ring { 0%{box-shadow:0 0 0 0 rgba(74,222,128,.5)} 70%{box-shadow:0 0 0 6px transparent} 100%{box-shadow:0 0 0 0 transparent} }
-    .wave { position: absolute; bottom: 0; left: 0; width: 100%; display: block; }
+
+    /* FIX: bottom:-2px bleeds the wave 2px past the header edge, closing any subpixel gap */
+    .wave { position: absolute; bottom: -2px; left: 0; width: 100%; display: block; }
     #form-wave-path, #chat-wave-path { fill: var(--brand-bg); }
 
     #form-body {
@@ -149,7 +152,8 @@
       background: var(--brand);
       padding-bottom: 20px;
       position: relative; flex-shrink: 0;
-      margin-bottom: -6px; /* FIX: was -2px, increased to seal wave seam */
+      /* FIX: -8px overlap + wave at bottom:-2px seals the subpixel seam */
+      margin-bottom: -8px;
       z-index: 1;
     }
 
@@ -540,7 +544,7 @@
       clearErr();
       userInitial = name ? name[0].toUpperCase() : email[0].toUpperCase();
       startBtn.disabled = true;
-      startBtn.innerHTML = '<i class="ti ti-loader" style="animation:spin .7s linear infinite" aria-hidden="true"></i> Connecting…';
+      startBtn.innerHTML = '<i class="ti ti-loader" style="animation:spin .7s linear infinite" aria-hidden="true"></i> Connecting\u2026';
       core.submitEmail(email, name).catch(function() {
         startBtn.disabled = false;
         startBtn.innerHTML = '<i class="ti ti-message-circle" aria-hidden="true"></i> Start chat';
@@ -599,10 +603,10 @@
         replyIdx      = 0;
         isTyping      = false;
         userInitial   = name ? name[0].toUpperCase() : email[0].toUpperCase();
-        messagesEl.innerHTML = '<div id="hello" class="on"><div class="k">You\'re connected</div><h2>How can we help?</h2><p>Ask us anything — orders, products, or a question before you buy.</p></div>';
+        messagesEl.innerHTML = '<div id="hello" class="on"><div class="k">You\'re connected</div><h2>How can we help?</h2><p>Ask us anything \u2014 orders, products, or a question before you buy.</p></div>';
         helloEl = $('hello');
         var greeting = name ? 'Hi ' + esc(name) + '!' : 'Hi there!';
-        renderAgent(greeting + ' 👋 Welcome to our support chat. How can we help you today?', false);
+        renderAgent(greeting + ' \uD83D\uDC4B Welcome to our support chat. How can we help you today?', false);
       }
       formView.style.display = 'none';
       chatView.style.display = 'flex';
