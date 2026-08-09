@@ -96,8 +96,15 @@ body{font-family:var(--font);color:var(--text);background:var(--thread);
   70%{box-shadow:0 0 0 7px transparent}
   100%{box-shadow:0 0 0 0 transparent}
 }
-.hd-title{font-size:19px;font-weight:700;color:#fff;line-height:1.25;margin-bottom:5px;letter-spacing:-.015em;}
-.hd-sub{font-size:13px;color:rgba(255,255,255,.7);}
+.hd-title{font-size:14px;font-weight:500;color:rgba(255,255,255,.75);margin-bottom:4px;letter-spacing:.005em;}
+.hd-sub{font-size:12px;color:rgba(255,255,255,.58);}
+/* shop name — the biggest text in the header */
+.hd-brand{
+  font-size:24px;font-weight:700;color:#fff;
+  line-height:1.18;letter-spacing:-.022em;
+  margin-bottom:7px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
 
 /* ━━ PANELS (chat vs KB) ━━━━━━━━━━━━━━━━━━━━━━━ */
 .chat-panel{flex:1;display:none;flex-direction:column;min-height:0;}
@@ -446,21 +453,9 @@ body{font-family:var(--font);color:var(--text);background:var(--thread);
   </div>
 
   <div class="hd-hero">
-    <!-- agent avatar cluster — swap .av placeholders for <img> when real photos are available -->
-    <div class="av-cluster" id="avCluster">
-      <div class="av" style="background:#c0392b;">
-        <svg viewBox="0 0 24 24" fill="rgba(255,255,255,.9)" width="20" height="20"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
-      </div>
-      <div class="av" style="background:#6c3483;">
-        <svg viewBox="0 0 24 24" fill="rgba(255,255,255,.9)" width="20" height="20"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
-      </div>
-      <div class="av" style="background:#1a6e3c;">
-        <svg viewBox="0 0 24 24" fill="rgba(255,255,255,.9)" width="20" height="20"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
-      </div>
-      <!-- online indicator tile -->
-      <div class="av-signal"><div class="av-signal-dot"></div></div>
-    </div>
-    <h2 class="hd-title" id="hd-title">Got questions? Let us help.</h2>
+    <!-- shop name injected from ?brand= URL param (Liquid) or core ready event -->
+    <div class="hd-brand" id="hd-brand">Chat Support</div>
+    <p class="hd-title" id="hd-title">Got questions? Let us help.</p>
     <p class="hd-sub" id="hd-sub">Typically replies under 15 mins.</p>
   </div>
 </header>
@@ -650,7 +645,7 @@ body{font-family:var(--font);color:var(--text);background:var(--thread);
       light=$('light'), lightimg=$('lightimg'),
       tabChat=$('tab-chat'), tabKb=$('tab-kb'),
       panelChat=$('chat-panel'), panelKb=$('kb-panel'),
-      hdSub=$('hd-sub'), avCluster=$('avCluster'),
+      hdSub=$('hd-sub');
       emojiBtn=$('emoji-btn'), emojiPicker=$('emojiPicker'), kbInput=$('kb-input');
 
   var selectedFile=null, uploading=false, typingTO=null, typingDeb=null, emojiOpen=false;
@@ -706,15 +701,27 @@ body{font-family:var(--font);color:var(--text);background:var(--thread);
   /* ── scroll helpers ── */
   function scroll(){thread.scrollTop=thread.scrollHeight;}
 
-  /* ── agent avatar injection ─────────────────────────────────────────────
-     Called from core.on('ready') when the backend provides a photo URL.
-     Replaces the first placeholder circle with the agent's real photo.
+  /* ── brand name injection ────────────────────────────────────────────────
+     Priority: ?brand= URL param (set by Liquid) → core ready brandName →
+     ?source= hostname parse → "Chat Support" default.
+     The Liquid launcher should add:  q.set('brand', {{ shop.name | url_encode }});
   ── */
-  function renderAvatar(url){
-    if(!url||!avCluster)return;
-    var first=avCluster.querySelector('.av');
-    if(first){ first.innerHTML='<img src="'+url+'" alt="">'; first.style.background=''; }
-  }
+  (function initBrand(){
+    try{
+      var p=new URLSearchParams(location.search);
+      var brand=p.get('brand');
+      if(!brand){
+        /* derive from hostname: strip .myshopify.com / common TLDs / www */
+        var src=(p.get('source')||'').trim();
+        src=src.replace(/\.myshopify\.com$/i,'')
+               .replace(/\.(com|net|org|io|ca|co\.uk|store)$/i,'')
+               .replace(/^www\./i,'');
+        if(src) brand=src.replace(/[-_]+/g,' ')
+                         .replace(/\b\w/g,function(c){return c.toUpperCase();});
+      }
+      if(brand) $('hd-brand').textContent=brand;
+    }catch(e){}
+  })();
 
   /* ── date separator ── */
   function maybeAddDateSep(ts){
@@ -777,9 +784,9 @@ body{font-family:var(--font);color:var(--text);background:var(--thread);
 
   /* ── core events ── */
   core.on('ready',function(d){
+    if(d.brandName) $('hd-brand').textContent=d.brandName;
     if(d.placeholder) box.placeholder=d.placeholder;
     if(d.greeting) hello.querySelector('p').innerHTML=d.greeting;
-    if(d.agentAvatar) renderAvatar(d.agentAvatar);
     applyTheme(d.theme);
   });
 
