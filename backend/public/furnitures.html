@@ -16,7 +16,7 @@
   --p-light:#e5f7ef;
   --p-glow:rgba(10,135,90,.16);
   --customer:#1c1c2e;   /* dark navy — sent bubbles */
-  --thread:#f8fafb;
+  --thread:#ffffff;     /* pure white — makes rounded header corners pop */
   --card:#ffffff;
   --text:#111827;
   --sub:#4b5563;
@@ -39,15 +39,8 @@ body{font-family:var(--font);color:var(--text);background:var(--thread);
 .hd{
   background:linear-gradient(150deg,var(--hd-a) 0%,var(--hd-b) 100%);
   flex-shrink:0;position:relative;z-index:2;
-  padding:calc(14px + env(safe-area-inset-top)) 16px 32px;
-}
-/* wave: thread bg carves a gentle scallop out of the header bottom */
-.hd::after{
-  content:"";position:absolute;left:0;right:0;bottom:-1px;height:24px;
-  background:var(--thread);
-  -webkit-mask:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1200 60' preserveAspectRatio='none'><path d='M0,60 L1200,60 L1200,22 Q900,2 600,32 Q300,60 0,22 Z' fill='%23000'/></svg>") bottom/100% 100% no-repeat;
-          mask:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1200 60' preserveAspectRatio='none'><path d='M0,60 L1200,60 L1200,22 Q900,2 600,32 Q300,60 0,22 Z' fill='%23000'/></svg>") bottom/100% 100% no-repeat;
-  pointer-events:none;
+  padding:calc(14px + env(safe-area-inset-top)) 16px 22px;
+  border-radius:0 0 20px 20px;   /* box shape — white thread shows at bottom corners */
 }
 
 /* ── nav tabs ── */
