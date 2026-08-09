@@ -36,7 +36,7 @@
       var pDark =inkAt(Math.max(L-0.10,0.10));
       var pMid  =inkAt(Math.min(L+0.07,0.50));
       var pLight=hsl2hex(H,clamp(S*0.35,0.07,0.30),0.94);
-      var pBg   =hsl2hex(H,clamp(S*0.25,0.05,0.20),0.96);
+      var pBg   =hsl2hex(H,clamp(S*0.25,0.05,0.20),0.93);
       var r=document.documentElement;
       r.style.setProperty('--brand',     p);
       r.style.setProperty('--brand-dark',pDark);
@@ -61,7 +61,7 @@
       --brand:      #1448A0;
       --brand-dark: #0e3478;
       --brand-mid:  #1E88E5;
-      --brand-bg:   #EEF4FF;
+      --brand-bg:   #EDEDEC;
       --brand-glow: rgba(20,72,160,.16);
       --text:       #111827;
       --sub:        #4B5563;
@@ -158,12 +158,6 @@
 
     #chat-header { background: var(--brand); padding-bottom: 20px; position: relative; flex-shrink: 0; margin-bottom: -2px; z-index: 1; }
 
-    /* Store name micro-label in chat header — same source as form badge */
-    #ch-store-label {
-      font-size: 10px; font-weight: 600; letter-spacing: .7px;
-      color: rgba(255,255,255,.55); text-transform: uppercase;
-      padding: 6px 14px 0; text-align: center;
-    }
     .ch-inner { padding: 6px 14px 4px; display: flex; align-items: center; gap: 9px; }
     .back-btn {
       background: none; border: none; color: #fff; cursor: pointer; padding: 3px;
@@ -334,7 +328,6 @@
     <!-- ══════════════════ CHAT VIEW ══════════════════ -->
     <div id="chat-view">
       <div id="chat-header">
-        <p id="ch-store-label"></p>
         <div class="ch-inner">
           <button class="back-btn" id="back-btn" aria-label="Back">
             <i class="ti ti-arrow-left" aria-hidden="true"></i>
@@ -431,12 +424,10 @@
 
   function applyStoreName(name) {
     if (!name) return;
-    var fhTitle = document.querySelector('.fh-title');  // form header main title
-    var chLabel = $('ch-store-label');                  // chat header micro-label
-    var chName  = $('ch-name-el');                      // chat header agent name
+    var fhTitle = document.querySelector('.fh-title');
+    var chName  = $('ch-name-el');
     if (fhTitle) fhTitle.textContent = name;
-    if (chLabel) chLabel.textContent = name;
-    if (chName)  chName.textContent  = name + ' Support';
+    if (chName)  chName.textContent  = name;
   }
   applyStoreName(STORE_NAME);
 
