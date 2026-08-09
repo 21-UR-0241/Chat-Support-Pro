@@ -2,31 +2,85 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
   <title>Chat Support</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css" />
+
+  <!--
+    ── EARLY PALETTE INJECTION ─────────────────────────────────────
+    Mirrors production widget-aurora.html pattern:
+    Runs synchronously in <head> before first paint so CSS vars are
+    set before the browser lays out a single pixel.
+    Uses __applyPrimary (exposed on window) so the body script can
+    call it again from core.on('ready') without duplicating math.
+    ──────────────────────────────────────────────────────────────── -->
+  <script>
+  (function(){
+    function h2r(h){h=h.replace('#','');if(h.length===3)h=h[0]+h[0]+h[1]+h[1]+h[2]+h[2];return[parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];}
+    function lin(v){v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);}
+    function rlum(c){return 0.2126*lin(c[0])+0.7152*lin(c[1])+0.0722*lin(c[2]);}
+    function cr(a,b){var la=rlum(h2r(a))+0.05,lb=rlum(h2r(b))+0.05;return Math.max(la,lb)/Math.min(la,lb);}
+    function r2hsl(r,g,b){r/=255;g/=255;b/=255;var mx=Math.max(r,g,b),mn=Math.min(r,g,b),hh=0,s,l=(mx+mn)/2;if(mx!==mn){var d=mx-mn;s=l>0.5?d/(2-mx-mn):d/(mx+mn);switch(mx){case r:hh=(g-b)/d+(g<b?6:0);break;case g:hh=(b-r)/d+2;break;default:hh=(r-g)/d+4;}hh/=6;}else{s=0;}return[hh*360,s,l];}
+    function hsl2hex(h,s,l){h/=360;var r,g,b;if(s===0){r=g=b=l;}else{var q=l<0.5?l*(1+s):l+s-l*s,p=2*l-q,hu=function(t){if(t<0)t+=1;if(t>1)t-=1;if(t<1/6)return p+(q-p)*6*t;if(t<1/2)return q;if(t<2/3)return p+(q-p)*(2/3-t)*6;return p;};r=hu(h+1/3);g=hu(h);b=hu(h-1/3);}var to=function(x){var v=Math.round(x*255).toString(16);return v.length===1?'0'+v:v;};return'#'+to(r)+to(g)+to(b);}
+    function clamp(v,lo,hi){return Math.min(hi,Math.max(lo,v));}
+    function rgba(hex,a){var c=h2r(hex);return'rgba('+c[0]+','+c[1]+','+c[2]+','+a+')';}
+
+    function applyPrimary(raw){
+      if(!raw)return;
+      raw=raw.trim();if(raw.charAt(0)!=='#')raw='#'+raw;
+      if(!/^#[0-9a-f]{6}$/i.test(raw))return;
+      var rgb=h2r(raw),hsl=r2hsl(rgb[0],rgb[1],rgb[2]);
+      var H=hsl[0],S=hsl[1],L=hsl[2];
+      function inkAt(l){var sat=Math.min(S,0.95),hex=hsl2hex(H,sat,l),g=0;while(cr(hex,'#ffffff')<4.5&&l>0.06&&g<50){l-=0.02;hex=hsl2hex(H,sat,l);g++;}return hex;}
+      var p     =inkAt(L);
+      var pDark =inkAt(Math.max(L-0.10,0.10));
+      var pMid  =inkAt(Math.min(L+0.07,0.50));
+      var pLight=hsl2hex(H,clamp(S*0.35,0.07,0.30),0.94);
+      var pBg   =hsl2hex(H,clamp(S*0.25,0.05,0.20),0.96);
+      var r=document.documentElement;
+      r.style.setProperty('--brand',     p);
+      r.style.setProperty('--brand-dark',pDark);
+      r.style.setProperty('--brand-mid', pMid);
+      r.style.setProperty('--brand-bg',  pBg);
+      r.style.setProperty('--brand-glow',rgba(p,0.16));
+      /* update SVG wave fills to match new bg */
+      document.querySelectorAll('#form-wave-path,#chat-wave-path')
+        .forEach(function(el){el.setAttribute('fill',pBg);});
+    }
+
+    /* apply from ?primary= immediately (zero-flash) */
+    try{var qp=new URLSearchParams(location.search).get('primary');if(qp)applyPrimary(qp);}catch(e){}
+
+    /* expose so body script can call again from core.on('ready') */
+    window.__applyPrimary = applyPrimary;
+  })();
+  </script>
+
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      /* Defaults — overridden at runtime from ?primary= param */
-      --brand:         #1448A0;
-      --brand-mid:     #1E88E5;
-      --brand-bg:      #EEF4FF;
-      --brand-wave:    #EEF4FF;
-      --text-primary:  #111827;
-      --text-secondary:#6B7280;
-      --text-muted:    #9CA3AF;
-      --border:        rgba(0,0,0,.1);
-      --border-strong: rgba(0,0,0,.18);
-      --radius:        8px;
+      /* Defaults overridden at runtime by __applyPrimary() */
+      --brand:      #1448A0;
+      --brand-dark: #0e3478;
+      --brand-mid:  #1E88E5;
+      --brand-bg:   #EEF4FF;
+      --brand-glow: rgba(20,72,160,.16);
+      --text:       #111827;
+      --sub:        #4B5563;
+      --muted:      #9CA3AF;
+      --border:     rgba(0,0,0,.10);
+      --border-s:   rgba(0,0,0,.18);
+      --card:       #ffffff;
+      --radius:     8px;
     }
 
     html, body { height: 100%; width: 100%; }
     body {
-      display: flex; flex-direction: column;
-      background: var(--brand-bg);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--brand-bg);
+      display: flex; flex-direction: column; overflow: hidden;
+      -webkit-font-smoothing: antialiased;
     }
 
     /* ── Shell ───────────────────────────────────────── */
@@ -47,22 +101,24 @@
       padding-bottom: 28px;
       position: relative; text-align: center; flex-shrink: 0;
     }
-    /* Store name badge at the very top of form header */
+    /* Store name badge — populated from ?brand= or ?source= */
     #fh-store-badge {
       font-size: 11px; font-weight: 600; letter-spacing: .8px;
       color: rgba(255,255,255,.6); text-transform: uppercase;
-      padding: 10px 0 0;
+      padding: 10px 0 0; min-height: 26px;
     }
     .fh-avatar {
       width: 68px; height: 68px; border-radius: 50%;
       background: rgba(255,255,255,.18);
       border: 2px solid rgba(255,255,255,.4);
       display: flex; align-items: center; justify-content: center;
-      margin: 10px auto 10px;
+      margin: 8px auto 10px;
     }
     .fh-title { color: #fff; font-size: 20px; font-weight: 700; margin-bottom: 5px; }
-    .fh-sub   { color: rgba(255,255,255,.8); font-size: 13px; display: flex; align-items: center; justify-content: center; gap: 6px; }
-    .online-dot { width: 7px; height: 7px; border-radius: 50%; background: #4ade80; flex-shrink: 0; }
+    .fh-sub   { color: rgba(255,255,255,.8); font-size: 13px; display: flex; align-items: center; justify-content: center; gap: 6px; padding-bottom: 14px; }
+    .online-dot { width: 7px; height: 7px; border-radius: 50%; background: #4ade80; flex-shrink: 0;
+      animation: pulse-ring 2.4s infinite; box-shadow: 0 0 0 0 rgba(74,222,128,.5); }
+    @keyframes pulse-ring { 0%{box-shadow:0 0 0 0 rgba(74,222,128,.5)} 70%{box-shadow:0 0 0 6px transparent} 100%{box-shadow:0 0 0 0 transparent} }
     .wave { position: absolute; bottom: 0; left: 0; width: 100%; display: block; }
 
     #form-body {
@@ -72,52 +128,44 @@
     #form-body > .form-card,
     #form-body > p.form-note { width: 100%; max-width: 480px; }
 
-    .form-card {
-      background: #fff; border-radius: 16px;
-      border: 0.5px solid var(--border); padding: 22px;
-    }
-    .form-card > p { font-size: 13px; color: var(--text-secondary); margin-bottom: 14px; line-height: 1.55; }
+    .form-card { background: var(--card); border-radius: 16px; border: 0.5px solid var(--border); padding: 22px; }
+    .form-card > p { font-size: 13px; color: var(--sub); margin-bottom: 14px; line-height: 1.55; }
 
     .field-wrap  { margin-bottom: 13px; }
-    .field-label { display: block; font-size: 12px; font-weight: 500; color: var(--text-secondary); margin-bottom: 5px; }
+    .field-label { display: block; font-size: 12px; font-weight: 500; color: var(--sub); margin-bottom: 5px; }
     .req-star    { color: #ef4444; }
-    .field-opt   { font-size: 11px; color: var(--text-muted); font-weight: 400; }
+    .field-opt   { font-size: 11px; color: var(--muted); font-weight: 400; }
     .field-input {
       width: 100%; padding: 10px 13px; border-radius: var(--radius);
-      border: 1px solid var(--border-strong);
-      font-size: 14px; outline: none;
-      background: #F7FAFF; color: var(--text-primary);
-      font-family: inherit; transition: border-color .15s, box-shadow .15s;
+      border: 1px solid var(--border-s); font-size: 14px; outline: none;
+      background: #F7FAFF; color: var(--text); font-family: inherit;
+      transition: border-color .15s, box-shadow .15s;
     }
-    .field-input:focus { border-color: var(--brand-mid); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-mid) 18%, transparent); }
+    .field-input:focus { border-color: var(--brand-mid); box-shadow: 0 0 0 3px var(--brand-glow); }
     .field-input.has-error { border-color: #ef4444; }
     .err-msg { font-size: 11.5px; color: #ef4444; margin-top: 4px; display: none; }
 
     .start-btn {
       width: 100%; padding: 12px;
-      background: var(--brand-mid); color: #fff;
-      border: none; border-radius: 10px;
-      font-size: 15px; font-weight: 600;
-      cursor: pointer; font-family: inherit;
+      background: var(--brand); color: #fff; border: none; border-radius: 10px;
+      font-size: 15px; font-weight: 600; cursor: pointer; font-family: inherit;
       display: flex; align-items: center; justify-content: center; gap: 8px;
-      transition: background .15s, transform .1s;
+      transition: filter .15s, transform .1s;
     }
-    .start-btn:hover  { background: var(--brand); }
+    .start-btn:hover  { filter: brightness(1.1); }
     .start-btn:active { transform: scale(.98); }
+    .start-btn:disabled { opacity: .6; cursor: not-allowed; }
 
-    .form-note { font-size: 11px; color: var(--text-muted); text-align: center; margin-top: 10px; line-height: 1.5; }
+    .form-note { font-size: 11px; color: var(--muted); text-align: center; margin-top: 10px; line-height: 1.5; }
 
     /* ══════════════════════════════════════════════════
        CHAT VIEW
     ══════════════════════════════════════════════════ */
     #chat-view { flex: 1; display: none; flex-direction: column; overflow: hidden; }
 
-    #chat-header {
-      background: var(--brand);
-      padding-bottom: 22px;
-      position: relative; flex-shrink: 0;
-    }
-    /* Store name micro-label inside chat header */
+    #chat-header { background: var(--brand); padding-bottom: 22px; position: relative; flex-shrink: 0; }
+
+    /* Store name micro-label in chat header — same source as form badge */
     #ch-store-label {
       font-size: 10px; font-weight: 600; letter-spacing: .7px;
       color: rgba(255,255,255,.55); text-transform: uppercase;
@@ -125,107 +173,109 @@
     }
     .ch-inner { padding: 6px 14px 4px; display: flex; align-items: center; gap: 9px; }
     .back-btn {
-      background: none; border: none; color: #fff;
-      cursor: pointer; padding: 3px; font-size: 20px;
-      display: flex; align-items: center; border-radius: 6px;
-      transition: background .12s;
+      background: none; border: none; color: #fff; cursor: pointer; padding: 3px;
+      font-size: 20px; display: flex; align-items: center; border-radius: 6px; transition: background .12s;
     }
     .back-btn:hover  { background: rgba(255,255,255,.15); }
     .back-btn:active { background: rgba(255,255,255,.25); }
     .ch-avatar {
       width: 40px; height: 40px; border-radius: 50%;
-      background: rgba(255,255,255,.2);
-      border: 1.5px solid rgba(255,255,255,.4);
+      background: rgba(255,255,255,.2); border: 1.5px solid rgba(255,255,255,.4);
       display: flex; align-items: center; justify-content: center; flex-shrink: 0;
     }
     .ch-name   { color: #fff; font-size: 16px; font-weight: 600; margin-bottom: 1px; }
     .ch-status { color: rgba(255,255,255,.75); font-size: 12px; display: flex; align-items: center; gap: 4px; }
     .opts-btn  {
-      background: none; border: none; color: #fff;
-      cursor: pointer; padding: 3px; font-size: 19px;
-      display: flex; align-items: center; margin-left: auto;
+      background: none; border: none; color: #fff; cursor: pointer; padding: 3px;
+      font-size: 19px; display: flex; align-items: center; margin-left: auto;
       border-radius: 6px; transition: background .12s;
     }
     .opts-btn:hover { background: rgba(255,255,255,.15); }
 
     /* ── Messages ────────────────────────────────────── */
     #messages {
-      flex: 1; overflow-y: auto; padding: 10px 16px 6px;
-      display: flex; flex-direction: column; gap: 3px;
+      flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
+      padding: 10px 16px 6px; display: flex; flex-direction: column; gap: 3px;
       background: var(--brand-bg);
     }
     #messages::-webkit-scrollbar { width: 4px; }
-    #messages::-webkit-scrollbar-track { background: transparent; }
     #messages::-webkit-scrollbar-thumb { background: rgba(0,0,0,.12); border-radius: 4px; }
+
+    /* hello state — shown when connected but no messages yet */
+    #hello {
+      display: none; flex-direction: column; align-items: center; justify-content: center;
+      text-align: center; padding: 28px 16px; margin: auto 0; color: var(--muted);
+    }
+    #hello.on { display: flex; }
+    #hello .k  { font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--brand); font-weight: 700; margin-bottom: 10px; }
+    #hello h2  { font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+    #hello p   { font-size: 13.5px; line-height: 1.5; max-width: 28ch; }
 
     .msg-row      { display: flex; align-items: flex-end; gap: 6px; margin-bottom: 5px; }
     .msg-row.user { flex-direction: row-reverse; }
 
+    /* grouped: collapse spacing + hide repeated avatar (mirrors production) */
+    .msg-row.agent + .msg-row.agent { margin-top: 3px; }
+    .msg-row.agent + .msg-row.agent .msg-avatar { visibility: hidden; }
+
     .msg-avatar {
-      width: 32px; height: 32px; border-radius: 50%;
-      background: var(--brand-mid);
+      width: 32px; height: 32px; border-radius: 50%; background: var(--brand);
       display: flex; align-items: center; justify-content: center;
-      flex-shrink: 0; color: #fff; font-size: 14px;
+      flex-shrink: 0; color: #fff; font-size: 13px; align-self: flex-end;
     }
     .msg-avatar.user-av { background: #DBEAFE; color: #1E40AF; font-weight: 700; font-size: 13px; }
 
-    .bubble-wrap      { max-width: 70%; display: flex; flex-direction: column; }
+    .bubble-wrap      { max-width: 72%; display: flex; flex-direction: column; }
     .bubble-wrap.user { align-items: flex-end; }
 
     .bubble { padding: 9px 13px; font-size: 14px; line-height: 1.47; word-break: break-word; }
     .bubble.agent {
       background: #fff; border: 0.5px solid rgba(0,0,0,.1);
-      border-radius: 14px 14px 14px 3px; color: var(--text-primary);
+      border-radius: 18px 18px 18px 4px; color: var(--text);
     }
     .bubble.user {
-      background: var(--brand-mid); color: #fff;
-      border-radius: 14px 14px 3px 14px;
+      background: var(--brand); color: #fff;
+      border-radius: 18px 18px 4px 18px;
     }
-    .bubble-time { font-size: 10px; color: var(--text-muted); margin-top: 3px; }
+    /* hist messages skip the slide-up animation (mirrors production .hist) */
+    .msg-row.hist { animation: none !important; }
+    .bubble-time { font-size: 10px; color: var(--muted); margin-top: 3px; }
 
-    .typing-row {
-      display: flex; align-items: flex-end; gap: 6px;
-      margin-bottom: 6px; animation: fadeIn .2s ease;
-    }
+    /* typing */
+    .typing-row { display: flex; align-items: flex-end; gap: 6px; margin-bottom: 6px; animation: fadeIn .2s ease; }
     .typing-bubble {
       background: #fff; border: 0.5px solid rgba(0,0,0,.1);
-      border-radius: 14px 14px 14px 3px;
+      border-radius: 18px 18px 18px 4px;
       padding: 10px 13px; display: flex; gap: 4px; align-items: center;
     }
 
     /* ── Input bar ───────────────────────────────────── */
     #inputbar {
-      background: #fff; border-top: 0.5px solid var(--border);
-      padding: 10px 14px;
-      display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+      background: var(--card); border-top: 0.5px solid var(--border);
+      padding: 10px 14px; display: flex; align-items: center; gap: 10px; flex-shrink: 0;
     }
     .input-inner {
-      flex: 1; background: var(--brand-bg);
-      border-radius: 20px; padding: 7px 12px;
-      display: flex; align-items: center; gap: 6px;
+      flex: 1; background: var(--brand-bg); border-radius: 20px;
+      padding: 7px 12px; display: flex; align-items: center; gap: 6px;
     }
     #msg-input {
-      flex: 1; border: none; background: transparent;
-      font-size: 14px; outline: none;
-      color: var(--text-primary); font-family: inherit;
+      flex: 1; border: none; background: transparent; font-size: 14px; outline: none;
+      color: var(--text); font-family: inherit;
     }
-    #msg-input::placeholder { color: var(--text-muted); }
+    #msg-input::placeholder { color: var(--muted); }
     .bar-icon {
-      background: none; border: none; cursor: pointer;
-      color: var(--text-muted); font-size: 18px;
-      padding: 2px; display: flex; align-items: center;
+      background: none; border: none; cursor: pointer; color: var(--muted);
+      font-size: 18px; padding: 2px; display: flex; align-items: center;
       border-radius: 6px; transition: color .12s;
     }
-    .bar-icon:hover { color: var(--brand-mid); }
+    .bar-icon:hover { color: var(--brand); }
     .send-btn {
-      width: 42px; height: 42px; border-radius: 50%;
-      background: var(--brand-mid); border: none;
+      width: 42px; height: 42px; border-radius: 50%; background: var(--brand); border: none;
       cursor: pointer; display: flex; align-items: center; justify-content: center;
-      color: #fff; font-size: 18px; flex-shrink: 0;
-      transition: background .15s, transform .1s;
+      color: #fff; font-size: 18px; flex-shrink: 0; transition: filter .15s, transform .1s;
     }
     .send-btn:disabled { background: #CBD5E1; cursor: default; }
-    .send-btn:not(:disabled):hover  { background: var(--brand); }
+    .send-btn:not(:disabled):hover  { filter: brightness(1.1); }
     .send-btn:not(:disabled):active { transform: scale(.94); }
 
     /* ── Animations ──────────────────────────────────── */
@@ -264,31 +314,22 @@
         <p class="fh-title">Support Chat</p>
         <p class="fh-sub"><span class="online-dot"></span> We reply in minutes</p>
         <svg class="wave" viewBox="0 0 400 28" preserveAspectRatio="none" aria-hidden="true">
-          <path id="form-wave-path" d="M0,14 C100,28 300,0 400,14 L400,28 L0,28 Z"/>
+          <path id="form-wave-path" d="M0,14 C100,28 300,0 400,14 L400,28 L0,28 Z" fill="#EEF4FF"/>
         </svg>
       </div>
 
       <div id="form-body">
         <div class="form-card">
           <p>Fill in your details below to connect with our support team.</p>
-
           <div class="field-wrap">
-            <label class="field-label" for="f-email">
-              Email <span class="req-star">*</span>
-            </label>
-            <input id="f-email" class="field-input" type="email"
-              placeholder="name@example.com" autocomplete="email" />
+            <label class="field-label" for="f-email">Email <span class="req-star">*</span></label>
+            <input id="f-email" class="field-input" type="email" placeholder="name@example.com" autocomplete="email" />
             <p id="f-email-err" class="err-msg" role="alert"></p>
           </div>
-
           <div class="field-wrap" style="margin-bottom:18px">
-            <label class="field-label" for="f-name">
-              Name <span class="field-opt">(optional)</span>
-            </label>
-            <input id="f-name" class="field-input" type="text"
-              placeholder="How should we call you?" autocomplete="name" />
+            <label class="field-label" for="f-name">Name <span class="field-opt">(optional)</span></label>
+            <input id="f-name" class="field-input" type="text" placeholder="How should we call you?" autocomplete="name" />
           </div>
-
           <button class="start-btn" id="start-btn">
             <i class="ti ti-message-circle" aria-hidden="true"></i>
             Start chat
@@ -318,25 +359,25 @@
           </button>
         </div>
         <svg class="wave" viewBox="0 0 400 22" preserveAspectRatio="none" aria-hidden="true">
-          <path id="chat-wave-path" d="M0,11 C100,22 300,0 400,11 L400,22 L0,22 Z"/>
+          <path id="chat-wave-path" d="M0,11 C100,22 300,0 400,11 L400,22 L0,22 Z" fill="#EEF4FF"/>
         </svg>
       </div>
 
-      <div id="messages" role="log" aria-live="polite" aria-label="Chat messages"></div>
+      <div id="messages" role="log" aria-live="polite" aria-label="Chat messages">
+        <!-- hello state: shown when connected but no messages yet -->
+        <div id="hello">
+          <div class="k">You're connected</div>
+          <h2>How can we help?</h2>
+          <p>Ask us anything — orders, products, or a question before you buy.</p>
+        </div>
+      </div>
 
       <div id="inputbar">
         <div class="input-inner">
-          <input id="msg-input" type="text"
-            placeholder="Type a message..." maxlength="500" aria-label="Message" />
-          <button class="bar-icon" aria-label="Emoji">
-            <i class="ti ti-mood-smile" aria-hidden="true"></i>
-          </button>
-          <button class="bar-icon" aria-label="Attach photo">
-            <i class="ti ti-photo" aria-hidden="true"></i>
-          </button>
-          <button class="bar-icon" aria-label="Video">
-            <i class="ti ti-video" aria-hidden="true"></i>
-          </button>
+          <input id="msg-input" type="text" placeholder="Type a message..." maxlength="500" aria-label="Message" />
+          <button class="bar-icon" aria-label="Emoji"><i class="ti ti-mood-smile" aria-hidden="true"></i></button>
+          <button class="bar-icon" aria-label="Attach photo"><i class="ti ti-photo" aria-hidden="true"></i></button>
+          <button class="bar-icon" aria-label="Video"><i class="ti ti-video" aria-hidden="true"></i></button>
         </div>
         <button class="send-btn" id="send-btn" disabled aria-label="Send">
           <i class="ti ti-send" aria-hidden="true"></i>
@@ -347,121 +388,70 @@
   </div>
 </div>
 
+<!--
+  chat-core.js is served from the same origin as this file (backend/public/).
+  If the file is opened standalone (file://, local test) the script 404s
+  silently and we fall through to the mock mode below.
+-->
+<script src="./chat-core.js" onerror="window.__coreLoadFailed=true"></script>
+<script src="./chat-render.js" onerror="window.__renderLoadFailed=true"></script>
+
 <script>
 (function () {
   'use strict';
 
+  var $ = function(id){ return document.getElementById(id); };
+
   /* ══════════════════════════════════════════════════
-     1. READ URL PARAMS (passed by theme.liquid launcher)
-     ?store=   store ID
-     ?source=  store hostname  → derive display name
-     ?email=   customer email  (logged-in → skip form)
+     1. URL PARAMS
+     ?brand=   shop.name direct from Liquid (priority 1) ← matches production
+     ?source=  store hostname to parse as fallback       ← current launcher
+     ?email=   customer email (logged-in → skip form)
      ?name=    customer name
-     ?primary= brand hex color
+     ?primary= brand hex (already applied by <head> script, re-used here)
+     ?store=   store ID
+     ?api=     API base URL
   ══════════════════════════════════════════════════ */
-  const params  = new URLSearchParams(location.search);
-  const P_EMAIL  = (params.get('email')   || '').trim();
-  const P_NAME   = (params.get('name')    || '').trim();
-  const P_SOURCE = (params.get('source')  || '').trim();
-  const P_COLOR  = (params.get('primary') || '').trim();
-
-  /* ── Derive a readable store name from the hostname ── */
-  function storeNameFrom(source) {
-    if (!source) return '';
-    let s = source.toLowerCase()
-      .replace(/^www\./, '')
-      .replace(/\.myshopify\.com$/, '')
-      .replace(/\.(com|net|org|io|co|store|shop|ca|uk|au)(\.[a-z]{2})?$/, '');
-    // split on hyphens and dots, capitalise each word
-    return s.split(/[-.]/)
-      .filter(Boolean)
-      .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-      .join(' ');
-  }
-  const STORE_NAME = storeNameFrom(P_SOURCE);  // e.g. "Car Parts", "Nyx Labs"
-
-  /* ── Apply brand color from ?primary= ─────────────── */
-  function hexToRgb(hex) {
-    hex = hex.replace('#', '');
-    if (hex.length === 3) hex = hex.split('').map(c => c+c).join('');
-    if (!/^[0-9a-f]{6}$/i.test(hex)) return null;
-    return [parseInt(hex.slice(0,2),16), parseInt(hex.slice(2,4),16), parseInt(hex.slice(4,6),16)];
-  }
-  function darken(hex, amt) {
-    const rgb = hexToRgb(hex); if (!rgb) return hex;
-    return '#' + rgb.map(v => Math.max(0, Math.round(v * (1 - amt))).toString(16).padStart(2,'0')).join('');
-  }
-  function lighten(hex, pct) {
-    const rgb = hexToRgb(hex); if (!rgb) return hex;
-    return '#' + rgb.map(v => Math.min(255, Math.round(v + (255 - v) * pct)).toString(16).padStart(2,'0')).join('');
-  }
-  function hexToHsl(hex) {
-    const rgb = hexToRgb(hex); if (!rgb) return null;
-    let [r,g,b] = rgb.map(v => v/255);
-    const max = Math.max(r,g,b), min = Math.min(r,g,b);
-    let h, s, l = (max+min)/2;
-    if (max === min) { h = s = 0; }
-    else {
-      const d = max - min;
-      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-      switch(max) {
-        case r: h = ((g-b)/d + (g<b?6:0)) / 6; break;
-        case g: h = ((b-r)/d + 2) / 6; break;
-        case b: h = ((r-g)/d + 4) / 6; break;
-      }
-    }
-    return { h: h*360, s: s*100, l: l*100 };
-  }
-
-  (function applyBrand() {
-    if (!P_COLOR) return;
-    const rgb = hexToRgb(P_COLOR); if (!rgb) return;
-    const hsl = hexToHsl(P_COLOR);
-    const root = document.documentElement;
-
-    const brand    = P_COLOR;
-    const brandMid = hsl && hsl.l < 35 ? lighten(brand, 0.15) : darken(brand, 0.08);
-    const brandBg  = lighten(brand, 0.90);
-
-    root.style.setProperty('--brand',      brand);
-    root.style.setProperty('--brand-mid',  brandMid);
-    root.style.setProperty('--brand-bg',   brandBg);
-    root.style.setProperty('--brand-wave', brandBg);
-
-    // Update wave fill colours to match new brand-bg
-    document.querySelectorAll('#form-wave-path, #chat-wave-path')
-      .forEach(p => p.setAttribute('fill', brandBg));
-  })();
+  var params   = new URLSearchParams(location.search);
+  var P_BRAND  = (params.get('brand')   || '').trim();   // direct shop.name
+  var P_SOURCE = (params.get('source')  || '').trim();   // hostname fallback
+  var P_EMAIL  = (params.get('email')   || '').trim();
+  var P_NAME   = (params.get('name')    || '').trim();
+  var P_API    = (params.get('api')     || '').trim();
+  var P_STORE  = (params.get('store')   || '').trim();
 
   /* ══════════════════════════════════════════════════
-     2. INJECT STORE NAME INTO UI
+     2. STORE NAME RESOLUTION
+     Priority: ?brand= → parse ?source= → backend 'ready' event → default
+     Mirrors production initBrand() in widget-aurora.html
   ══════════════════════════════════════════════════ */
-  if (STORE_NAME) {
-    // Form header — small badge above avatar
-    const badge = document.getElementById('fh-store-badge');
-    if (badge) badge.textContent = STORE_NAME;
-
-    // Chat header — micro-label above the agent row
-    const chLabel = document.getElementById('ch-store-label');
-    if (chLabel) chLabel.textContent = STORE_NAME;
-
-    // Chat header agent name e.g. "Nyx Labs Support"
-    const chName = document.getElementById('ch-name-el');
-    if (chName) chName.textContent = STORE_NAME + ' Support';
+  function nameFromSource(src) {
+    if (!src) return '';
+    src = src.replace(/\.myshopify\.com$/i, '')
+             .replace(/\.(com|net|org|io|ca|co\.uk|store|shop)(\.[a-z]{2})?$/i, '')
+             .replace(/^www\./i, '');
+    return src.replace(/[-_]+/g, ' ')
+              .replace(/\b\w/g, function(c){ return c.toUpperCase(); });
   }
 
-  /* ══════════════════════════════════════════════════
-     3. PRE-FILL FORM  (logged-in customer from Shopify)
-  ══════════════════════════════════════════════════ */
-  const emailInput = document.getElementById('f-email');
-  const nameInput  = document.getElementById('f-name');
-  if (P_EMAIL) emailInput.value = P_EMAIL;
-  if (P_NAME)  nameInput.value  = P_NAME;
+  // Resolved once; can be overridden later by core.on('ready') d.brandName
+  var STORE_NAME = P_BRAND || nameFromSource(P_SOURCE);
+
+  function applyStoreName(name) {
+    if (!name) return;
+    var badge   = $('fh-store-badge');
+    var chLabel = $('ch-store-label');
+    var chName  = $('ch-name-el');
+    if (badge)   badge.textContent   = name;
+    if (chLabel) chLabel.textContent = name;
+    if (chName)  chName.textContent  = name + ' Support';
+  }
+  applyStoreName(STORE_NAME);
 
   /* ══════════════════════════════════════════════════
-     4. CHAT LOGIC
+     3. CHAT STATE
   ══════════════════════════════════════════════════ */
-  const REPLIES = [
+  var MOCK_REPLIES = [
     "Thanks for reaching out! I'd be happy to help with that.",
     "I understand. Let me look into that for you right away.",
     "Great question! Could you share a bit more detail so I can better assist?",
@@ -470,158 +460,283 @@
     "Thanks for the info! Let me pull up your account and we'll sort this out.",
     "I appreciate your patience. Let me escalate this to the right team for you.",
   ];
-  const MIN_TYPING_MS = 1400;
-  const MAX_TYPING_MS = 2600;
+  var MIN_TYPE = 1400, MAX_TYPE = 2600;
 
-  let replyIdx     = 0;
-  let isTyping     = false;
-  let userInitial  = 'U';
-  let sessionEmail = '';
-  let sessionOpen  = false;
+  var replyIdx    = 0;
+  var isTyping    = false;
+  var userInitial = 'U';
+  var sessionEmail = '';
+  var sessionOpen  = false;
 
-  const $ = id => document.getElementById(id);
-  const formView   = $('form-view');
-  const chatView   = $('chat-view');
-  const emailErr   = $('f-email-err');
-  const startBtn   = $('start-btn');
-  const backBtn    = $('back-btn');
-  const msgInput   = $('msg-input');
-  const sendBtn    = $('send-btn');
-  const messagesEl = $('messages');
+  var formView   = $('form-view');
+  var chatView   = $('chat-view');
+  var emailInput = $('f-email');
+  var nameInput  = $('f-name');
+  var emailErr   = $('f-email-err');
+  var startBtn   = $('start-btn');
+  var backBtn    = $('back-btn');
+  var msgInput   = $('msg-input');
+  var sendBtn    = $('send-btn');
+  var messagesEl = $('messages');
+  var helloEl    = $('hello');
 
   function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-  function fmt(d) { return d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', hour12:false }); }
+  function fmt(d) { return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',hour12:false}); }
   function validateEmail(e) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim()); }
-  function rand(a, b) { return Math.floor(Math.random() * (b - a + 1)) + a; }
+  function rand(a,b) { return Math.floor(Math.random()*(b-a+1))+a; }
   function scrollBottom() { messagesEl.scrollTop = messagesEl.scrollHeight; }
 
-  function showErr(msg) {
-    emailInput.classList.add('has-error');
-    emailErr.style.display = 'block';
-    emailErr.textContent   = msg;
-    emailInput.focus();
-  }
-  function clearErr() {
-    emailInput.classList.remove('has-error');
-    emailErr.style.display = 'none';
-    emailErr.textContent   = '';
-  }
-  emailInput.addEventListener('input', clearErr);
-
-  function openChat(email, name) {
-    const sameSession = sessionOpen && email.toLowerCase() === sessionEmail;
-    if (!sameSession) {
-      sessionEmail  = email.toLowerCase();
-      sessionOpen   = true;
-      replyIdx      = 0;
-      isTyping      = false;
-      userInitial   = name ? name[0].toUpperCase() : email[0].toUpperCase();
-      messagesEl.innerHTML = '';
-      const greeting = name ? `Hi ${esc(name)}!` : 'Hi there!';
-      addAgentMsg(`${greeting} 👋 Welcome to our support chat. How can we help you today?`);
-    }
-    formView.style.display = 'none';
-    chatView.style.display = 'flex';
-    setTimeout(() => { scrollBottom(); msgInput.focus(); }, 60);
-  }
-
-  function startChat() {
-    const email = emailInput.value.trim();
-    const name  = nameInput.value.trim();
-    if (!email)                return showErr('Email is required to start the chat.');
-    if (!validateEmail(email)) return showErr('Enter a valid email address.');
-    openChat(email, name);
-  }
-
-  startBtn.addEventListener('click', startChat);
-  emailInput.addEventListener('keydown', e => { if (e.key === 'Enter') startChat(); });
-  nameInput.addEventListener('keydown',  e => { if (e.key === 'Enter') startChat(); });
-
-  backBtn.addEventListener('click', () => {
-    isTyping               = false;
-    msgInput.value         = '';
-    sendBtn.disabled       = true;
-    chatView.style.display = 'none';
-    formView.style.display = 'flex';
-  });
-
-  msgInput.addEventListener('input', () => {
-    sendBtn.disabled = !msgInput.value.trim() || isTyping;
-  });
-  msgInput.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); trySend(); }
-  });
-  sendBtn.addEventListener('click', trySend);
-
-  function trySend() {
-    const text = msgInput.value.trim();
-    if (!text || isTyping) return;
-    msgInput.value   = '';
-    sendBtn.disabled = true;
-    addUserMsg(text);
-    const d1 = rand(500, 900), d2 = rand(MIN_TYPING_MS, MAX_TYPING_MS);
-    setTimeout(() => {
-      isTyping = true; showTyping();
-      setTimeout(() => {
-        hideTyping(); isTyping = false;
-        addAgentMsg(REPLIES[replyIdx % REPLIES.length]);
-        replyIdx++;
-      }, d2);
-    }, d1);
-  }
-
-  function addAgentMsg(text) {
-    const row = document.createElement('div');
-    row.className = 'msg-row msg-anim';
+  /* ══════════════════════════════════════════════════
+     4. RENDER HELPERS
+     hist=true  → no animation (matches production .hist class pattern)
+     hist=false → slide-up animation on new live messages
+  ══════════════════════════════════════════════════ */
+  function renderAgent(text, hist) {
+    helloEl.classList.remove('on');
+    var row = document.createElement('div');
+    row.className = 'msg-row agent' + (hist ? ' hist' : ' msg-anim');
     row.innerHTML =
-      `<div class="msg-avatar" aria-hidden="true"><i class="ti ti-headset" style="font-size:13px"></i></div>
-       <div class="bubble-wrap">
-         <div class="bubble agent">${text}</div>
-         <span class="bubble-time">${fmt(new Date())}</span>
-       </div>`;
+      '<div class="msg-avatar" aria-hidden="true"><i class="ti ti-headset" style="font-size:13px"></i></div>' +
+      '<div class="bubble-wrap">' +
+        '<div class="bubble agent">' + text + '</div>' +
+        '<span class="bubble-time">' + fmt(new Date()) + '</span>' +
+      '</div>';
     messagesEl.appendChild(row);
     scrollBottom();
   }
 
-  function addUserMsg(text) {
-    const row = document.createElement('div');
-    row.className = 'msg-row user msg-anim';
+  function renderUser(text, hist) {
+    helloEl.classList.remove('on');
+    var row = document.createElement('div');
+    row.className = 'msg-row user' + (hist ? ' hist' : ' msg-anim');
     row.innerHTML =
-      `<div class="msg-avatar user-av" aria-hidden="true">${esc(userInitial)}</div>
-       <div class="bubble-wrap user">
-         <div class="bubble user">${esc(text)}</div>
-         <span class="bubble-time">${fmt(new Date())}</span>
-       </div>`;
+      '<div class="msg-avatar user-av" aria-hidden="true">' + esc(userInitial) + '</div>' +
+      '<div class="bubble-wrap user">' +
+        '<div class="bubble user">' + esc(text) + '</div>' +
+        '<span class="bubble-time">' + fmt(new Date()) + '</span>' +
+      '</div>';
     messagesEl.appendChild(row);
     scrollBottom();
   }
 
-  function showTyping() {
-    const row = document.createElement('div');
+  function showTypingIndicator() {
+    var row = document.createElement('div');
     row.id = 'typing-indicator'; row.className = 'typing-row';
     row.setAttribute('aria-label', 'Support is typing');
     row.innerHTML =
-      `<div class="msg-avatar" aria-hidden="true"><i class="ti ti-headset" style="font-size:13px"></i></div>
-       <div class="typing-bubble">
-         <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-       </div>`;
+      '<div class="msg-avatar" aria-hidden="true"><i class="ti ti-headset" style="font-size:13px"></i></div>' +
+      '<div class="typing-bubble"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>';
     messagesEl.appendChild(row);
     scrollBottom();
   }
-
-  function hideTyping() {
-    const el = document.getElementById('typing-indicator');
-    if (el) el.remove();
-  }
+  function hideTypingIndicator() { var el = $('typing-indicator'); if (el) el.remove(); }
 
   /* ══════════════════════════════════════════════════
-     5. AUTO-START if email already known (logged-in customer)
-        Fires after DOM is ready so the chat view renders correctly.
+     5. CORE INTEGRATION  (chat-core.js)
+     If chat-core.js loaded successfully, wire up the same events as
+     widget-aurora.html:
+       core.on('ready')   → override brand name + reapply theme color
+       core.on('history') → replay past messages (no animation, hist=true)
+       core.on('message') → render incoming live message
+       core.on('typing')  → show/hide typing indicator
+       core.on('stage')   → 'email' = show form, else show chat
+     Falls through to MOCK MODE if chat-core.js failed to load.
   ══════════════════════════════════════════════════ */
-  if (P_EMAIL && validateEmail(P_EMAIL)) {
-    // Slight defer so CSS variables and DOM are fully applied
-    setTimeout(() => openChat(P_EMAIL, P_NAME), 120);
+  var usingCore = !window.__coreLoadFailed && window.ChatCore;
+
+  if (usingCore) {
+    var core = window.ChatCore.create();
+
+    /* ── ready: backend can override brand name + theme ── */
+    core.on('ready', function(d) {
+      if (d.brandName) applyStoreName(d.brandName);
+      if (d.theme && d.theme.primary && window.__applyPrimary) {
+        window.__applyPrimary(d.theme.primary);
+      }
+      if (d.greeting) helloEl.querySelector('p').textContent = d.greeting;
+    });
+
+    /* ── stage: 'email' = show gate, else show chat ── */
+    core.on('stage', function(s) {
+      if (s === 'email') {
+        formView.style.display = 'flex';
+        chatView.style.display = 'none';
+      } else {
+        formView.style.display = 'none';
+        chatView.style.display = 'flex';
+        helloEl.classList.add('on');
+        msgInput.focus();
+      }
+    });
+
+    /*
+      ── history: replay past conversation (no animation) ──────────────
+      Mirrors production widget-aurora.html core.on('history') handler:
+        list.forEach(function(m){ render(m, true); });
+      The 'hist' flag suppresses slideUp animation so old messages
+      appear instantly, exactly as they were before.
+    */
+    core.on('history', function(list) {
+      helloEl.classList.remove('on');
+      list.forEach(function(m) {
+        if (m.senderType === 'agent' || m.senderType === 'support') {
+          renderAgent(esc(m.content || ''), true);
+        } else if (m.senderType === 'customer' || m.senderType === 'user') {
+          renderUser(m.content || '', true);
+        }
+      });
+      setTimeout(scrollBottom, 80);
+    });
+
+    /* ── incoming live message ── */
+    core.on('message', function(m) {
+      hideTypingIndicator();
+      if (m.senderType === 'agent' || m.senderType === 'support') {
+        renderAgent(esc(m.content || ''), false);
+      } else if (m.senderType === 'customer' || m.senderType === 'user') {
+        renderUser(m.content || '', false);
+      }
+    });
+
+    /* ── typing indicator ── */
+    core.on('typing', function(show) {
+      hideTypingIndicator();
+      if (show) showTypingIndicator();
+    });
+
+    /* ── email gate submit → core.submitEmail ── */
+    startBtn.addEventListener('click', function() { submitGate(); });
+    emailInput.addEventListener('keydown', function(e){ if(e.key==='Enter') submitGate(); });
+    nameInput.addEventListener('keydown',  function(e){ if(e.key==='Enter') submitGate(); });
+
+    function submitGate() {
+      var email = emailInput.value.trim();
+      var name  = nameInput.value.trim();
+      if (!email)                { showErr('Email is required to start the chat.'); return; }
+      if (!validateEmail(email)) { showErr('Enter a valid email address.'); return; }
+      clearErr();
+      userInitial = name ? name[0].toUpperCase() : email[0].toUpperCase();
+      startBtn.disabled = true;
+      startBtn.innerHTML = '<i class="ti ti-loader" style="animation:spin .7s linear infinite" aria-hidden="true"></i> Connecting…';
+      core.submitEmail(email, name).catch(function() {
+        startBtn.disabled = false;
+        startBtn.innerHTML = '<i class="ti ti-message-circle" aria-hidden="true"></i> Start chat';
+      });
+    }
+
+    /* ── send via core ── */
+    msgInput.addEventListener('input', function(){ sendBtn.disabled = !msgInput.value.trim(); });
+    msgInput.addEventListener('keydown', function(e){
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); coreSend(); }
+    });
+    sendBtn.addEventListener('click', coreSend);
+
+    function coreSend() {
+      var text = msgInput.value.trim(); if (!text) return;
+      userInitial = userInitial || (sessionEmail ? sessionEmail[0].toUpperCase() : 'U');
+      msgInput.value = ''; sendBtn.disabled = true;
+      renderUser(text, false);
+      core.send(text, null).catch(function(){});
+    }
+
+    backBtn.addEventListener('click', function() {
+      chatView.style.display = 'none';
+      formView.style.display = 'flex';
+      msgInput.value = ''; sendBtn.disabled = true;
+    });
+
+    /* pre-fill form from URL params (logged-in Shopify customer) */
+    if (P_EMAIL) emailInput.value = P_EMAIL;
+    if (P_NAME)  nameInput.value  = P_NAME;
+
+    core.init();
+
+    /* If email already known, auto-submit (skip form) */
+    if (P_EMAIL && validateEmail(P_EMAIL)) {
+      setTimeout(function() {
+        userInitial = P_NAME ? P_NAME[0].toUpperCase() : P_EMAIL[0].toUpperCase();
+        core.submitEmail(P_EMAIL, P_NAME).catch(function(){});
+      }, 120);
+    }
+
+  } else {
+
+    /* ══════════════════════════════════════════════════
+       MOCK MODE  (chat-core.js not available)
+       Used for standalone testing / local preview.
+       Behaviour mirrors the real core flow:
+       - Form gate → openChat()
+       - DOM kept alive on back (same-session check)
+       - Mock agent replies with typing delay
+    ══════════════════════════════════════════════════ */
+    if (P_EMAIL) emailInput.value = P_EMAIL;
+    if (P_NAME)  nameInput.value  = P_NAME;
+
+    function showErr(m) { emailInput.classList.add('has-error'); emailErr.style.display='block'; emailErr.textContent=m; emailInput.focus(); }
+    function clearErr() { emailInput.classList.remove('has-error'); emailErr.style.display='none'; emailErr.textContent=''; }
+    emailInput.addEventListener('input', clearErr);
+
+    function openChat(email, name) {
+      var same = sessionOpen && email.toLowerCase() === sessionEmail;
+      if (!same) {
+        sessionEmail  = email.toLowerCase();
+        sessionOpen   = true;
+        replyIdx      = 0;
+        isTyping      = false;
+        userInitial   = name ? name[0].toUpperCase() : email[0].toUpperCase();
+        messagesEl.innerHTML = '<div id="hello" class="on"><div class="k">You\'re connected</div><h2>How can we help?</h2><p>Ask us anything — orders, products, or a question before you buy.</p></div>';
+        helloEl = $('hello');
+        var greeting = name ? 'Hi ' + esc(name) + '!' : 'Hi there!';
+        renderAgent(greeting + ' 👋 Welcome to our support chat. How can we help you today?', false);
+      }
+      formView.style.display = 'none';
+      chatView.style.display = 'flex';
+      setTimeout(function(){ scrollBottom(); msgInput.focus(); }, 60);
+    }
+
+    startBtn.addEventListener('click', function() {
+      var email = emailInput.value.trim(), name = nameInput.value.trim();
+      if (!email)                { showErr('Email is required to start the chat.'); return; }
+      if (!validateEmail(email)) { showErr('Enter a valid email address.'); return; }
+      openChat(email, name);
+    });
+    emailInput.addEventListener('keydown', function(e){ if(e.key==='Enter'){ var name=nameInput.value.trim(),email=emailInput.value.trim();if(!email){showErr('Email is required.');return;}if(!validateEmail(email)){showErr('Enter a valid email address.');return;}openChat(email,name);}});
+    nameInput.addEventListener('keydown',  function(e){ if(e.key==='Enter'){ startBtn.click(); }});
+
+    backBtn.addEventListener('click', function() {
+      isTyping = false; msgInput.value = ''; sendBtn.disabled = true;
+      chatView.style.display = 'none'; formView.style.display = 'flex';
+    });
+
+    msgInput.addEventListener('input', function(){ sendBtn.disabled = !msgInput.value.trim() || isTyping; });
+    msgInput.addEventListener('keydown', function(e){ if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();mockSend();}});
+    sendBtn.addEventListener('click', mockSend);
+
+    function mockSend() {
+      var text = msgInput.value.trim(); if (!text || isTyping) return;
+      msgInput.value = ''; sendBtn.disabled = true;
+      renderUser(text, false);
+      isTyping = true;
+      setTimeout(function() {
+        showTypingIndicator();
+        setTimeout(function() {
+          hideTypingIndicator(); isTyping = false;
+          renderAgent(MOCK_REPLIES[replyIdx % MOCK_REPLIES.length], false);
+          replyIdx++;
+        }, rand(MIN_TYPE, MAX_TYPE));
+      }, rand(500, 900));
+    }
+
+    /* auto-open if email passed via URL (logged-in customer) */
+    if (P_EMAIL && validateEmail(P_EMAIL)) {
+      setTimeout(function(){ openChat(P_EMAIL, P_NAME); }, 120);
+    }
   }
+
+  /* ── Form error helpers (shared) ── */
+  function showErr(m) { emailInput.classList.add('has-error'); emailErr.style.display='block'; emailErr.textContent=m; emailInput.focus(); }
+  function clearErr() { emailInput.classList.remove('has-error'); emailErr.style.display='none'; emailErr.textContent=''; }
+  emailInput.addEventListener('input', clearErr);
 
 })();
 </script>
