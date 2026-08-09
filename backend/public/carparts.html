@@ -95,8 +95,9 @@
 
     #form-header {
       background: var(--brand);
-      padding-bottom: 28px;
+      padding-bottom: 26px;
       position: relative; text-align: center; flex-shrink: 0;
+      margin-bottom: -2px; z-index: 1;
     }
     /* Store name badge — populated from ?brand= or ?source= */
     #fh-store-badge {
@@ -161,7 +162,7 @@
     ══════════════════════════════════════════════════ */
     #chat-view { flex: 1; display: none; flex-direction: column; overflow: hidden; }
 
-    #chat-header { background: var(--brand); padding-bottom: 22px; position: relative; flex-shrink: 0; }
+    #chat-header { background: var(--brand); padding-bottom: 20px; position: relative; flex-shrink: 0; margin-bottom: -2px; z-index: 1; }
 
     /* Store name micro-label in chat header — same source as form badge */
     #ch-store-label {
