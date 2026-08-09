@@ -3,15 +3,17 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Chat Support Widget</title>
+  <title>Chat Support</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --blue-brand:    #1448A0;
-      --blue-mid:      #1E88E5;
-      --blue-bg:       #EEF4FF;
+      /* Defaults — overridden at runtime from ?primary= param */
+      --brand:         #1448A0;
+      --brand-mid:     #1E88E5;
+      --brand-bg:      #EEF4FF;
+      --brand-wave:    #EEF4FF;
       --text-primary:  #111827;
       --text-secondary:#6B7280;
       --text-muted:    #9CA3AF;
@@ -20,50 +22,51 @@
       --radius:        8px;
     }
 
-    html, body {
-      height: 100%; width: 100%;
-    }
+    html, body { height: 100%; width: 100%; }
     body {
       display: flex; flex-direction: column;
-      background: var(--blue-bg);
+      background: var(--brand-bg);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      padding: 0;
     }
 
-    /* ── Shell ─────────────────────────────────────── */
+    /* ── Shell ───────────────────────────────────────── */
     #phone {
       width: 100%; height: 100%; flex: 1;
       display: flex; flex-direction: column;
       background: #fff; overflow: hidden;
     }
-
-    /* ── View container ────────────────────────────── */
     #view { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 
     /* ══════════════════════════════════════════════════
        FORM VIEW
     ══════════════════════════════════════════════════ */
-    #form-view  { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    #form-view { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
     #form-header {
-      background: var(--blue-brand);
+      background: var(--brand);
       padding-bottom: 28px;
       position: relative; text-align: center; flex-shrink: 0;
     }
+    /* Store name badge at the very top of form header */
+    #fh-store-badge {
+      font-size: 11px; font-weight: 600; letter-spacing: .8px;
+      color: rgba(255,255,255,.6); text-transform: uppercase;
+      padding: 10px 0 0;
+    }
     .fh-avatar {
-      width: 72px; height: 72px; border-radius: 50%;
+      width: 68px; height: 68px; border-radius: 50%;
       background: rgba(255,255,255,.18);
       border: 2px solid rgba(255,255,255,.4);
       display: flex; align-items: center; justify-content: center;
-      margin: 18px auto 10px;
+      margin: 10px auto 10px;
     }
     .fh-title { color: #fff; font-size: 20px; font-weight: 700; margin-bottom: 5px; }
     .fh-sub   { color: rgba(255,255,255,.8); font-size: 13px; display: flex; align-items: center; justify-content: center; gap: 6px; }
-    .online-dot { width: 7px; height: 7px; border-radius: 50%; background: #4ade80; display: inline-block; }
+    .online-dot { width: 7px; height: 7px; border-radius: 50%; background: #4ade80; flex-shrink: 0; }
     .wave { position: absolute; bottom: 0; left: 0; width: 100%; display: block; }
 
     #form-body {
-      flex: 1; background: var(--blue-bg); overflow-y: auto;
+      flex: 1; background: var(--brand-bg); overflow-y: auto;
       padding: 16px; display: flex; flex-direction: column; align-items: center;
     }
     #form-body > .form-card,
@@ -73,10 +76,8 @@
       background: #fff; border-radius: 16px;
       border: 0.5px solid var(--border); padding: 22px;
     }
-    .form-card > p {
-      font-size: 13px; color: var(--text-secondary);
-      margin-bottom: 14px; line-height: 1.55;
-    }
+    .form-card > p { font-size: 13px; color: var(--text-secondary); margin-bottom: 14px; line-height: 1.55; }
+
     .field-wrap  { margin-bottom: 13px; }
     .field-label { display: block; font-size: 12px; font-weight: 500; color: var(--text-secondary); margin-bottom: 5px; }
     .req-star    { color: #ef4444; }
@@ -88,26 +89,23 @@
       background: #F7FAFF; color: var(--text-primary);
       font-family: inherit; transition: border-color .15s, box-shadow .15s;
     }
-    .field-input:focus { border-color: var(--blue-mid); box-shadow: 0 0 0 3px rgba(30,136,229,.12); }
+    .field-input:focus { border-color: var(--brand-mid); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-mid) 18%, transparent); }
     .field-input.has-error { border-color: #ef4444; }
     .err-msg { font-size: 11.5px; color: #ef4444; margin-top: 4px; display: none; }
 
     .start-btn {
       width: 100%; padding: 12px;
-      background: var(--blue-mid); color: #fff;
+      background: var(--brand-mid); color: #fff;
       border: none; border-radius: 10px;
       font-size: 15px; font-weight: 600;
       cursor: pointer; font-family: inherit;
       display: flex; align-items: center; justify-content: center; gap: 8px;
       transition: background .15s, transform .1s;
     }
-    .start-btn:hover  { background: var(--blue-brand); }
+    .start-btn:hover  { background: var(--brand); }
     .start-btn:active { transform: scale(.98); }
 
-    .form-note {
-      font-size: 11px; color: var(--text-muted);
-      text-align: center; margin-top: 10px; line-height: 1.5;
-    }
+    .form-note { font-size: 11px; color: var(--text-muted); text-align: center; margin-top: 10px; line-height: 1.5; }
 
     /* ══════════════════════════════════════════════════
        CHAT VIEW
@@ -115,11 +113,17 @@
     #chat-view { flex: 1; display: none; flex-direction: column; overflow: hidden; }
 
     #chat-header {
-      background: var(--blue-brand);
+      background: var(--brand);
       padding-bottom: 22px;
       position: relative; flex-shrink: 0;
     }
-    .ch-inner { padding: 9px 14px 4px; display: flex; align-items: center; gap: 9px; }
+    /* Store name micro-label inside chat header */
+    #ch-store-label {
+      font-size: 10px; font-weight: 600; letter-spacing: .7px;
+      color: rgba(255,255,255,.55); text-transform: uppercase;
+      padding: 6px 14px 0; text-align: center;
+    }
+    .ch-inner { padding: 6px 14px 4px; display: flex; align-items: center; gap: 9px; }
     .back-btn {
       background: none; border: none; color: #fff;
       cursor: pointer; padding: 3px; font-size: 20px;
@@ -144,11 +148,11 @@
     }
     .opts-btn:hover { background: rgba(255,255,255,.15); }
 
-    /* ── Messages ──────────────────────────────────── */
+    /* ── Messages ────────────────────────────────────── */
     #messages {
       flex: 1; overflow-y: auto; padding: 10px 16px 6px;
       display: flex; flex-direction: column; gap: 3px;
-      background: var(--blue-bg);
+      background: var(--brand-bg);
     }
     #messages::-webkit-scrollbar { width: 4px; }
     #messages::-webkit-scrollbar-track { background: transparent; }
@@ -159,13 +163,11 @@
 
     .msg-avatar {
       width: 32px; height: 32px; border-radius: 50%;
-      background: var(--blue-mid);
+      background: var(--brand-mid);
       display: flex; align-items: center; justify-content: center;
       flex-shrink: 0; color: #fff; font-size: 14px;
     }
-    .msg-avatar.user-av {
-      background: #DBEAFE; color: #1E40AF; font-weight: 700; font-size: 13px;
-    }
+    .msg-avatar.user-av { background: #DBEAFE; color: #1E40AF; font-weight: 700; font-size: 13px; }
 
     .bubble-wrap      { max-width: 70%; display: flex; flex-direction: column; }
     .bubble-wrap.user { align-items: flex-end; }
@@ -176,12 +178,11 @@
       border-radius: 14px 14px 14px 3px; color: var(--text-primary);
     }
     .bubble.user {
-      background: var(--blue-mid); color: #fff;
+      background: var(--brand-mid); color: #fff;
       border-radius: 14px 14px 3px 14px;
     }
     .bubble-time { font-size: 10px; color: var(--text-muted); margin-top: 3px; }
 
-    /* Typing */
     .typing-row {
       display: flex; align-items: flex-end; gap: 6px;
       margin-bottom: 6px; animation: fadeIn .2s ease;
@@ -192,14 +193,14 @@
       padding: 10px 13px; display: flex; gap: 4px; align-items: center;
     }
 
-    /* ── Input bar ─────────────────────────────────── */
+    /* ── Input bar ───────────────────────────────────── */
     #inputbar {
       background: #fff; border-top: 0.5px solid var(--border);
       padding: 10px 14px;
       display: flex; align-items: center; gap: 10px; flex-shrink: 0;
     }
     .input-inner {
-      flex: 1; background: var(--blue-bg);
+      flex: 1; background: var(--brand-bg);
       border-radius: 20px; padding: 7px 12px;
       display: flex; align-items: center; gap: 6px;
     }
@@ -215,19 +216,19 @@
       padding: 2px; display: flex; align-items: center;
       border-radius: 6px; transition: color .12s;
     }
-    .bar-icon:hover { color: var(--blue-mid); }
+    .bar-icon:hover { color: var(--brand-mid); }
     .send-btn {
       width: 42px; height: 42px; border-radius: 50%;
-      background: var(--blue-mid); border: none;
+      background: var(--brand-mid); border: none;
       cursor: pointer; display: flex; align-items: center; justify-content: center;
       color: #fff; font-size: 18px; flex-shrink: 0;
       transition: background .15s, transform .1s;
     }
     .send-btn:disabled { background: #CBD5E1; cursor: default; }
-    .send-btn:not(:disabled):hover  { background: var(--blue-brand); }
+    .send-btn:not(:disabled):hover  { background: var(--brand); }
     .send-btn:not(:disabled):active { transform: scale(.94); }
 
-    /* ── Animations ────────────────────────────────── */
+    /* ── Animations ──────────────────────────────────── */
     @keyframes dotBounce {
       0%, 60%, 100% { transform: translateY(0); opacity: .4; }
       30%            { transform: translateY(-5px); opacity: 1; }
@@ -236,9 +237,8 @@
       from { opacity: 0; transform: translateY(10px); }
       to   { opacity: 1; transform: translateY(0); }
     }
-    @keyframes fadeIn {
-      from { opacity: 0; } to { opacity: 1; }
-    }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
     .msg-anim { animation: slideUp .22s ease both; }
     .dot {
       display: inline-block; width: 7px; height: 7px;
@@ -257,13 +257,14 @@
     <!-- ══════════════════ FORM VIEW ══════════════════ -->
     <div id="form-view">
       <div id="form-header">
+        <p id="fh-store-badge"></p>
         <div class="fh-avatar">
-          <i class="ti ti-headset" style="font-size:34px;color:#fff" aria-hidden="true"></i>
+          <i class="ti ti-headset" style="font-size:32px;color:#fff" aria-hidden="true"></i>
         </div>
         <p class="fh-title">Support Chat</p>
         <p class="fh-sub"><span class="online-dot"></span> We reply in minutes</p>
         <svg class="wave" viewBox="0 0 400 28" preserveAspectRatio="none" aria-hidden="true">
-          <path d="M0,14 C100,28 300,0 400,14 L400,28 L0,28 Z" fill="#EEF4FF"/>
+          <path id="form-wave-path" d="M0,14 C100,28 300,0 400,14 L400,28 L0,28 Z"/>
         </svg>
       </div>
 
@@ -300,6 +301,7 @@
     <!-- ══════════════════ CHAT VIEW ══════════════════ -->
     <div id="chat-view">
       <div id="chat-header">
+        <p id="ch-store-label"></p>
         <div class="ch-inner">
           <button class="back-btn" id="back-btn" aria-label="Back">
             <i class="ti ti-arrow-left" aria-hidden="true"></i>
@@ -308,7 +310,7 @@
             <i class="ti ti-headset" style="font-size:18px;color:#fff" aria-hidden="true"></i>
           </div>
           <div>
-            <p class="ch-name">Support Team</p>
+            <p class="ch-name" id="ch-name-el">Support Team</p>
             <p class="ch-status"><span class="online-dot"></span> Online</p>
           </div>
           <button class="opts-btn" aria-label="Options">
@@ -316,7 +318,7 @@
           </button>
         </div>
         <svg class="wave" viewBox="0 0 400 22" preserveAspectRatio="none" aria-hidden="true">
-          <path d="M0,11 C100,22 300,0 400,11 L400,22 L0,22 Z" fill="#EEF4FF"/>
+          <path id="chat-wave-path" d="M0,11 C100,22 300,0 400,11 L400,22 L0,22 Z"/>
         </svg>
       </div>
 
@@ -349,6 +351,116 @@
 (function () {
   'use strict';
 
+  /* ══════════════════════════════════════════════════
+     1. READ URL PARAMS (passed by theme.liquid launcher)
+     ?store=   store ID
+     ?source=  store hostname  → derive display name
+     ?email=   customer email  (logged-in → skip form)
+     ?name=    customer name
+     ?primary= brand hex color
+  ══════════════════════════════════════════════════ */
+  const params  = new URLSearchParams(location.search);
+  const P_EMAIL  = (params.get('email')   || '').trim();
+  const P_NAME   = (params.get('name')    || '').trim();
+  const P_SOURCE = (params.get('source')  || '').trim();
+  const P_COLOR  = (params.get('primary') || '').trim();
+
+  /* ── Derive a readable store name from the hostname ── */
+  function storeNameFrom(source) {
+    if (!source) return '';
+    let s = source.toLowerCase()
+      .replace(/^www\./, '')
+      .replace(/\.myshopify\.com$/, '')
+      .replace(/\.(com|net|org|io|co|store|shop|ca|uk|au)(\.[a-z]{2})?$/, '');
+    // split on hyphens and dots, capitalise each word
+    return s.split(/[-.]/)
+      .filter(Boolean)
+      .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(' ');
+  }
+  const STORE_NAME = storeNameFrom(P_SOURCE);  // e.g. "Car Parts", "Nyx Labs"
+
+  /* ── Apply brand color from ?primary= ─────────────── */
+  function hexToRgb(hex) {
+    hex = hex.replace('#', '');
+    if (hex.length === 3) hex = hex.split('').map(c => c+c).join('');
+    if (!/^[0-9a-f]{6}$/i.test(hex)) return null;
+    return [parseInt(hex.slice(0,2),16), parseInt(hex.slice(2,4),16), parseInt(hex.slice(4,6),16)];
+  }
+  function darken(hex, amt) {
+    const rgb = hexToRgb(hex); if (!rgb) return hex;
+    return '#' + rgb.map(v => Math.max(0, Math.round(v * (1 - amt))).toString(16).padStart(2,'0')).join('');
+  }
+  function lighten(hex, pct) {
+    const rgb = hexToRgb(hex); if (!rgb) return hex;
+    return '#' + rgb.map(v => Math.min(255, Math.round(v + (255 - v) * pct)).toString(16).padStart(2,'0')).join('');
+  }
+  function hexToHsl(hex) {
+    const rgb = hexToRgb(hex); if (!rgb) return null;
+    let [r,g,b] = rgb.map(v => v/255);
+    const max = Math.max(r,g,b), min = Math.min(r,g,b);
+    let h, s, l = (max+min)/2;
+    if (max === min) { h = s = 0; }
+    else {
+      const d = max - min;
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      switch(max) {
+        case r: h = ((g-b)/d + (g<b?6:0)) / 6; break;
+        case g: h = ((b-r)/d + 2) / 6; break;
+        case b: h = ((r-g)/d + 4) / 6; break;
+      }
+    }
+    return { h: h*360, s: s*100, l: l*100 };
+  }
+
+  (function applyBrand() {
+    if (!P_COLOR) return;
+    const rgb = hexToRgb(P_COLOR); if (!rgb) return;
+    const hsl = hexToHsl(P_COLOR);
+    const root = document.documentElement;
+
+    const brand    = P_COLOR;
+    const brandMid = hsl && hsl.l < 35 ? lighten(brand, 0.15) : darken(brand, 0.08);
+    const brandBg  = lighten(brand, 0.90);
+
+    root.style.setProperty('--brand',      brand);
+    root.style.setProperty('--brand-mid',  brandMid);
+    root.style.setProperty('--brand-bg',   brandBg);
+    root.style.setProperty('--brand-wave', brandBg);
+
+    // Update wave fill colours to match new brand-bg
+    document.querySelectorAll('#form-wave-path, #chat-wave-path')
+      .forEach(p => p.setAttribute('fill', brandBg));
+  })();
+
+  /* ══════════════════════════════════════════════════
+     2. INJECT STORE NAME INTO UI
+  ══════════════════════════════════════════════════ */
+  if (STORE_NAME) {
+    // Form header — small badge above avatar
+    const badge = document.getElementById('fh-store-badge');
+    if (badge) badge.textContent = STORE_NAME;
+
+    // Chat header — micro-label above the agent row
+    const chLabel = document.getElementById('ch-store-label');
+    if (chLabel) chLabel.textContent = STORE_NAME;
+
+    // Chat header agent name e.g. "Nyx Labs Support"
+    const chName = document.getElementById('ch-name-el');
+    if (chName) chName.textContent = STORE_NAME + ' Support';
+  }
+
+  /* ══════════════════════════════════════════════════
+     3. PRE-FILL FORM  (logged-in customer from Shopify)
+  ══════════════════════════════════════════════════ */
+  const emailInput = document.getElementById('f-email');
+  const nameInput  = document.getElementById('f-name');
+  if (P_EMAIL) emailInput.value = P_EMAIL;
+  if (P_NAME)  nameInput.value  = P_NAME;
+
+  /* ══════════════════════════════════════════════════
+     4. CHAT LOGIC
+  ══════════════════════════════════════════════════ */
   const REPLIES = [
     "Thanks for reaching out! I'd be happy to help with that.",
     "I understand. Let me look into that for you right away.",
@@ -361,19 +473,15 @@
   const MIN_TYPING_MS = 1400;
   const MAX_TYPING_MS = 2600;
 
-  /* ── State ─────────────────────────────────────── */
   let replyIdx     = 0;
   let isTyping     = false;
   let userInitial  = 'U';
-  let sessionEmail = '';      // email of active session
-  let sessionOpen  = false;   // whether a session has been started
+  let sessionEmail = '';
+  let sessionOpen  = false;
 
-  /* ── DOM ───────────────────────────────────────── */
   const $ = id => document.getElementById(id);
   const formView   = $('form-view');
   const chatView   = $('chat-view');
-  const emailInput = $('f-email');
-  const nameInput  = $('f-name');
   const emailErr   = $('f-email-err');
   const startBtn   = $('start-btn');
   const backBtn    = $('back-btn');
@@ -381,24 +489,12 @@
   const sendBtn    = $('send-btn');
   const messagesEl = $('messages');
 
-  /* ── Helpers ───────────────────────────────────── */
-  function esc(s) {
-    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  }
-  function fmt(d) {
-    return d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', hour12:false });
-  }
-  function validateEmail(e) {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim());
-  }
-  function rand(min, max) {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
-  }
-  function scrollBottom() {
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-  }
+  function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function fmt(d) { return d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', hour12:false }); }
+  function validateEmail(e) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim()); }
+  function rand(a, b) { return Math.floor(Math.random() * (b - a + 1)) + a; }
+  function scrollBottom() { messagesEl.scrollTop = messagesEl.scrollHeight; }
 
-  /* ── Form error ────────────────────────────────── */
   function showErr(msg) {
     emailInput.classList.add('has-error');
     emailErr.style.display = 'block';
@@ -412,40 +508,35 @@
   }
   emailInput.addEventListener('input', clearErr);
 
-  /* ── Start / restore chat ──────────────────────── */
-  function startChat() {
-    const email = emailInput.value.trim();
-    const name  = nameInput.value.trim();
-
-    if (!email)                return showErr('Email is required to start the chat.');
-    if (!validateEmail(email)) return showErr('Enter a valid email address.');
-
+  function openChat(email, name) {
     const sameSession = sessionOpen && email.toLowerCase() === sessionEmail;
-
     if (!sameSession) {
-      // Fresh session — clear old messages and reset
-      sessionEmail   = email.toLowerCase();
-      sessionOpen    = true;
-      replyIdx       = 0;
-      isTyping       = false;
-      userInitial    = name ? name[0].toUpperCase() : email[0].toUpperCase();
+      sessionEmail  = email.toLowerCase();
+      sessionOpen   = true;
+      replyIdx      = 0;
+      isTyping      = false;
+      userInitial   = name ? name[0].toUpperCase() : email[0].toUpperCase();
       messagesEl.innerHTML = '';
-
       const greeting = name ? `Hi ${esc(name)}!` : 'Hi there!';
       addAgentMsg(`${greeting} 👋 Welcome to our support chat. How can we help you today?`);
     }
-    // If same session: DOM already has messages — just show the view
-
     formView.style.display = 'none';
     chatView.style.display = 'flex';
     setTimeout(() => { scrollBottom(); msgInput.focus(); }, 60);
+  }
+
+  function startChat() {
+    const email = emailInput.value.trim();
+    const name  = nameInput.value.trim();
+    if (!email)                return showErr('Email is required to start the chat.');
+    if (!validateEmail(email)) return showErr('Enter a valid email address.');
+    openChat(email, name);
   }
 
   startBtn.addEventListener('click', startChat);
   emailInput.addEventListener('keydown', e => { if (e.key === 'Enter') startChat(); });
   nameInput.addEventListener('keydown',  e => { if (e.key === 'Enter') startChat(); });
 
-  /* ── Back — keep DOM intact ────────────────────── */
   backBtn.addEventListener('click', () => {
     isTyping               = false;
     msgInput.value         = '';
@@ -454,7 +545,6 @@
     formView.style.display = 'flex';
   });
 
-  /* ── Input ─────────────────────────────────────── */
   msgInput.addEventListener('input', () => {
     sendBtn.disabled = !msgInput.value.trim() || isTyping;
   });
@@ -466,27 +556,20 @@
   function trySend() {
     const text = msgInput.value.trim();
     if (!text || isTyping) return;
-
     msgInput.value   = '';
     sendBtn.disabled = true;
     addUserMsg(text);
-
-    const d1 = rand(500, 900);
-    const d2 = rand(MIN_TYPING_MS, MAX_TYPING_MS);
-
+    const d1 = rand(500, 900), d2 = rand(MIN_TYPING_MS, MAX_TYPING_MS);
     setTimeout(() => {
-      isTyping = true;
-      showTyping();
+      isTyping = true; showTyping();
       setTimeout(() => {
-        hideTyping();
-        isTyping = false;
+        hideTyping(); isTyping = false;
         addAgentMsg(REPLIES[replyIdx % REPLIES.length]);
         replyIdx++;
       }, d2);
     }, d1);
   }
 
-  /* ── Render ────────────────────────────────────── */
   function addAgentMsg(text) {
     const row = document.createElement('div');
     row.className = 'msg-row msg-anim';
@@ -515,8 +598,7 @@
 
   function showTyping() {
     const row = document.createElement('div');
-    row.id        = 'typing-indicator';
-    row.className = 'typing-row';
+    row.id = 'typing-indicator'; row.className = 'typing-row';
     row.setAttribute('aria-label', 'Support is typing');
     row.innerHTML =
       `<div class="msg-avatar" aria-hidden="true"><i class="ti ti-headset" style="font-size:13px"></i></div>
@@ -530,6 +612,15 @@
   function hideTyping() {
     const el = document.getElementById('typing-indicator');
     if (el) el.remove();
+  }
+
+  /* ══════════════════════════════════════════════════
+     5. AUTO-START if email already known (logged-in customer)
+        Fires after DOM is ready so the chat view renders correctly.
+  ══════════════════════════════════════════════════ */
+  if (P_EMAIL && validateEmail(P_EMAIL)) {
+    // Slight defer so CSS variables and DOM are fully applied
+    setTimeout(() => openChat(P_EMAIL, P_NAME), 120);
   }
 
 })();
