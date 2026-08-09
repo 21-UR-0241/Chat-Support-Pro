@@ -51,19 +51,7 @@
     }
 
     /* ─── Status bar ─────────────────────────────────────────────── */
-    #statusbar {
-      background: var(--blue-brand);
-      padding: 7px 20px 5px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      color: #fff;
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: .4px;
-      flex-shrink: 0;
-    }
-    .sb-icons { display: flex; gap: 5px; align-items: center; }
+
 
     /* ─── View container ─────────────────────────────────────────── */
     #view { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
@@ -318,12 +306,6 @@
 <body>
 
   <div id="phone">
-    <!-- Status bar -->
-    <div id="statusbar">
-      <span id="clock">12:00</span>
-
-    </div>
-
     <div id="view">
 
       <!-- ══════════════════════════════════
@@ -472,15 +454,6 @@
       const msgInput   = $('msg-input');
       const sendBtn    = $('send-btn');
       const messagesEl = $('messages');
-
-      /* ── Clock ─────────────────────────────────────────────────── */
-      function updateClock() {
-        $('clock').textContent = new Date().toLocaleTimeString([], {
-          hour: '2-digit', minute: '2-digit', hour12: false
-        });
-      }
-      updateClock();
-      setInterval(updateClock, 30_000);
 
       /* ── Helpers ───────────────────────────────────────────────── */
       function esc(str) {
