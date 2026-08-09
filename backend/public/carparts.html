@@ -6,14 +6,6 @@
   <title>Chat Support</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css" />
 
-  <!--
-    ── EARLY PALETTE INJECTION ─────────────────────────────────────
-    Mirrors production widget-aurora.html pattern:
-    Runs synchronously in <head> before first paint so CSS vars are
-    set before the browser lays out a single pixel.
-    Uses __applyPrimary (exposed on window) so the body script can
-    call it again from core.on('ready') without duplicating math.
-    ──────────────────────────────────────────────────────────────── -->
   <script>
   (function(){
     function h2r(h){h=h.replace('#','');if(h.length===3)h=h[0]+h[0]+h[1]+h[1]+h[2]+h[2];return[parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];}
@@ -45,10 +37,7 @@
       r.style.setProperty('--brand-glow',rgba(p,0.16));
     }
 
-    /* apply from ?primary= immediately (zero-flash) */
     try{var qp=new URLSearchParams(location.search).get('primary');if(qp)applyPrimary(qp);}catch(e){}
-
-    /* expose so body script can call again from core.on('ready') */
     window.__applyPrimary = applyPrimary;
   })();
   </script>
@@ -57,7 +46,6 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      /* Defaults overridden at runtime by __applyPrimary() */
       --brand:      #1448A0;
       --brand-dark: #0e3478;
       --brand-mid:  #1E88E5;
@@ -97,7 +85,8 @@
       background: var(--brand);
       padding-bottom: 26px;
       position: relative; text-align: center; flex-shrink: 0;
-      margin-bottom: -2px; z-index: 1;
+      margin-bottom: -6px; /* FIX: was -2px, increased to seal wave seam */
+      z-index: 1;
     }
     .fh-avatar {
       width: 68px; height: 68px; border-radius: 50%;
@@ -156,7 +145,13 @@
     ══════════════════════════════════════════════════ */
     #chat-view { flex: 1; display: none; flex-direction: column; overflow: hidden; }
 
-    #chat-header { background: var(--brand); padding-bottom: 20px; position: relative; flex-shrink: 0; margin-bottom: -2px; z-index: 1; }
+    #chat-header {
+      background: var(--brand);
+      padding-bottom: 20px;
+      position: relative; flex-shrink: 0;
+      margin-bottom: -6px; /* FIX: was -2px, increased to seal wave seam */
+      z-index: 1;
+    }
 
     .ch-inner { padding: 6px 14px 4px; display: flex; align-items: center; gap: 9px; }
     .back-btn {
@@ -188,7 +183,6 @@
     #messages::-webkit-scrollbar { width: 4px; }
     #messages::-webkit-scrollbar-thumb { background: rgba(0,0,0,.12); border-radius: 4px; }
 
-    /* hello state — shown when connected but no messages yet */
     #hello {
       display: none; flex-direction: column; align-items: center; justify-content: center;
       text-align: center; padding: 28px 16px; margin: auto 0; color: var(--muted);
@@ -201,7 +195,6 @@
     .msg-row      { display: flex; align-items: flex-end; gap: 6px; margin-bottom: 5px; }
     .msg-row.user { flex-direction: row-reverse; }
 
-    /* grouped: collapse spacing + hide repeated avatar (mirrors production) */
     .msg-row.agent + .msg-row.agent { margin-top: 3px; }
     .msg-row.agent + .msg-row.agent .msg-avatar { visibility: hidden; }
 
@@ -224,7 +217,6 @@
       background: var(--brand); color: #fff;
       border-radius: 18px 18px 4px 18px;
     }
-    /* hist messages skip the slide-up animation (mirrors production .hist) */
     .msg-row.hist { animation: none !important; }
     .bubble-time { font-size: 10px; color: var(--muted); margin-top: 3px; }
 
@@ -275,6 +267,7 @@
       to   { opacity: 1; transform: translateY(0); }
     }
     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes spin   { to { transform: rotate(360deg); } }
 
     .msg-anim { animation: slideUp .22s ease both; }
     .dot {
@@ -349,7 +342,6 @@
       </div>
 
       <div id="messages" role="log" aria-live="polite" aria-label="Chat messages">
-        <!-- hello state: shown when connected but no messages yet -->
         <div id="hello">
           <div class="k">You're connected</div>
           <h2>How can we help?</h2>
@@ -373,11 +365,6 @@
   </div>
 </div>
 
-<!--
-  chat-core.js is served from the same origin as this file (backend/public/).
-  If the file is opened standalone (file://, local test) the script 404s
-  silently and we fall through to the mock mode below.
--->
 <script src="./chat-core.js" onerror="window.__coreLoadFailed=true"></script>
 <script src="./chat-render.js" onerror="window.__renderLoadFailed=true"></script>
 
@@ -387,29 +374,14 @@
 
   var $ = function(id){ return document.getElementById(id); };
 
-  /* ══════════════════════════════════════════════════
-     1. URL PARAMS
-     ?brand=   shop.name direct from Liquid (priority 1) ← matches production
-     ?source=  store hostname to parse as fallback       ← current launcher
-     ?email=   customer email (logged-in → skip form)
-     ?name=    customer name
-     ?primary= brand hex (already applied by <head> script, re-used here)
-     ?store=   store ID
-     ?api=     API base URL
-  ══════════════════════════════════════════════════ */
   var params   = new URLSearchParams(location.search);
-  var P_BRAND  = (params.get('brand')   || '').trim();   // direct shop.name
-  var P_SOURCE = (params.get('source')  || '').trim();   // hostname fallback
+  var P_BRAND  = (params.get('brand')   || '').trim();
+  var P_SOURCE = (params.get('source')  || '').trim();
   var P_EMAIL  = (params.get('email')   || '').trim();
   var P_NAME   = (params.get('name')    || '').trim();
   var P_API    = (params.get('api')     || '').trim();
   var P_STORE  = (params.get('store')   || '').trim();
 
-  /* ══════════════════════════════════════════════════
-     2. STORE NAME RESOLUTION
-     Priority: ?brand= → parse ?source= → backend 'ready' event → default
-     Mirrors production initBrand() in widget-aurora.html
-  ══════════════════════════════════════════════════ */
   function nameFromSource(src) {
     if (!src) return '';
     src = src.replace(/\.myshopify\.com$/i, '')
@@ -419,7 +391,6 @@
               .replace(/\b\w/g, function(c){ return c.toUpperCase(); });
   }
 
-  // Resolved once; can be overridden later by core.on('ready') d.brandName
   var STORE_NAME = P_BRAND || nameFromSource(P_SOURCE);
 
   function applyStoreName(name) {
@@ -431,9 +402,6 @@
   }
   applyStoreName(STORE_NAME);
 
-  /* ══════════════════════════════════════════════════
-     3. CHAT STATE
-  ══════════════════════════════════════════════════ */
   var MOCK_REPLIES = [
     "Thanks for reaching out! I'd be happy to help with that.",
     "I understand. Let me look into that for you right away.",
@@ -469,11 +437,6 @@
   function rand(a,b) { return Math.floor(Math.random()*(b-a+1))+a; }
   function scrollBottom() { messagesEl.scrollTop = messagesEl.scrollHeight; }
 
-  /* ══════════════════════════════════════════════════
-     4. RENDER HELPERS
-     hist=true  → no animation (matches production .hist class pattern)
-     hist=false → slide-up animation on new live messages
-  ══════════════════════════════════════════════════ */
   function renderAgent(text, hist) {
     helloEl.classList.remove('on');
     var row = document.createElement('div');
@@ -514,23 +477,11 @@
   }
   function hideTypingIndicator() { var el = $('typing-indicator'); if (el) el.remove(); }
 
-  /* ══════════════════════════════════════════════════
-     5. CORE INTEGRATION  (chat-core.js)
-     If chat-core.js loaded successfully, wire up the same events as
-     widget-aurora.html:
-       core.on('ready')   → override brand name + reapply theme color
-       core.on('history') → replay past messages (no animation, hist=true)
-       core.on('message') → render incoming live message
-       core.on('typing')  → show/hide typing indicator
-       core.on('stage')   → 'email' = show form, else show chat
-     Falls through to MOCK MODE if chat-core.js failed to load.
-  ══════════════════════════════════════════════════ */
   var usingCore = !window.__coreLoadFailed && window.ChatCore;
 
   if (usingCore) {
     var core = window.ChatCore.create();
 
-    /* ── ready: backend can override brand name + theme ── */
     core.on('ready', function(d) {
       if (d.brandName) applyStoreName(d.brandName);
       if (d.theme && d.theme.primary && window.__applyPrimary) {
@@ -539,7 +490,6 @@
       if (d.greeting) helloEl.querySelector('p').textContent = d.greeting;
     });
 
-    /* ── stage: 'email' = show gate, else show chat ── */
     core.on('stage', function(s) {
       if (s === 'email') {
         formView.style.display = 'flex';
@@ -552,13 +502,6 @@
       }
     });
 
-    /*
-      ── history: replay past conversation (no animation) ──────────────
-      Mirrors production widget-aurora.html core.on('history') handler:
-        list.forEach(function(m){ render(m, true); });
-      The 'hist' flag suppresses slideUp animation so old messages
-      appear instantly, exactly as they were before.
-    */
     core.on('history', function(list) {
       helloEl.classList.remove('on');
       list.forEach(function(m) {
@@ -571,7 +514,6 @@
       setTimeout(scrollBottom, 80);
     });
 
-    /* ── incoming live message ── */
     core.on('message', function(m) {
       hideTypingIndicator();
       if (m.senderType === 'agent' || m.senderType === 'support') {
@@ -581,13 +523,11 @@
       }
     });
 
-    /* ── typing indicator ── */
     core.on('typing', function(show) {
       hideTypingIndicator();
       if (show) showTypingIndicator();
     });
 
-    /* ── email gate submit → core.submitEmail ── */
     startBtn.addEventListener('click', function() { submitGate(); });
     emailInput.addEventListener('keydown', function(e){ if(e.key==='Enter') submitGate(); });
     nameInput.addEventListener('keydown',  function(e){ if(e.key==='Enter') submitGate(); });
@@ -607,7 +547,6 @@
       });
     }
 
-    /* ── send via core ── */
     msgInput.addEventListener('input', function(){ sendBtn.disabled = !msgInput.value.trim(); });
     msgInput.addEventListener('keydown', function(e){
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); coreSend(); }
@@ -628,13 +567,11 @@
       msgInput.value = ''; sendBtn.disabled = true;
     });
 
-    /* pre-fill form from URL params (logged-in Shopify customer) */
     if (P_EMAIL) emailInput.value = P_EMAIL;
     if (P_NAME)  nameInput.value  = P_NAME;
 
     core.init();
 
-    /* If email already known, auto-submit (skip form) */
     if (P_EMAIL && validateEmail(P_EMAIL)) {
       setTimeout(function() {
         userInitial = P_NAME ? P_NAME[0].toUpperCase() : P_EMAIL[0].toUpperCase();
@@ -645,12 +582,7 @@
   } else {
 
     /* ══════════════════════════════════════════════════
-       MOCK MODE  (chat-core.js not available)
-       Used for standalone testing / local preview.
-       Behaviour mirrors the real core flow:
-       - Form gate → openChat()
-       - DOM kept alive on back (same-session check)
-       - Mock agent replies with typing delay
+       MOCK MODE
     ══════════════════════════════════════════════════ */
     if (P_EMAIL) emailInput.value = P_EMAIL;
     if (P_NAME)  nameInput.value  = P_NAME;
@@ -706,17 +638,17 @@
           hideTypingIndicator(); isTyping = false;
           renderAgent(MOCK_REPLIES[replyIdx % MOCK_REPLIES.length], false);
           replyIdx++;
+          sendBtn.disabled = !msgInput.value.trim();
         }, rand(MIN_TYPE, MAX_TYPE));
       }, rand(500, 900));
     }
 
-    /* auto-open if email passed via URL (logged-in customer) */
     if (P_EMAIL && validateEmail(P_EMAIL)) {
       setTimeout(function(){ openChat(P_EMAIL, P_NAME); }, 120);
     }
   }
 
-  /* ── Form error helpers (shared) ── */
+  /* ── Form error helpers (shared / core path) ── */
   function showErr(m) { emailInput.classList.add('has-error'); emailErr.style.display='block'; emailErr.textContent=m; emailInput.focus(); }
   function clearErr() { emailInput.classList.remove('has-error'); emailErr.style.display='none'; emailErr.textContent=''; }
   emailInput.addEventListener('input', clearErr);
