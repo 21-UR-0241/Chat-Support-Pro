@@ -43,9 +43,6 @@
       r.style.setProperty('--brand-mid', pMid);
       r.style.setProperty('--brand-bg',  pBg);
       r.style.setProperty('--brand-glow',rgba(p,0.16));
-      /* update SVG wave fills to match new bg */
-      document.querySelectorAll('#form-wave-path,#chat-wave-path')
-        .forEach(function(el){el.setAttribute('fill',pBg);});
     }
 
     /* apply from ?primary= immediately (zero-flash) */
@@ -120,6 +117,7 @@
       animation: pulse-ring 2.4s infinite; box-shadow: 0 0 0 0 rgba(74,222,128,.5); }
     @keyframes pulse-ring { 0%{box-shadow:0 0 0 0 rgba(74,222,128,.5)} 70%{box-shadow:0 0 0 6px transparent} 100%{box-shadow:0 0 0 0 transparent} }
     .wave { position: absolute; bottom: 0; left: 0; width: 100%; display: block; }
+    #form-wave-path, #chat-wave-path { fill: var(--brand-bg); }
 
     #form-body {
       flex: 1; background: var(--brand-bg); overflow-y: auto;
@@ -314,7 +312,7 @@
         <p class="fh-title">Support Chat</p>
         <p class="fh-sub"><span class="online-dot"></span> We reply in minutes</p>
         <svg class="wave" viewBox="0 0 400 28" preserveAspectRatio="none" aria-hidden="true">
-          <path id="form-wave-path" d="M0,14 C100,28 300,0 400,14 L400,28 L0,28 Z" fill="#EEF4FF"/>
+          <path id="form-wave-path" d="M0,14 C100,28 300,0 400,14 L400,28 L0,28 Z"/>
         </svg>
       </div>
 
@@ -359,7 +357,7 @@
           </button>
         </div>
         <svg class="wave" viewBox="0 0 400 22" preserveAspectRatio="none" aria-hidden="true">
-          <path id="chat-wave-path" d="M0,11 C100,22 300,0 400,11 L400,22 L0,22 Z" fill="#EEF4FF"/>
+          <path id="chat-wave-path" d="M0,11 C100,22 300,0 400,11 L400,22 L0,22 Z"/>
         </svg>
       </div>
 
