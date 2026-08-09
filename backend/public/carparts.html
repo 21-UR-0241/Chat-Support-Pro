@@ -438,9 +438,11 @@
       const MAX_TYPING_MS = 2600;
 
       /* ── State ─────────────────────────────────────────────────── */
-      let replyIdx    = 0;
-      let isTyping    = false;
-      let userInitial = 'U';
+      let replyIdx     = 0;
+      let isTyping     = false;
+      let userInitial  = 'U';
+      let sessionEmail = '';     // tracks the active session's email
+      let sessionLog   = [];     // { sender, text, time } — survives back/re-enter
 
       /* ── DOM refs ──────────────────────────────────────────────── */
       const $  = id => document.getElementById(id);
@@ -500,21 +502,31 @@
         const email = emailInput.value.trim();
         const name  = nameInput.value.trim();
 
-        if (!email)                  return showErr('Email is required to start the chat.');
-        if (!validateEmail(email))   return showErr('Enter a valid email address.');
+        if (!email)                return showErr('Email is required to start the chat.');
+        if (!validateEmail(email)) return showErr('Enter a valid email address.');
 
-        userInitial = name ? name[0].toUpperCase() : email[0].toUpperCase();
-        const greeting = name ? `Hi ${esc(name)}!` : 'Hi there!';
+        const isReturning = email === sessionEmail && sessionLog.length > 0;
 
-        messagesEl.innerHTML = '';
-        replyIdx  = 0;
-        isTyping  = false;
+        if (!isReturning) {
+          sessionEmail = email;
+          sessionLog   = [];
+          replyIdx     = 0;
+          isTyping     = false;
+          userInitial  = name ? name[0].toUpperCase() : email[0].toUpperCase();
+        }
 
         formView.style.display = 'none';
         chatView.style.display = 'flex';
+        messagesEl.innerHTML   = '';
 
-        addAgentMsg(`${greeting} 👋 Welcome to our support chat. How can we help you today?`);
-        setTimeout(() => msgInput.focus(), 80);
+        if (isReturning) {
+          sessionLog.forEach(m => renderMsg(m));
+        } else {
+          const greeting = name ? `Hi ${esc(name)}!` : 'Hi there!';
+          addAgentMsg(`${greeting} 👋 Welcome to our support chat. How can we help you today?`);
+        }
+
+        setTimeout(() => { scrollBottom(); msgInput.focus(); }, 80);
       }
 
       startBtn.addEventListener('click', startChat);
@@ -523,13 +535,12 @@
 
       /* ── Back to form ──────────────────────────────────────────── */
       backBtn.addEventListener('click', () => {
-        chatView.style.display = 'none';
-        formView.style.display = 'flex';
-        messagesEl.innerHTML   = '';
+        // Don't clear sessionLog — preserve for when user returns
+        isTyping               = false;
         msgInput.value         = '';
         sendBtn.disabled       = true;
-        isTyping               = false;
-        replyIdx               = 0;
+        chatView.style.display = 'none';
+        formView.style.display = 'flex';
       });
 
       /* ── Message input ─────────────────────────────────────────── */
@@ -571,7 +582,20 @@
       }
 
       /* ── Render helpers ────────────────────────────────────────── */
+      function renderMsg(m) {
+        const row = document.createElement('div');
+        row.className = m.sender === 'agent' ? 'msg-row' : 'msg-row user';
+        row.innerHTML = m.sender === 'agent'
+          ? `<div class="msg-avatar" aria-hidden="true"><i class="ti ti-headset" style="font-size:12px"></i></div>
+             <div class="bubble-wrap"><div class="bubble agent">${m.text}</div><span class="bubble-time">${m.time}</span></div>`
+          : `<div class="msg-avatar user-av" aria-hidden="true">${esc(userInitial)}</div>
+             <div class="bubble-wrap user"><div class="bubble user">${esc(m.text)}</div><span class="bubble-time">${m.time}</span></div>`;
+        messagesEl.appendChild(row);
+      }
+
       function addAgentMsg(text) {
+        const time = fmt(new Date());
+        sessionLog.push({ sender: 'agent', text, time });
         const row  = document.createElement('div');
         row.className = 'msg-row msg-anim';
         row.innerHTML = `
@@ -580,20 +604,22 @@
           </div>
           <div class="bubble-wrap">
             <div class="bubble agent">${text}</div>
-            <span class="bubble-time">${fmt(new Date())}</span>
+            <span class="bubble-time">${time}</span>
           </div>`;
         messagesEl.appendChild(row);
         scrollBottom();
       }
 
       function addUserMsg(text) {
+        const time = fmt(new Date());
+        sessionLog.push({ sender: 'user', text, time });
         const row  = document.createElement('div');
         row.className = 'msg-row user msg-anim';
         row.innerHTML = `
           <div class="msg-avatar user-av" aria-hidden="true">${esc(userInitial)}</div>
           <div class="bubble-wrap user">
             <div class="bubble user">${esc(text)}</div>
-            <span class="bubble-time">${fmt(new Date())}</span>
+            <span class="bubble-time">${time}</span>
           </div>`;
         messagesEl.appendChild(row);
         scrollBottom();
