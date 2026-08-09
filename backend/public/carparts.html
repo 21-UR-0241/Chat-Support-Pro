@@ -95,9 +95,10 @@
 
     #form-header {
       background: var(--brand);
-      padding-bottom: 26px;
+      padding-bottom: 20px;
       position: relative; text-align: center; flex-shrink: 0;
-      margin-bottom: -2px; z-index: 1;
+      border-radius: 0 0 20px 20px;
+      z-index: 1;
     }
     .fh-avatar {
       width: 68px; height: 68px; border-radius: 50%;
@@ -111,8 +112,7 @@
     .online-dot { width: 7px; height: 7px; border-radius: 50%; background: #4ade80; flex-shrink: 0;
       animation: pulse-ring 2.4s infinite; box-shadow: 0 0 0 0 rgba(74,222,128,.5); }
     @keyframes pulse-ring { 0%{box-shadow:0 0 0 0 rgba(74,222,128,.5)} 70%{box-shadow:0 0 0 6px transparent} 100%{box-shadow:0 0 0 0 transparent} }
-    .wave { position: absolute; bottom: 0; left: 0; width: 100%; display: block; }
-    #form-wave-path, #chat-wave-path { fill: var(--brand-bg); }
+
 
     #form-body {
       flex: 1; background: var(--brand-bg); overflow-y: auto;
@@ -156,7 +156,13 @@
     ══════════════════════════════════════════════════ */
     #chat-view { flex: 1; display: none; flex-direction: column; overflow: hidden; }
 
-    #chat-header { background: var(--brand); padding-bottom: 20px; position: relative; flex-shrink: 0; margin-bottom: -2px; z-index: 1; }
+    #chat-header {
+      background: var(--brand);
+      padding-bottom: 16px;
+      position: relative; flex-shrink: 0;
+      border-radius: 0 0 20px 20px;
+      z-index: 1;
+    }
 
     .ch-inner { padding: 6px 14px 4px; display: flex; align-items: center; gap: 9px; }
     .back-btn {
@@ -299,9 +305,6 @@
         </div>
         <p class="fh-title">Support Chat</p>
         <p class="fh-sub"><span class="online-dot"></span> We reply in minutes</p>
-        <svg class="wave" viewBox="0 0 400 28" preserveAspectRatio="none" aria-hidden="true">
-          <path id="form-wave-path" d="M0,14 C100,28 300,0 400,14 L400,28 L0,28 Z"/>
-        </svg>
       </div>
 
       <div id="form-body">
@@ -343,9 +346,6 @@
             <i class="ti ti-dots-vertical" aria-hidden="true"></i>
           </button>
         </div>
-        <svg class="wave" viewBox="0 0 400 22" preserveAspectRatio="none" aria-hidden="true">
-          <path id="chat-wave-path" d="M0,11 C100,22 300,0 400,11 L400,22 L0,22 Z"/>
-        </svg>
       </div>
 
       <div id="messages" role="log" aria-live="polite" aria-label="Chat messages">
@@ -427,7 +427,7 @@
     var fhTitle = document.querySelector('.fh-title');
     var chName  = $('ch-name-el');
     if (fhTitle) fhTitle.textContent = name;
-    if (chName)  chName.textContent  = name;
+    if (chName)  chName.textContent  = name + ' Support';
   }
   applyStoreName(STORE_NAME);
 
