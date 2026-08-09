@@ -43,8 +43,9 @@ body{font-family:var(--font);color:var(--text);background:var(--thread);
   border-radius:0 0 20px 20px;   /* box shape — white thread shows at bottom corners */
 }
 
-/* ── nav tabs ── */
-.tabs{display:flex;gap:4px;margin-bottom:22px;}
+/* ── nav row (tabs + close) ── */
+.hd-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;}
+.tabs{display:flex;gap:4px;}
 .tab{
   display:inline-flex;align-items:center;gap:6px;
   padding:7px 14px;border-radius:999px;border:none;
@@ -56,6 +57,21 @@ body{font-family:var(--font);color:var(--text);background:var(--thread);
 .tab:not(.active){background:transparent;color:rgba(255,255,255,.58);}
 .tab:not(.active):hover{background:rgba(255,255,255,.12);color:rgba(255,255,255,.82);}
 .tab:active{transform:scale(.96);}
+/* close / X button */
+.hd-x{
+  width:32px;height:32px;border-radius:50%;border:none;cursor:pointer;
+  background:rgba(255,255,255,.15);color:rgba(255,255,255,.85);
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
+  transition:background .16s,color .16s,transform .12s;
+}
+.hd-x svg{width:14px;height:14px;}
+.hd-x:hover{background:rgba(255,255,255,.28);color:#fff;}
+.hd-x:active{transform:scale(.9);}
+/* on mobile (full-screen iframe) make it slightly larger and easier to tap */
+@media(max-width:600px){
+  .hd-x{width:36px;height:36px;}
+  .hd-x svg{width:15px;height:15px;}
+}
 
 /* ── hero ── */
 .hd-hero{padding:0 2px;}
@@ -99,12 +115,9 @@ body{font-family:var(--font);color:var(--text);background:var(--thread);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 
-/* ━━ PANELS (chat vs KB) ━━━━━━━━━━━━━━━━━━━━━━━ */
+/* ━━ PANELS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 .chat-panel{flex:1;display:none;flex-direction:column;min-height:0;}
 .chat-panel.on{display:flex;}
-.kb-panel{flex:1;display:none;flex-direction:column;min-height:0;overflow-y:auto;
-  -webkit-overflow-scrolling:touch;background:var(--thread);padding:18px 14px 16px;}
-.kb-panel.on{display:flex;}
 
 /* ━━ THREAD ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 .thread{
@@ -114,40 +127,6 @@ body{font-family:var(--font);color:var(--text);background:var(--thread);
 .thread::-webkit-scrollbar{width:5px;}
 .thread::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:3px;}
 .thread::-webkit-scrollbar-track{background:transparent;}
-
-/* ━━ KNOWLEDGE BASE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
-.kb-search-wrap{position:relative;margin-bottom:18px;}
-.kb-search-wrap .kb-ico{
-  position:absolute;left:13px;top:50%;transform:translateY(-50%);
-  width:16px;height:16px;color:var(--muted);pointer-events:none;
-}
-.kb-search-wrap input{
-  width:100%;padding:11px 14px 11px 40px;
-  border:1.5px solid var(--line);border-radius:999px;
-  font-size:14px;font-family:var(--font);background:var(--card);color:var(--text);
-  outline:none;transition:border-color .16s,box-shadow .16s;
-}
-.kb-search-wrap input:focus{border-color:var(--p);box-shadow:0 0 0 3px var(--p-glow);}
-.kb-sect{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.08em;
-  text-transform:uppercase;margin-bottom:10px;padding:0 2px;}
-.kb-list{display:flex;flex-direction:column;gap:8px;}
-.kb-card{
-  display:flex;align-items:center;gap:11px;
-  padding:12px 13px;background:var(--card);border:1px solid var(--line);
-  border-radius:12px;cursor:pointer;text-decoration:none;color:var(--text);
-  transition:box-shadow .16s,border-color .16s;
-}
-.kb-card:hover{box-shadow:var(--sh-float);border-color:#c9d0da;}
-.kb-card-icon{
-  width:36px;height:36px;border-radius:9px;background:var(--p-light);
-  color:var(--p);display:flex;align-items:center;justify-content:center;
-  font-size:17px;flex-shrink:0;
-}
-.kb-card-meta{flex:1;min-width:0;}
-.kb-card-title{font-size:13.5px;font-weight:600;margin-bottom:2px;color:var(--text);}
-.kb-card-desc{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.kb-card-arr{color:var(--muted);flex-shrink:0;}
-.kb-card-arr svg{width:16px;height:16px;}
 
 /* ━━ EMAIL GATE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 #gate{display:none;flex-direction:column;align-items:center;justify-content:center;
@@ -351,13 +330,15 @@ body{font-family:var(--font);color:var(--text);background:var(--thread);
 }
 .emoji-picker button:hover{background:var(--p-light);}
 
-/* ━━ RESPONSIVE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+/* ━━ RESPONSIVE / MOBILE ━━━━━━━━━━━━━━━━━━━━━━━ */
 @media(max-width:600px){
-  .thread,.kb-panel{padding:14px 12px 8px;}
+  /* full-screen iframe on mobile — safe-area insets cover notch + home bar */
+  .hd{padding-top:calc(16px + env(safe-area-inset-top));padding-bottom:20px;}
+  .thread{padding:14px 12px 8px;}
+  .dock{padding:10px 12px calc(12px + env(safe-area-inset-bottom));}
   .m{max-width:86%;}
-  .dock{padding:9px 10px calc(9px + env(safe-area-inset-bottom));}
-  .hd-title{font-size:17px;}
-  .hd{padding-bottom:28px;}
+  .hd-brand{font-size:20px;}
+  .hd-title{font-size:13px;}
 }
 @media(prefers-reduced-motion:reduce){
   *{animation-duration:.001ms!important;transition-duration:.001ms!important;}
@@ -428,20 +409,21 @@ body{font-family:var(--font);color:var(--text);background:var(--thread);
      HEADER
 ══════════════════════════════════════ -->
 <header class="hd">
-  <div class="tabs">
-    <button class="tab active" id="tab-chat">
-      <!-- chat bubble icon -->
-      <svg viewBox="0 0 20 20" fill="currentColor">
-        <path fill-rule="evenodd" d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7z" clip-rule="evenodd"/>
+  <!-- top row: tabs left, close button right -->
+  <div class="hd-top">
+    <div class="tabs">
+      <button class="tab active" id="tab-chat">
+        <svg viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7z" clip-rule="evenodd"/>
+        </svg>
+        Chat
+      </button>
+    </div>
+    <!-- close button — always visible; essential on mobile (full-screen iframe) -->
+    <button class="hd-x" id="close" type="button" aria-label="Close chat">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
       </svg>
-      Chat
-    </button>
-    <button class="tab" id="tab-kb">
-      <!-- book icon -->
-      <svg viewBox="0 0 20 20" fill="currentColor">
-        <path d="M9 4.804A7.968 7.968 0 005.5 4c-1.255 0-2.443.29-3.5.804v10A7.969 7.969 0 015.5 14c1.669 0 3.218.51 4.5 1.385A7.962 7.962 0 0114.5 14c1.255 0 2.443.29 3.5.804v-10A7.968 7.968 0 0014.5 4c-1.255 0-2.443.29-3.5.804V12a1 1 0 11-2 0V4.804z"/>
-      </svg>
-      Knowledge Base
     </button>
   </div>
 
@@ -530,90 +512,6 @@ body{font-family:var(--font);color:var(--text);background:var(--thread);
 
 </div><!-- /chat-panel -->
 
-<!-- ══════════════════════════════════════
-     KNOWLEDGE BASE PANEL
-══════════════════════════════════════ -->
-<div class="kb-panel" id="kb-panel">
-  <div class="kb-search-wrap">
-    <svg class="kb-ico" viewBox="0 0 20 20" fill="currentColor">
-      <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/>
-    </svg>
-    <input type="text" id="kb-input" placeholder="Search for answers…" aria-label="Search knowledge base">
-  </div>
-
-  <div class="kb-sect">Popular articles</div>
-  <div class="kb-list" id="kb-list">
-
-    <a href="#" class="kb-card" data-title="How do I track my order?" data-desc="Check your shipping status and estimated delivery date">
-      <div class="kb-card-icon">📦</div>
-      <div class="kb-card-meta">
-        <div class="kb-card-title">How do I track my order?</div>
-        <div class="kb-card-desc">Check your shipping status and estimated delivery date</div>
-      </div>
-      <span class="kb-card-arr"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/></svg></span>
-    </a>
-
-    <a href="#" class="kb-card" data-title="What is your return policy?" data-desc="Returns, refunds, and exchanges explained">
-      <div class="kb-card-icon">↩️</div>
-      <div class="kb-card-meta">
-        <div class="kb-card-title">What is your return policy?</div>
-        <div class="kb-card-desc">Returns, refunds, and exchanges explained</div>
-      </div>
-      <span class="kb-card-arr"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/></svg></span>
-    </a>
-
-    <a href="#" class="kb-card" data-title="Change my shipping address" data-desc="How to update delivery details before your order ships">
-      <div class="kb-card-icon">🚚</div>
-      <div class="kb-card-meta">
-        <div class="kb-card-title">Change my shipping address</div>
-        <div class="kb-card-desc">How to update delivery details before your order ships</div>
-      </div>
-      <span class="kb-card-arr"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/></svg></span>
-    </a>
-
-    <a href="#" class="kb-card" data-title="Payment methods we accept" data-desc="Credit card, PayPal, crypto and more">
-      <div class="kb-card-icon">💳</div>
-      <div class="kb-card-meta">
-        <div class="kb-card-title">Payment methods we accept</div>
-        <div class="kb-card-desc">Credit card, PayPal, crypto and more</div>
-      </div>
-      <span class="kb-card-arr"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/></svg></span>
-    </a>
-
-    <a href="#" class="kb-card" data-title="Cancelling or modifying an order" data-desc="Steps to cancel or change an existing order">
-      <div class="kb-card-icon">✏️</div>
-      <div class="kb-card-meta">
-        <div class="kb-card-title">Cancelling or modifying an order</div>
-        <div class="kb-card-desc">Steps to cancel or change an existing order</div>
-      </div>
-      <span class="kb-card-arr"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/></svg></span>
-    </a>
-
-    <a href="#" class="kb-card" data-title="Frequently asked questions" data-desc="Quick answers to the most common questions">
-      <div class="kb-card-icon">❓</div>
-      <div class="kb-card-meta">
-        <div class="kb-card-title">Frequently asked questions</div>
-        <div class="kb-card-desc">Quick answers to the most common questions</div>
-      </div>
-      <span class="kb-card-arr"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/></svg></span>
-    </a>
-
-  </div><!-- /kb-list -->
-
-  <!-- "Still need help?" CTA at the bottom of KB -->
-  <div style="margin-top:20px;padding:14px 16px;background:var(--p-light);border-radius:12px;display:flex;align-items:center;gap:12px;">
-    <div style="width:36px;height:36px;border-radius:50%;background:var(--p);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-      <svg viewBox="0 0 20 20" fill="white" width="16" height="16"><path fill-rule="evenodd" d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7z" clip-rule="evenodd"/></svg>
-    </div>
-    <div style="flex:1;min-width:0;">
-      <div style="font-size:13px;font-weight:600;color:var(--text);">Still need help?</div>
-      <div style="font-size:12px;color:var(--sub);">Chat with a real person right now</div>
-    </div>
-    <button id="kb-to-chat" type="button" style="padding:8px 14px;background:var(--p);color:#fff;border:none;border-radius:999px;font-family:var(--font);font-size:12.5px;font-weight:600;cursor:pointer;flex-shrink:0;transition:filter .16s;">Chat</button>
-  </div>
-
-</div><!-- /kb-panel -->
-
 <!-- lightbox -->
 <div id="light">
   <button class="lx" type="button" aria-label="Close image">✕</button>
@@ -636,10 +534,9 @@ body{font-family:var(--font);color:var(--text);background:var(--thread);
       box=$('box'), send=$('send'), clip=$('clip'), file=$('file'),
       pre=$('pre'), prethumb=$('prethumb'), prename=$('prename'), presize=$('presize'), preprog=$('preprog'), predel=$('predel'),
       light=$('light'), lightimg=$('lightimg'),
-      tabChat=$('tab-chat'), tabKb=$('tab-kb'),
-      panelChat=$('chat-panel'), panelKb=$('kb-panel'),
-      hdSub=$('hd-sub');
-      emojiBtn=$('emoji-btn'), emojiPicker=$('emojiPicker'), kbInput=$('kb-input');
+      panelChat=$('chat-panel'),
+      hdSub=$('hd-sub'),
+      emojiBtn=$('emoji-btn'), emojiPicker=$('emojiPicker');
 
   var selectedFile=null, uploading=false, typingTO=null, typingDeb=null, emojiOpen=false;
 
@@ -655,32 +552,8 @@ body{font-family:var(--font);color:var(--text);background:var(--thread);
     window.visualViewport.addEventListener('scroll',appH);
   }
 
-  /* ── tab switching ── */
-  function switchTab(t){
-    if(t==='chat'){
-      tabChat.classList.add('active'); tabKb.classList.remove('active');
-      panelChat.classList.add('on'); panelKb.classList.remove('on');
-    } else {
-      tabKb.classList.add('active'); tabChat.classList.remove('active');
-      panelKb.classList.add('on'); panelChat.classList.remove('on');
-    }
-  }
-  tabChat.addEventListener('click',function(){switchTab('chat');});
-  tabKb.addEventListener('click',function(){switchTab('kb');});
-  $('kb-to-chat').addEventListener('click',function(){switchTab('chat');});
-
-  /* KB search filter */
-  kbInput.addEventListener('input',function(){
-    var q=this.value.toLowerCase();
-    [].forEach.call(document.querySelectorAll('.kb-card'),function(el){
-      var txt=(el.dataset.title+' '+el.dataset.desc).toLowerCase();
-      el.style.display=txt.indexOf(q)>-1?'':'none';
-    });
-  });
-  /* prevent navigation on KB article click (demo) */
-  [].forEach.call(document.querySelectorAll('.kb-card'),function(el){
-    el.addEventListener('click',function(e){e.preventDefault();});
-  });
+  /* close button — sends postMessage to parent launcher; works on all viewports */
+  $('close').addEventListener('click',function(){core.close();});
 
   /* ── colour theming ──────────────────────────────────────────────────────
      __applyPrimary is injected in <head> and already ran for the ?primary=
