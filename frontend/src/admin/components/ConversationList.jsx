@@ -1,6 +1,5 @@
 
 
-
 // import React, { useMemo, useEffect, useRef, useState, useCallback } from 'react';
 // import '../styles/ConversationList.css';
 
@@ -38,29 +37,21 @@
 //   loadMore,              // ← fetch the next page of older conversations
 //   hasMore = false,       // ← server has more beyond what's loaded
 //   loadingMore = false,   // ← a page fetch is in flight
+//   isServerSearch = false, // ← rows came from /api/conversations/search (message-body match)
 // }) {
 //   const [notificationPermission, setNotificationPermission] = useState('default');
 //   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
 //   const [soundEnabled, setSoundEnabled] = useState(true);
 //   const [showNotificationSettings, setShowNotificationSettings] = useState(false);
-
 //   const [toast, setToast] = useState(null);
 //   const toastTimeoutRef = useRef(null);
-
 //   const previousConversationsRef = useRef(null);
-
 //   const [contextMenu, setContextMenu] = useState(null);
 //   const contextMenuRef = useRef(null);
-
 //   const [confirmModal, setConfirmModal] = useState(null);
-
 //   const [dismissTick, setDismissTick] = useState(0);
-
 //   const acknowledgedGroupsRef = useRef(new Set());
-
-//   // ── Store index: build O(1) lookups ONCE per `stores` change ───────────────
-//   // Replaces the per-conversation stores.find() calls that were O(n × m) and
-//   // ran on every WebSocket update (the main source of list-render lag).
+//   const audioCtxRef = useRef(null);
 //   const storeIndex = useMemo(() => {
 //     const byIdentifier = new Map();
 //     const byId = new Map();
@@ -112,6 +103,28 @@
 //   }, []);
 
 //   useEffect(() => {
+//     if ('Notification' in window) {
+//       setNotificationPermission(Notification.permission);
+//     }
+//   }, []);
+
+//   useEffect(() => {
+//     const unlock = () => {
+//       try {
+//         if (!audioCtxRef.current)
+//           audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+//         if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume();
+//       } catch {}
+//     };
+//     window.addEventListener('pointerdown', unlock, { once: true });
+//     window.addEventListener('keydown',     unlock, { once: true });
+//     return () => {
+//       window.removeEventListener('pointerdown', unlock);
+//       window.removeEventListener('keydown', unlock);
+//     };
+//   }, []);
+
+//   useEffect(() => {
 //     const handleClickOutside = (e) => {
 //       if (contextMenuRef.current && !contextMenuRef.current.contains(e.target)) {
 //         setContextMenu(null);
@@ -148,26 +161,37 @@
 //     toastTimeoutRef.current = setTimeout(() => setToast(null), 3500);
 //   };
 
+
 //   const playNotificationSound = () => {
 //     if (!soundEnabled) return;
 //     try {
-//       const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-//       const oscillator = audioContext.createOscillator();
-//       const gainNode = audioContext.createGain();
-//       oscillator.connect(gainNode);
-//       gainNode.connect(audioContext.destination);
-//       oscillator.frequency.value = 600;
-//       oscillator.type = 'sine';
-//       gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-//       gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
-//       oscillator.start(audioContext.currentTime);
-//       oscillator.stop(audioContext.currentTime + 0.3);
+//       let ctx = audioCtxRef.current;
+//       if (!ctx) {
+//         ctx = new (window.AudioContext || window.webkitAudioContext)();
+//         audioCtxRef.current = ctx;        // create ONCE, reuse for the component's life
+//       }
+//       const beep = () => {
+//         const oscillator = ctx.createOscillator();
+//         const gainNode   = ctx.createGain();
+//         oscillator.connect(gainNode);
+//         gainNode.connect(ctx.destination);
+//         oscillator.frequency.value = 600;
+//         oscillator.type = 'sine';
+//         gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
+//         gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+//         oscillator.start(ctx.currentTime);
+//         oscillator.stop(ctx.currentTime + 0.3);
+//       };
+//       if (ctx.state === 'suspended') ctx.resume().then(beep).catch(() => {});
+//       else beep();
 //     } catch (error) {
 //       console.error('Error playing notification sound:', error);
 //     }
 //   };
 
-//   const showNotification = (conversation, newMessage) => {
+
+
+// const showNotification = (conversation, newMessage) => {
 //     if (!notificationsEnabled || notificationPermission !== 'granted') return;
 //     const title = conversation.customerName || 'New Message';
 //     const options = {
@@ -183,7 +207,7 @@
 //       const notification = new Notification(title, options);
 //       notification.onclick = () => {
 //         window.focus();
-//         onSelectConversation(conversation);
+//         if (!activeConversation) onSelectConversation(conversation);
 //         notification.close();
 //       };
 //       setTimeout(() => notification.close(), 5000);
@@ -192,13 +216,13 @@
 //     }
 //   };
 
+
 //   useEffect(() => {
 //     if (!conversations || loading) return;
+//     if (isServerSearch) { previousConversationsRef.current = conversations; return; }
 //     const previousConversations = previousConversationsRef.current;
 
 //     if (previousConversations) {
-//       // Index previous by id once — was previousConversations.find() inside the
-//       // loop (O(n²)). Now O(n).
 //       const prevById = new Map(previousConversations.map(c => [c.id, c]));
 //       conversations.forEach((currentConv) => {
 //         const previousConv = prevById.get(currentConv.id);
@@ -227,7 +251,7 @@
 //     }
 
 //     previousConversationsRef.current = conversations;
-//   }, [conversations, activeConversation, loading, notificationsEnabled, soundEnabled]);
+//   }, [conversations, activeConversation, loading, notificationsEnabled, soundEnabled, isServerSearch]);
 
 //   const resolveStoreId = useCallback((conv) => {
 //     const match = findStore(conv);
@@ -299,7 +323,6 @@
 //     });
 //     if (replied) acknowledgedGroupsRef.current.add(group.groupKey);
 //     return replied;
-//   // eslint-disable-next-line react-hooks/exhaustive-deps
 //   }, [dismissTick]);
 
 //   const handleDismissUrgent = useCallback((e, groupKey) => {
@@ -341,17 +364,21 @@
 //     if (!groupedConversations) return [];
 //     return groupedConversations.filter((group) => {
 //       const conv = group.mostRecent;
-//       const search = filters.search?.toLowerCase();
+//       const search = !isServerSearch && filters.search?.toLowerCase();
 //       if (search) {
-//         const storeName = findStore(conv)?.name || conv.storeName || '';
-//         const matchesSearch =
-//           group.conversations.some(c => c.customerName?.toLowerCase().includes(search)) ||
-//           conv.customerEmail?.toLowerCase().includes(search) ||
-//           conv.customerId?.toLowerCase().includes(search) ||
-//           conv.lastMessage?.toLowerCase().includes(search) ||
-//           storeName.toLowerCase().includes(search) ||
-//           conv.storeIdentifier?.toLowerCase().includes(search) ||
-//           conv.shopId?.toString().toLowerCase().includes(search);
+//         const matchesSearch = group.conversations.some((c) => {
+//           const storeName = findStore(c)?.name || c.storeName || '';
+//           return (
+//             c.customerName?.toLowerCase().includes(search) ||
+//             c.customerEmail?.toLowerCase().includes(search) ||
+//             c.customerId?.toLowerCase().includes(search) ||
+//             c.lastMessage?.toLowerCase().includes(search) ||
+//             c.lastCustomerMessage?.toLowerCase().includes(search) ||
+//             storeName.toLowerCase().includes(search) ||
+//             c.storeIdentifier?.toLowerCase().includes(search) ||
+//             c.shopId?.toString().toLowerCase().includes(search)
+//           );
+//         });
 //         if (!matchesSearch) return false;
 //       }
 //       if (filters.status) {
@@ -372,7 +399,7 @@
 //       }
 //       return true;
 //     });
-//   }, [groupedConversations, filters, findStore, getGroupUnread]);
+//   }, [groupedConversations, filters, findStore, getGroupUnread, isServerSearch]);
 
 //   const totalUnread = useMemo(() => {
 //     if (!conversations) return 0;
@@ -388,11 +415,6 @@
 //   // eslint-disable-next-line react-hooks/exhaustive-deps
 //   }, [groupedConversations, adminHasReplied, dismissTick]);
 
-//   // ── Windowing ───────────────────────────────────────────────────────────────
-//   // Rendering a DOM node per conversation is the main list-side cost on big
-//   // groups. Urgent items always render (there are few); the "normal" bulk is
-//   // capped and grows as the user scrolls near the bottom. Partition once here so
-//   // the scroll handler can see the full normal length.
 //   const { urgentGroups, normalGroups } = useMemo(() => {
 //     const u = [], n = [];
 //     (filteredGroupedConversations || []).forEach((g) => {
@@ -400,14 +422,13 @@
 //       (isUrgent ? u : n).push(g);
 //     });
 //     return { urgentGroups: u, normalGroups: n };
-//   // eslint-disable-next-line react-hooks/exhaustive-deps
 //   }, [filteredGroupedConversations, adminHasReplied, dismissTick]);
 
 //   const NORMAL_CHUNK = 60;
 //   const itemsScrollRef = useRef(null);
 //   const [visibleNormal, setVisibleNormal] = useState(NORMAL_CHUNK);
+//   const searchActive = !isServerSearch && (filters.search || '').trim().length > 0;
 
-//   // Reset the window whenever the filtered set is re-scoped (search/filter/tab).
 //   useEffect(() => {
 //     setVisibleNormal(NORMAL_CHUNK);
 //     if (itemsScrollRef.current) itemsScrollRef.current.scrollTop = 0;
@@ -416,7 +437,7 @@
 //   const handleItemsScroll = (e) => {
 //     const el = e.currentTarget;
 //     if (el.scrollHeight - el.scrollTop - el.clientHeight < 500) {
-//       if (visibleNormal < normalGroups.length) {
+//       if (!searchActive && visibleNormal < normalGroups.length) {
 //         setVisibleNormal((v) => v + NORMAL_CHUNK);          // reveal already-fetched rows first
 //       } else if (hasMore && !loadingMore && typeof loadMore === 'function') {
 //         loadMore();                                          // then pull the next page from the server
@@ -929,8 +950,10 @@
 //                     )}
 //                   </>
 //                 )}
-//                 {normalGroups.slice(0, visibleNormal).map(renderGroup)}
-//                 {(() => {
+//                 {/* When a local search is active, lift the window cap so EVERY match
+//                     renders at once instead of 60-at-a-time behind scroll. */}
+//                 {(searchActive ? normalGroups : normalGroups.slice(0, visibleNormal)).map(renderGroup)}
+//                 {!searchActive && (() => {
 //                   const moreWindowed = normalGroups.length > visibleNormal;       // fetched, not yet shown
 //                   const canFetch     = hasMore && typeof loadMore === 'function';  // server has older pages
 //                   if (!moreWindowed && !canFetch && !loadingMore) return null;
@@ -1101,6 +1124,10 @@
 
 
 
+
+
+
+
 import React, { useMemo, useEffect, useRef, useState, useCallback } from 'react';
 import '../styles/ConversationList.css';
 
@@ -1144,24 +1171,15 @@ function ConversationList({
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [showNotificationSettings, setShowNotificationSettings] = useState(false);
-
   const [toast, setToast] = useState(null);
   const toastTimeoutRef = useRef(null);
-
   const previousConversationsRef = useRef(null);
-
   const [contextMenu, setContextMenu] = useState(null);
   const contextMenuRef = useRef(null);
-
   const [confirmModal, setConfirmModal] = useState(null);
-
   const [dismissTick, setDismissTick] = useState(0);
-
   const acknowledgedGroupsRef = useRef(new Set());
-
-  // ── Store index: build O(1) lookups ONCE per `stores` change ───────────────
-  // Replaces the per-conversation stores.find() calls that were O(n × m) and
-  // ran on every WebSocket update (the main source of list-render lag).
+  const audioCtxRef = useRef(null);
   const storeIndex = useMemo(() => {
     const byIdentifier = new Map();
     const byId = new Map();
@@ -1213,6 +1231,28 @@ function ConversationList({
   }, []);
 
   useEffect(() => {
+    if ('Notification' in window) {
+      setNotificationPermission(Notification.permission);
+    }
+  }, []);
+
+  useEffect(() => {
+    const unlock = () => {
+      try {
+        if (!audioCtxRef.current)
+          audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume();
+      } catch {}
+    };
+    window.addEventListener('pointerdown', unlock, { once: true });
+    window.addEventListener('keydown',     unlock, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+    };
+  }, []);
+
+  useEffect(() => {
     const handleClickOutside = (e) => {
       if (contextMenuRef.current && !contextMenuRef.current.contains(e.target)) {
         setContextMenu(null);
@@ -1249,26 +1289,37 @@ function ConversationList({
     toastTimeoutRef.current = setTimeout(() => setToast(null), 3500);
   };
 
+
   const playNotificationSound = () => {
     if (!soundEnabled) return;
     try {
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-      oscillator.frequency.value = 600;
-      oscillator.type = 'sine';
-      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
-      oscillator.start(audioContext.currentTime);
-      oscillator.stop(audioContext.currentTime + 0.3);
+      let ctx = audioCtxRef.current;
+      if (!ctx) {
+        ctx = new (window.AudioContext || window.webkitAudioContext)();
+        audioCtxRef.current = ctx;        // create ONCE, reuse for the component's life
+      }
+      const beep = () => {
+        const oscillator = ctx.createOscillator();
+        const gainNode   = ctx.createGain();
+        oscillator.connect(gainNode);
+        gainNode.connect(ctx.destination);
+        oscillator.frequency.value = 600;
+        oscillator.type = 'sine';
+        gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+        oscillator.start(ctx.currentTime);
+        oscillator.stop(ctx.currentTime + 0.3);
+      };
+      if (ctx.state === 'suspended') ctx.resume().then(beep).catch(() => {});
+      else beep();
     } catch (error) {
       console.error('Error playing notification sound:', error);
     }
   };
 
-  const showNotification = (conversation, newMessage) => {
+
+
+const showNotification = (conversation, newMessage) => {
     if (!notificationsEnabled || notificationPermission !== 'granted') return;
     const title = conversation.customerName || 'New Message';
     const options = {
@@ -1284,7 +1335,7 @@ function ConversationList({
       const notification = new Notification(title, options);
       notification.onclick = () => {
         window.focus();
-        onSelectConversation(conversation);
+        if (!activeConversation) onSelectConversation(conversation);
         notification.close();
       };
       setTimeout(() => notification.close(), 5000);
@@ -1293,17 +1344,13 @@ function ConversationList({
     }
   };
 
+
   useEffect(() => {
     if (!conversations || loading) return;
-    // While in server-search mode the list is a query result set, not the live
-    // feed — new "rows" appearing here are just search matches, not new inbound
-    // messages, so suppress the new-message notifications/toasts.
     if (isServerSearch) { previousConversationsRef.current = conversations; return; }
     const previousConversations = previousConversationsRef.current;
 
     if (previousConversations) {
-      // Index previous by id once — was previousConversations.find() inside the
-      // loop (O(n²)). Now O(n).
       const prevById = new Map(previousConversations.map(c => [c.id, c]));
       conversations.forEach((currentConv) => {
         const previousConv = prevById.get(currentConv.id);
@@ -1404,7 +1451,6 @@ function ConversationList({
     });
     if (replied) acknowledgedGroupsRef.current.add(group.groupKey);
     return replied;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dismissTick]);
 
   const handleDismissUrgent = useCallback((e, groupKey) => {
@@ -1413,46 +1459,36 @@ function ConversationList({
     setDismissTick(t => t + 1);
   }, []);
 
-  const activeGroupConversationIds = useMemo(() => {
-    if (!activeConversation || !groupedConversations) return new Set();
-    const activeGroup = groupedConversations.find(group =>
-      group.conversations.some(c => c.id === activeConversation.id)
-    );
-    if (!activeGroup) return new Set([activeConversation.id]);
-    return new Set(activeGroup.conversations.map(c => c.id));
-  }, [activeConversation, groupedConversations]);
-
+  // Unread now reflects ONLY the conversation that is actually open — never the
+  // whole email+store group. Opening one thread no longer silently zeroes (and
+  // marks-read in the DB) a customer's sibling threads, so a new message on a
+  // sibling keeps its badge until that thread is itself opened.
   const getEffectiveUnread = useCallback((conv) => {
-    if (activeGroupConversationIds.has(conv.id)) return 0;
+    if (conv.id === activeConversation?.id) return 0;
     return conv.unreadCount || conv.unread_count || conv.unread || 0;
-  }, [activeGroupConversationIds]);
+  }, [activeConversation]);
 
   const getGroupUnread = useCallback((group) => {
     return group.conversations.reduce((sum, c) => sum + getEffectiveUnread(c), 0);
   }, [getEffectiveUnread]);
 
+  // Auto-mark-read is scoped to the OPEN conversation only. Sibling threads in
+  // the same group are left untouched (they clear on explicit click via
+  // handleGroupClick, not on message arrival).
   useEffect(() => {
     if (!activeConversation || !conversations || !onMarkAsRead) return;
-    if (activeGroupConversationIds.size === 0) return;
-    activeGroupConversationIds.forEach((convId) => {
-      const conv = conversations.find(c => c.id === convId);
-      if (!conv) return;
-      const unreadCount = conv.unreadCount || conv.unread_count || conv.unread || 0;
-      if (unreadCount > 0) onMarkAsRead(convId);
-    });
-  }, [activeConversation, conversations, onMarkAsRead, activeGroupConversationIds]);
+    const conv = conversations.find(c => c.id === activeConversation.id);
+    if (!conv) return;
+    const unreadCount = conv.unreadCount || conv.unread_count || conv.unread || 0;
+    if (unreadCount > 0) onMarkAsRead(activeConversation.id);
+  }, [activeConversation, conversations, onMarkAsRead]);
 
   const filteredGroupedConversations = useMemo(() => {
     if (!groupedConversations) return [];
     return groupedConversations.filter((group) => {
       const conv = group.mostRecent;
-      // Skip the client-side text match when rows came from the server search:
-      // a server hit can match on a mid-thread message body that isn't the
-      // group's lastMessage, and re-filtering here would wrongly drop it.
       const search = !isServerSearch && filters.search?.toLowerCase();
       if (search) {
-        // Match across EVERY conversation in the group (older threads too), not
-        // just mostRecent — otherwise a hit buried in an older thread is missed.
         const matchesSearch = group.conversations.some((c) => {
           const storeName = findStore(c)?.name || c.storeName || '';
           return (
@@ -1502,11 +1538,6 @@ function ConversationList({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupedConversations, adminHasReplied, dismissTick]);
 
-  // ── Windowing ───────────────────────────────────────────────────────────────
-  // Rendering a DOM node per conversation is the main list-side cost on big
-  // groups. Urgent items always render (there are few); the "normal" bulk is
-  // capped and grows as the user scrolls near the bottom. Partition once here so
-  // the scroll handler can see the full normal length.
   const { urgentGroups, normalGroups } = useMemo(() => {
     const u = [], n = [];
     (filteredGroupedConversations || []).forEach((g) => {
@@ -1514,18 +1545,13 @@ function ConversationList({
       (isUrgent ? u : n).push(g);
     });
     return { urgentGroups: u, normalGroups: n };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filteredGroupedConversations, adminHasReplied, dismissTick]);
 
   const NORMAL_CHUNK = 60;
   const itemsScrollRef = useRef(null);
   const [visibleNormal, setVisibleNormal] = useState(NORMAL_CHUNK);
-
-  // A local (client-side) text search is active. In server-search mode the
-  // parent has already narrowed the set, so we don't treat it as a local search.
   const searchActive = !isServerSearch && (filters.search || '').trim().length > 0;
 
-  // Reset the window whenever the filtered set is re-scoped (search/filter/tab).
   useEffect(() => {
     setVisibleNormal(NORMAL_CHUNK);
     if (itemsScrollRef.current) itemsScrollRef.current.scrollTop = 0;
