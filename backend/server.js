@@ -4622,7 +4622,7 @@ async function startServer() {
       }, 2 * 60 * 1000);
 
       // ============ AUTO-REPLY (9-minute no-response rule) ============
-      const AUTO_REPLY_TEXT = 'We received your message and will answer you ASAP! We answer as early as next business day, sometimes even within a few hours!';
+      const AUTO_REPLY_TEXT = 'Thanks for reaching out! Our agents are available 24/7, so we’ll get back to you as soon as possible. We’re always here and ready to help!';
 
       setInterval(async () => {
         try {
