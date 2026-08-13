@@ -2568,6 +2568,11 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use('/api', (req, res, next) => {
+  if (req.method === 'GET') res.set('Cache-Control', 'no-store');
+  next();
+});
+
 let lastHourlyReportAt = 0;
 let lastDailyReportAt  = 0;
 const REPORT_COOLDOWN  = 60_000;
@@ -3463,7 +3468,7 @@ app.post('/api/stores', authenticateToken, async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, $6, '', NOW(), NOW()) RETURNING *`,
       [storeIdentifier, shopDomain, brandName, isActive !== false, storeGroup ?? 'peptides-group', storeGroupName ?? null]
     );
-    appCache.invalidate('stores:active');
+    appCache.invalidatePrefix('stores:active'); 
     appCache.invalidate('stores:all');
     res.status(201).json(snakeToCamel(result.rows[0]));
   } catch (error) {
