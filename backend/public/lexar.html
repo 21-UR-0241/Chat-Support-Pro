@@ -46,11 +46,17 @@
     -webkit-mask:var(--hd-wave) bottom/100% 100% no-repeat;mask:var(--hd-wave) bottom/100% 100% no-repeat;}
   .eyebrow{font-size:11px;font-weight:600;letter-spacing:.26em;text-transform:uppercase;color:var(--accent);}
   .headline{font-family:var(--serif);font-weight:600;font-size:31px;line-height:1.12;letter-spacing:-.01em;margin-top:9px;max-width:11ch;color:#fff;transition:font-size .28s ease,margin .28s ease;}
+  .subhead{display:none;align-items:center;gap:7px;margin-top:9px;font-family:var(--body);font-size:12.5px;font-weight:500;color:rgba(255,255,255,.72);letter-spacing:.01em;}
+  .subhead .sdot{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px rgba(74,208,127,.16);flex-shrink:0;}
   .hd-x{position:absolute;top:calc(18px + env(safe-area-inset-top));right:16px;width:34px;height:34px;border-radius:0;background:rgba(255,255,255,.07);border:none;color:rgba(255,255,255,.75);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .16s,color .16s;}
   .hd-x:hover{background:rgba(255,255,255,.16);color:#fff;} .hd-x svg{width:15px;height:15px;}
   /* compact header once a conversation is under way — gives the thread more room */
   .hd.compact{padding-top:calc(16px + env(safe-area-inset-top));padding-bottom:26px;}
   .hd.compact .headline{font-size:20px;margin-top:5px;}
+  /* in-chat header: store name as the title + a live "replies within minutes" line */
+  .hd.chatting{padding-top:calc(18px + env(safe-area-inset-top));padding-bottom:24px;}
+  .hd.chatting .headline{font-size:23px;line-height:1.15;margin-top:2px;max-width:18ch;}
+  .hd.chatting .subhead{display:flex;}
 
   /* ── thread ──────────────────────────────────────────────── */
   /* messages scroll; the email gate scrolls too if the viewport is short.
@@ -172,6 +178,7 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
     </button>
     <h1 class="headline" id="headline">We're here to help.</h1>
+    <p class="subhead" id="subhead"><span class="sdot"></span><span id="subtext">Typically replies within minutes</span></p>
   </header>
 
   <div class="thread gateon" id="thread">
@@ -244,9 +251,12 @@
     var hd=$('hd'), thread=$('thread'), gate=$('gate'), intro=$('intro'), dock=$('dock'), gform=$('gform'),
         box=$('box'), send=$('send'), clip=$('clip'), file=$('file'),
         pre=$('pre'), prethumb=$('prethumb'), prename=$('prename'), presize=$('presize'), preprog=$('preprog'), predel=$('predel'),
-        headline=$('headline'), welcometext=$('welcometext'), welcometitle=$('welcometitle'),
+        headline=$('headline'), subtext=$('subtext'), welcometext=$('welcometext'), welcometitle=$('welcometitle'),
         light=$('light'), lightimg=$('lightimg');
-    var selectedFile=null, uploading=false, typingTO=null, typingDeb=null, emailCaptured=false;
+    var selectedFile=null, uploading=false, typingTO=null, typingDeb=null, emailCaptured=false, storeName='';
+
+    // Swap the header to its in-chat form: store name as the title + reply-time line.
+    function applyHeader(){ hd.classList.add('compact','chatting'); if(storeName) headline.textContent=storeName; }
 
     function appH(){var h=window.visualViewport?window.visualViewport.height:window.innerHeight;document.documentElement.style.setProperty('--app-height',h+'px');}
     appH();window.addEventListener('resize',appH);if(window.visualViewport){window.visualViewport.addEventListener('resize',appH);window.visualViewport.addEventListener('scroll',appH);}
@@ -331,12 +341,18 @@
       var primary = (d.theme && d.theme.primary) || d.primaryColor || d.primary_color
                  || (d.store && (d.store.primary_color || d.store.primaryColor)) || null;
       if(primary) applyTheme({primary:primary}); else applyTheme(d.theme);
-      if(d.headline) headline.textContent=d.headline;
+      if(d.headline) headline.textContent=d.headline;   // pre-chat title (during the email gate)
+      // Actual store name = stores.brand_name (NOT the store handle). Shown as the
+      // header title once the customer is in the chat.
+      storeName = d.brandName || d.brand_name || d.storeName
+               || (d.store && (d.store.brand_name || d.store.brandName)) || storeName;
+      if(d.replyTime || d.agentRole) subtext.textContent = d.replyTime || d.agentRole;
       if(d.welcomeTitle) welcometitle.textContent=d.welcomeTitle;
       if(d.greeting) welcometext.innerHTML=d.greeting;
       if(d.placeholder) box.placeholder=d.placeholder;
+      if(emailCaptured) applyHeader();   // ready landed after the customer already entered
     });
-    function enterChat(){ emailCaptured=true; gate.classList.remove('on'); thread.classList.remove('gateon'); dock.classList.add('on'); if(hasMsgs()){hideIntro();}else{showIntro();} box.focus(); }
+    function enterChat(){ emailCaptured=true; gate.classList.remove('on'); thread.classList.remove('gateon'); dock.classList.add('on'); applyHeader(); if(hasMsgs()){hideIntro();}else{showIntro();} box.focus(); }
     core.on('stage',function(s){
       // Email + name are collected first. Until that's done we keep the gate up,
       // regardless of what stage the backend reports.
