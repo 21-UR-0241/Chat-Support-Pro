@@ -34,7 +34,7 @@
     --mono:'IBM Plex Mono',ui-monospace,monospace;
     --hd-wave:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 120" preserveAspectRatio="none"><path d="M0,120 L1200,120 L1200,60 C980,20 760,20 600,52 C440,84 220,92 0,52 Z" fill="%23000"/></svg>');
   }
-  html,body{height:100%;} html{height:-webkit-fill-available;}
+  html,body{height:100%;border-radius:0;} html{height:-webkit-fill-available;}
   body{font-family:var(--body);color:var(--text);background:var(--bg);
     height:var(--app-height);min-height:-webkit-fill-available;display:flex;flex-direction:column;overflow:hidden;-webkit-font-smoothing:antialiased;}
 
@@ -57,6 +57,11 @@
     padding:14px 18px 8px;display:flex;flex-direction:column;min-height:0;background:var(--bg);}
   .thread::-webkit-scrollbar{width:6px;}.thread::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:3px;}
   .thread::-webkit-scrollbar-track{background:transparent;}
+  /* while the email gate is up the form must stay fully reachable — allow it to
+     scroll only if the viewport is short, with no visible scrollbar so the panel
+     still reads as non-scrollable. The chat thread itself stays overflow:hidden. */
+  .thread.gateon{overflow-y:auto;scrollbar-width:none;-ms-overflow-style:none;}
+  .thread.gateon::-webkit-scrollbar{display:none;}
 
   /* ── intro (brand card + welcome + quick replies) ── */
   #intro{display:none;flex-direction:column;padding-top:6px;}
@@ -84,14 +89,14 @@
   .chip:active{transform:scale(.97);}
 
   /* ── email gate ── */
-  #gate{display:none;flex-direction:column;align-items:center;padding:22px 2px 8px;}
+  #gate{display:none;flex-direction:column;align-items:center;padding:10px 2px 4px;}
   #gate.on{display:flex;}
-  .gate-icon{width:66px;height:66px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin-bottom:20px;background:var(--surface);border:1px solid var(--line-soft);color:var(--accent);box-shadow:0 8px 24px var(--glow);}
-  .gate-icon svg{width:30px;height:30px;}
-  #gate h2{font-family:var(--serif);font-weight:600;font-size:22px;line-height:1.26;color:#fff;margin-bottom:10px;max-width:22ch;text-align:center;}
-  #gate .sub{font-size:13.5px;color:var(--text-dim);margin-bottom:22px;line-height:1.55;max-width:32ch;text-align:center;}
+  .gate-icon{width:54px;height:54px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin-bottom:12px;background:var(--surface);border:1px solid var(--line-soft);color:var(--accent);box-shadow:0 8px 24px var(--glow);}
+  .gate-icon svg{width:26px;height:26px;}
+  #gate h2{font-family:var(--serif);font-weight:600;font-size:20px;line-height:1.26;color:#fff;margin-bottom:7px;max-width:22ch;text-align:center;}
+  #gate .sub{font-size:13.5px;color:var(--text-dim);margin-bottom:15px;line-height:1.5;max-width:32ch;text-align:center;}
   #gate .gform{width:100%;}
-  .gf{margin-bottom:12px;}
+  .gf{margin-bottom:10px;}
   .gf label{display:block;font-size:12px;font-weight:600;color:var(--text-dim);margin-bottom:6px;}
   .gf label .req{color:var(--accent);}.gf label .opt{color:var(--muted);font-weight:400;}
   .gf input{width:100%;padding:13px 15px;border:1.4px solid var(--line);border-radius:0;font-size:16px;font-family:var(--body);background:var(--surface);color:var(--text);outline:none;transition:border-color .16s,box-shadow .16s;}
@@ -106,7 +111,7 @@
   .gf-field:focus-within .gf-ic{color:var(--accent);}
   .go{width:100%;padding:14px;background:var(--accent);color:var(--accent-ink);border:none;border-radius:0;font-family:var(--body);font-weight:600;font-size:15px;cursor:pointer;transition:filter .16s,transform .12s;margin-top:4px;}
   .go:hover{filter:brightness(1.07);} .go:active{transform:translateY(1px);} .go:disabled{opacity:.6;cursor:not-allowed;}
-  .gnote{font-size:11.5px;color:var(--muted);margin-top:13px;text-align:center;}
+  .gnote{font-size:11.5px;color:var(--muted);margin-top:9px;text-align:center;}
   .spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(0,0,0,.25);border-top-color:var(--accent-ink);border-radius:50%;animation:spin .7s linear infinite;vertical-align:-1px;margin-right:7px;}
   @keyframes spin{to{transform:rotate(360deg)}}
 
@@ -189,7 +194,7 @@
     <h1 class="headline" id="headline">We're here to help.</h1>
   </header>
 
-  <div class="thread" id="thread">
+  <div class="thread gateon" id="thread">
     <!-- email gate (shown first, before chat) -->
     <div id="gate" class="on">
       <div class="gate-icon" aria-hidden="true">
@@ -403,11 +408,11 @@
       if(d.agentAvatar) agentav.innerHTML='<img src="'+d.agentAvatar+'" alt="">'+'<span class="dot" id="dot"></span>', dot=$('dot');
       renderChips(d.quickReplies);
     });
-    function enterChat(){ emailCaptured=true; gate.classList.remove('on'); dock.classList.add('on'); if(hasMsgs()){hideIntro();}else{showIntro();} box.focus(); }
+    function enterChat(){ emailCaptured=true; gate.classList.remove('on'); thread.classList.remove('gateon'); dock.classList.add('on'); if(hasMsgs()){hideIntro();}else{showIntro();} box.focus(); }
     core.on('stage',function(s){
       // Email + name are collected first. Until that's done we keep the gate up,
       // regardless of what stage the backend reports.
-      if(!emailCaptured || s==='email'){ gate.classList.add('on'); intro.classList.remove('on'); dock.classList.remove('on'); return; }
+      if(!emailCaptured || s==='email'){ gate.classList.add('on'); thread.classList.add('gateon'); intro.classList.remove('on'); dock.classList.remove('on'); return; }
       enterChat();
     });
     core.on('status',function(s){ setPresence(s.state); if(s.state!=='online'&&s.text) agentrole.textContent=s.text; });
