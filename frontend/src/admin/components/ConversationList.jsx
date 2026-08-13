@@ -1125,9 +1125,6 @@
 
 
 
-
-
-
 import React, { useMemo, useEffect, useRef, useState, useCallback } from 'react';
 import '../styles/ConversationList.css';
 
@@ -1230,25 +1227,44 @@ function ConversationList({
     }
   }, []);
 
+  // ── AudioContext unlock (resilient) ────────────────────────────────────────
+  // Browsers only let a *user gesture* move a suspended AudioContext to
+  // "running". A resume() triggered later from a WebSocket message handler is
+  // ignored, so the beep silently fails. This effect keeps re-arming on every
+  // gesture until the context is genuinely running (a single {once:true}
+  // listener could fire before the context is ready and then never retry), and
+  // re-resumes whenever the tab comes back to the foreground — which covers the
+  // support-dashboard-in-a-background-tab case where Chrome suspends the context.
   useEffect(() => {
-    if ('Notification' in window) {
-      setNotificationPermission(Notification.permission);
-    }
-  }, []);
-
-  useEffect(() => {
-    const unlock = () => {
+    const ensureRunning = () => {
       try {
         if (!audioCtxRef.current)
           audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
         if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume();
       } catch {}
     };
-    window.addEventListener('pointerdown', unlock, { once: true });
-    window.addEventListener('keydown',     unlock, { once: true });
+
+    const onGesture = () => {
+      ensureRunning();
+      // Only stop listening once the context has actually reached "running".
+      if (audioCtxRef.current?.state === 'running') {
+        window.removeEventListener('pointerdown', onGesture);
+        window.removeEventListener('keydown', onGesture);
+      }
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') ensureRunning();
+    };
+
+    window.addEventListener('pointerdown', onGesture);
+    window.addEventListener('keydown', onGesture);
+    document.addEventListener('visibilitychange', onVisibility);
+
     return () => {
-      window.removeEventListener('pointerdown', unlock);
-      window.removeEventListener('keydown', unlock);
+      window.removeEventListener('pointerdown', onGesture);
+      window.removeEventListener('keydown', onGesture);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, []);
 
