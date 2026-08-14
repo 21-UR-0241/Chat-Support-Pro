@@ -2788,6 +2788,35 @@ const normalizeMessage = (msg) => ({
 
 const msgTime = (m) =>
   new Date(m?.createdAt || m?.created_at || m?.sentAt || m?.sent_at || 0).getTime();
+const dedupeMessages = (list) => {
+  const seenIds = new Set();
+  const out = [];
+  for (const m of list) {
+    const id = m.id != null ? String(m.id) : null;
+    if (id && seenIds.has(id)) continue;                 // exact id dup
+    const ts = msgTime(m);
+    const dupIdx = out.findIndex(o => {
+      if (o.senderType !== m.senderType) return false;
+      if ((o.content || '') !== (m.content || '')) return false;
+      if ((o.fileUrl || '') !== (m.fileUrl || '')) return false;
+      const ots = msgTime(o);
+      if (ots === 0 || ts === 0) return true;            // malformed 2nd frame (no ts)
+      return Math.abs(ots - ts) < 2000;                  // same row re-delivered → ~identical ts
+    });
+    if (dupIdx !== -1) {
+      // keep whichever copy has a real (non-temp) server id
+      const existing = out[dupIdx];
+      const existingReal = existing.id != null && !String(existing.id).startsWith('temp-');
+      const incomingReal = id && !id.startsWith('temp-');
+      if (!existingReal && incomingReal) out[dupIdx] = m;
+      if (id) seenIds.add(id);
+      continue;
+    }
+    if (id) seenIds.add(id);
+    out.push(m);
+  }
+  return out;
+};
 
 const INPUT_STYLE = {
   fontSize:     '14px',
@@ -3656,11 +3685,12 @@ useEffect(() => {
     return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
   };
 
-  const groupedMessages = useMemo(() => {
-    if (!messages || messages.length === 0) return [];
-    return messages.map((message, index) => {
-      const prevMessage = index > 0 ? messages[index - 1] : null;
-      const nextMessage = index < messages.length - 1 ? messages[index + 1] : null;
+const groupedMessages = useMemo(() => {
+    const deduped = dedupeMessages(messages || []);
+    if (deduped.length === 0) return [];
+    return deduped.map((message, index) => {
+      const prevMessage = index > 0 ? deduped[index - 1] : null;
+      const nextMessage = index < deduped.length - 1 ? deduped[index + 1] : null;
       return {
         ...message,
         isFirstInGroup: !prevMessage || prevMessage.senderType !== message.senderType,
