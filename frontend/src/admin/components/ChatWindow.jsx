@@ -2771,9 +2771,19 @@ const parseFileData = (raw) => {
   try { return JSON.parse(raw); } catch { return null; }
 };
 
+// const normalizeMessage = (msg) => ({
+//   ...msg,
+//   fileData: parseFileData(msg.fileData || msg.file_data),
+// });
+
+const pickId = (m) =>
+  m?.id ?? m?.messageId ?? m?.message_id ?? m?._id ?? null;
+
 const normalizeMessage = (msg) => ({
   ...msg,
-  fileData: parseFileData(msg.fileData || msg.file_data),
+  id:          pickId(msg),
+  clientMsgId: msg.clientMsgId ?? msg.client_msg_id ?? null,
+  fileData:    parseFileData(msg.fileData || msg.file_data),
 });
 
 const msgTime = (m) =>
@@ -3249,14 +3259,15 @@ function ChatWindow({
     setLegalAlert(null);
   };
 
-const handleIncomingMessage = (message, currentConv) => {
+const handleIncomingMessage = (raw, currentConv) => {
+    const message = normalizeMessage(raw);        // normalize FIRST → id is canonical
     const msgId  = message.id;
     const convId = message.conversationId || message.conversation_id;
     if (!convId || String(convId) !== String(currentConv?.id)) return;
     if (msgId && displayedMessageIds.current.has(String(msgId))) return;
 
-    const cmid = message.clientMsgId || message.client_msg_id || null;
-    const normalized = normalizeMessage(message);
+    const cmid = message.clientMsgId || null;
+    const normalized = message;
 
     setMessages(prev => {
       if (msgId && prev.some(m => String(m.id) === String(msgId))) return prev;
