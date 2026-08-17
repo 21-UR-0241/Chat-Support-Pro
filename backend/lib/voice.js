@@ -86,7 +86,14 @@ TWO EXCEPTIONS TO THE WORD LIMIT. Both override it completely:
 2. SERVICE FAILURE (refund owed, missed promise, repeated delay, escalation). Acknowledge once, state the resolution you are doing now, give the concrete next step. All three, up to 90 words.`;
 
 const OWNER_FAST_STRUCTURE_SHORT = `${SEP}
-LENGTH: One short paragraph, 15 to 40 words. These are quick-picks an agent fires off in one click, not full emails. Max 2 exclamation points. Still land on a concrete next step, a real date, or a bracketed placeholder.
+LENGTH: One short paragraph, 15 to 40 words. These are quick-picks an agent fires off in one click, not full emails. Max 2 exclamation points. Still land on a concrete next step or a real date.
+
+BLANKS: A bracket marks a value that has to be SUBSTITUTED before sending, because you cannot know it: [2-3] for a transit range, [date] for a real ship date, [order number]. The agent looks it up and types it in.
+
+Never bracket a word that is already the final text. "tomorrow", "today", "tonight", "this week" need no substitution — the agent has nothing to look up, so a bracket round them only stops them sending the reply. Write "by tomorrow", not "by [tomorrow]". The owner's own reference reply says "by tomorrow" and "very early next week" plain, with ZERO brackets in it.
+
+Prefer a reply that needs no filling in at all. When you have no date, explain the mechanism instead of promising a time: "its packed and the label is already made, its sitting in the depot queue right now which happens when they get backed up" beats "it ships by [date]".
+At most ONE bracket. If you need two, you are guessing at something you should not be promising.
 ${CARVE_OUTS}
 ${SEP}`;
 
@@ -218,16 +225,30 @@ const PROFILES = {
       // date, no bracket, no outcome. Only flagged when the reply carries no
       // placeholder and no weekday, since "I'll reply by [Friday]" is fine.
       vagueCloseRe: /(?:as soon as|once|when)\s+(?:i|we)\s+(?:see|hear|know|get|have|find out)\b[^.!?]{0,25}[.!]?\s*$|\bwith (?:the next step|an update|more info(?:rmation)?)\b[^.!?]{0,25}[.!]?\s*$|\b(?:i'?ll|i will|we'?ll) (?:update|let you know|come back|get back)\b[^.!?]{0,20}[.!]?\s*$/i,
-      // A bracket should mark a SLOT the agent fills from real data: [Friday],
-      // [2-3 days], [order number]. These are not slots — there is nothing to look
-      // up. The model picked a deadline and wrapped it in a bracket, so the agent
-      // most likely just deletes the brackets and sends the commitment. Closed
-      // list of relative time words, so it cannot drift into flagging real slots.
-      pickedDeadlineRe: /\[\s*(?:by\s+)?(?:end of (?:day|today|business)|eod|cob|today|tonight|tomorrow|this (?:afternoon|evening|morning)|asap|right away|shortly|immediately)\s*\]/i,
+      // A bracket marks a value needing SUBSTITUTION: [2-3], [date], [order number].
+      // These words are already the final text — there is nothing to substitute, so
+      // the bracket only stops the agent sending. Write "by tomorrow", not
+      // "by [tomorrow]". Closed list of relative time words, so it cannot drift
+      // into flagging real slots.
+      // Two different problems, two different fixes.
+      //
+      // bracketStripRe — a real word wearing a pointless bracket. "tomorrow" needs
+      // no substitution, so removing the bracket cannot change any claim and makes
+      // the reply sendable. Scrubbed automatically, same safety argument as the
+      // opener prepend.
+      bracketStripRe: /\[\s*((?:by\s+)?(?:end of (?:day|today|business)|today|tonight|tomorrow|this (?:afternoon|evening|morning)))\s*\]/gi,
+      // bracketRewriteRe — vague speed. Stripping "[asap]" to "asap" would launder
+      // a banned phrase into plain text. This needs a human rewrite, so flag only.
+      bracketRewriteRe: /\[\s*(?:by\s+)?(?:asap|a\.s\.a\.p\.?|right away|shortly|immediately|eod|cob)\s*\]/i,
       // Part Six: "Do the sentences run on, or does it read like a school essay?"
       // The owner reference reply averages 28.3 words per sentence. An essay-shaped
       // reply averages 12-15. Long replies only, where the mean means something.
       minMeanSentenceWords: 18,
+      // A quick-pick with several blanks is a form, not something an agent can
+      // click and send, and every unfilled bracket is a chance to leak
+      // "[Thursday]" to a customer. Live median for fast mode was 2. One lookup
+      // is fine. Detailed mode is exempt — that is a draft the agent edits anyway.
+      maxPlaceholdersShort: 1,
       // Part Six: "Does the last sentence leave the customer picturing a good
       // outcome?" vagueclose catches the negative case; this checks the positive.
       outcomeRe: /\b(?:door|doorstep|door step|arriv|deliver|land|hands|in your|on your card|back on your|refund|tracking|moving|move|scan|shipped|ships|out to you|to you)\b/i,
@@ -328,6 +349,14 @@ function scrubVoice(text, profile) {
     }
   }
 
+  // Needless brackets. A bracket marks a value the agent must SUBSTITUTE; these
+  // words are already the final text, so the bracket only blocks sending. Strip it
+  // and the reply reads exactly as the owner writes it: "by tomorrow", not
+  // "by [tomorrow]". Cannot alter a claim — same bar as the opener repair.
+  if (profile.lint?.bracketStripRe) {
+    t = t.replace(profile.lint.bracketStripRe, '$1');
+  }
+
   t = t.replace(/\*\*([^*\n]+)\*\*/g, '$1');            // markdown bold
   t = t.replace(/__([^_\n]+)__/g, '$1');
   t = t.replace(/^[ \t]*[-*•‣▪]\s+/gm, '');             // list markers
@@ -407,11 +436,19 @@ function lintVoice(text, profile, { detailed = false } = {}) {
     if (commits && !hasDate) issues.push({ code: 'nodate', label: 'commits with no date' });
   }
 
-  if (cfg.pickedDeadlineRe && cfg.pickedDeadlineRe.test(t)) {
-    const picked = [...new Set((t.match(new RegExp(cfg.pickedDeadlineRe.source, 'gi')) || []).map(x => x.trim()))];
+  if (!detailed && Number.isInteger(cfg.maxPlaceholdersShort)) {
+    const n = (t.match(/\[[^\]]*\]/g) || []).length;
+    if (n > cfg.maxPlaceholdersShort) issues.push({ code: 'toomanyblanks', label: `${n} blanks to fill` });
+  }
+
+  // Only the rewrite case is flagged. The strip case is repaired by scrubVoice
+  // before lint ever sees it, so flagging it too would be noise about something
+  // already fixed.
+  if (cfg.bracketRewriteRe && cfg.bracketRewriteRe.test(t)) {
+    const picked = [...new Set((t.match(new RegExp(cfg.bracketRewriteRe.source, 'gi')) || []).map(x => x.trim()))];
     issues.push({
-      code: 'pickeddeadline',
-      label: picked.length === 1 ? 'self-chosen deadline' : `${picked.length} self-chosen deadlines`,
+      code: 'vaguebracket',
+      label: 'bracketed vague speed',
       detail: picked.join(', '),
     });
   }

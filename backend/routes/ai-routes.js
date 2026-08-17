@@ -498,7 +498,6 @@
 
 
 
-
 const express = require('express');
 const db = require('../database');
 const { authenticateToken } = require('../auth');
@@ -622,15 +621,44 @@ const {
   if (ai.detectUnauthorisedUpgrade(upgradeSug, allowBrain).blocked.length !== 0) {
     throw new Error('[BOOT] Upgrade guard blocked an expedited offer the brain explicitly approves. Refusing to start.');
   }
-  // UNBRACKETED, deliberately. A bracketed date no longer flags — the voice block
-  // mandates brackets, so flagging them was 100% noise over seven live fires. This
-  // assertion is about negation polarity, so the sample must be a flat statement.
-  if (ai.detectInventedTimeframe(['Hello! tracking by tomorrow!'], 'We cannot promise delivery by tomorrow.').review.length !== 1) {
+  // Sample must be UNBRACKETED (bracketed dates no longer flag — 100% noise over
+  // seven live fires) AND must make an ARRIVAL claim (a checkpoint the agent
+  // controls is not a delivery promise). "tracking by tomorrow" satisfies neither
+  // condition now, so it was asserting on a case the guard deliberately ignores.
+  if (ai.detectInventedTimeframe(['Hello! it arrives at your door by tomorrow!'], 'We cannot promise delivery by tomorrow.').review.length !== 1) {
     throw new Error('[BOOT] Timeframe guard treated a negated brain line as authorisation. Refusing to start.');
   }
-  if (ai.detectInventedTimeframe(['Hello! tracking by tomorrow!'], 'New tracking goes out by tomorrow.').review.length !== 0) {
+  if (ai.detectInventedTimeframe(['Hello! it arrives at your door by tomorrow!'], 'It arrives at your door by tomorrow.').review.length !== 0) {
     throw new Error('[BOOT] Timeframe guard flagged a promise the brain affirmatively states. Refusing to start.');
   }
+  // An approved live reply must be writable cleanly. "If it hasnt scanned by
+  // tomorrow, I'll reship" is a checkpoint the agent controls, not a delivery
+  // promise — flagging it made the reply unwritable either way, bracketed or not.
+  const approved = "Hello! I'm pulling your tracking right now. If it hasnt scanned by tomorrow, I'll get a brand-new package out to you express with new tracking so you wont have to chase this again.";
+  if (ai.detectInventedTimeframe([approved], 'express reship is approved').review.length !== 0) {
+    throw new Error('[BOOT] Timeframe guard flags a self-imposed checkpoint as a delivery promise. An approved reply must be writable cleanly. Refusing to start.');
+  }
+  if (ai.detectInventedTimeframe(['Hello! it will be at your door by tomorrow!'], '').review.length !== 1) {
+    throw new Error('[BOOT] Timeframe guard missed a real arrival claim. Refusing to start.');
+  }
+  if (ai.detectInventedTimeframe([active.referenceReply], '').review.length !== 0) {
+    throw new Error("[BOOT] Timeframe guard flags the owner's own reference reply. Refusing to start.");
+  }
+
+  // Needless brackets must self-correct to the approved wording, and vague speed
+  // must NOT be laundered into plain text by the same mechanism.
+  const needless = "Hello! if it hasnt scanned by [tomorrow], I'll reship express.";
+  if (voice.scrubVoice(needless, active) !== needless.replace('[tomorrow]', 'tomorrow')) {
+    throw new Error('[BOOT] Needless bracket not stripped. "[tomorrow]" needs no substitution, so the bracket only blocks sending. Refusing to start.');
+  }
+  const keepThese = 'Hello! its [2-3] days and I reship by [Friday] if no scan.';
+  if (voice.scrubVoice(keepThese, active) !== keepThese) {
+    throw new Error('[BOOT] Scrubber removed a SUBSTITUTABLE bracket. [2-3] and [Friday] are values the agent fills in. Refusing to start.');
+  }
+  if (voice.scrubVoice('Hello! new tracking by [asap]!', active).includes('by asap')) {
+    throw new Error('[BOOT] Scrubber laundered bracketed vague speed into plain text. "[asap]" needs a rewrite, not a bracket removal. Refusing to start.');
+  }
+
   // Locks in the bracket fix: the mandated form must stay quiet and be counted.
   const bracketed = ai.detectInventedTimeframe(['Hello! if no scan by [tomorrow] I will reship!'], '');
   if (bracketed.review.length !== 0 || bracketed.placeholders !== 1) {

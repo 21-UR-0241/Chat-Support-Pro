@@ -1778,6 +1778,15 @@ const _countPlaceholders = (t) => (String(t || '').match(/\[[^\]]*\]/g) || []).l
 //   "can take [1-2 days]" — a bare range with no "within" or "in" in front.
 const TIME_PROMISE_RE = /\bwithin (?:the next )?(?:\d+|one|two|three|a few|24|48|72)\s*(?:hour|hr|minute|min|day|business day|week)s?\b|\bin (?:\d+|one|two|a few)\s*(?:hour|hr|day|business day)s?\b|\bby (?:today|tomorrow|tonight|end of (?:day|today)|eod|close of business|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|\bend of (?:day|today)\b|\b(?:same|next)[- ]day\b|\bovernight\b|\bthis (?:afternoon|evening|week|weekend)\b|\b(?:today|tonight|tomorrow) at\b|\bshortly\b|\b\d+\s*(?:-|–|—|to)\s*\d+\s*(?:business\s+)?(?:hour|day|week)s?\b/gi;
 
+// A time expression only needs brain authorisation when it is a CLAIM about the
+// customer getting their package. "If it hasnt scanned by tomorrow, I'll reship"
+// is not a delivery promise — it is a checkpoint the AGENT controls, and the real
+// commitment is the reship. Flagging it made an approved reply unwritable: bracket
+// the "tomorrow" and pickeddeadline fires, leave it plain and TimeGuard fires.
+//
+// So: scope per sentence, and only flag when that sentence actually claims arrival.
+const ARRIVAL_RE = /\b(?:arriv\w*|deliver\w*|at your door|door\s?step|in your hands|lands?|reach(?:es)? you|gets? to you|shows? up|turns? up|be there|you'?ll have it|you will have it)\b/i;
+
 /**
  * Flags time promises the brain does not authorise.
  * Advisory: returns review entries rather than dropping, because a genuinely
@@ -1793,7 +1802,18 @@ function detectInventedTimeframe(suggestions, brainContext = '') {
   suggestions.forEach((sug, index) => {
     if (typeof sug !== 'string') return;
     placeholders += _countPlaceholders(sug);
-    const hits = [...new Set((_stripPlaceholders(sug).match(TIME_PROMISE_RE) || []).map(h => h.trim().toLowerCase()))]
+
+    // Only sentences that claim the customer gets their package by some time can
+    // make an unauthorised promise. A checkpoint the agent controls cannot.
+    // Split on paragraph breaks as well as sentence enders. The voice says a reply
+    // "just stops", so a paragraph often ends with no punctuation — and splitting
+    // on punctuation alone glued the reference reply's "...by tomorrow" onto the
+    // next paragraph's "at your door step" and read one claim where there are two.
+    const claimSentences = _stripPlaceholders(sug)
+      .split(/(?<=[.!?])\s+|\n\s*\n/)
+      .filter(x => ARRIVAL_RE.test(x));
+
+    const hits = [...new Set(claimSentences.flatMap(x => (x.match(TIME_PROMISE_RE) || [])).map(h => h.trim().toLowerCase()))]
       .filter(h => !_brainAuthorises(brainContext, h).authorised);
     if (hits.length) {
       review.push({ index, reasons: hits.map(h => `unverified time promise, stated flat: "${h}"`) });
