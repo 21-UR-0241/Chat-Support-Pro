@@ -102,8 +102,16 @@
   line-height: 1.4;
 }
 
+/* The component renders this as an EMPTY span with only an inline `color`.
+   Without a box it drew nothing. Paint it as a dot from currentColor so the
+   inline colour the component sets is what shows. */
 .ai-context-indicator {
-  font-size: 12px;
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
   line-height: 1;
 }
 
@@ -170,6 +178,11 @@
 .ai-image-upload-zone.dragging {
   border-color: #00a884;
   background: #f0faf7;
+}
+
+.ai-image-upload-zone:focus-visible {
+  outline: 2px solid #00a884;
+  outline-offset: 2px;
 }
 
 .ai-upload-icon {
@@ -406,6 +419,39 @@
   color: #54656f;
 }
 
+/* ── Generate buttons ──────────────────────────────────────────────── */
+
+.ai-generate-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0;
+}
+
+.ai-generate-btn {
+  width: 100%;
+  padding: 10px;
+  background: #6366f1;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.ai-generate-btn--secondary {
+  background: transparent;
+  color: #6366f1;
+  border: 1px solid #6366f1;
+  font-weight: 500;
+}
+
+.ai-generate-btn:hover:not(:disabled) { opacity: 0.9; }
+.ai-generate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
 /* ── Edit area ─────────────────────────────────────────────────────── */
 
 .ai-context-section {
@@ -585,6 +631,39 @@
 
 .ai-edit-msg-btn:hover { background: #e7f8f2; }
 
+/* ── Fallback notice — AI unavailable, canned templates shown ──────── */
+
+.ai-fallback-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-left: 3px solid #f59e0b;
+  border-radius: 8px;
+}
+
+.ai-fallback-notice-icon {
+  flex-shrink: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #f59e0b;
+}
+
+.ai-fallback-notice-text {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: #92400e;
+}
+
+.ai-fallback-notice--modal {
+  margin: 14px 24px 0;
+  border-radius: 8px;
+}
+
 /* ── Suggestion cards ──────────────────────────────────────────────── */
 
 .ai-suggestions-list {
@@ -593,8 +672,11 @@
   gap: 10px;
 }
 
+/* flex-wrap lets the fallback tag and the voice-flag row drop to their own
+   line instead of squeezing the suggestion text. */
 .ai-suggestion-card {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: 10px;
   width: 100%;
@@ -620,6 +702,11 @@
   box-shadow: none;
 }
 
+.ai-suggestion-card:focus-visible {
+  outline: 2px solid #00a884;
+  outline-offset: 2px;
+}
+
 .ai-suggestion-number {
   flex-shrink: 0;
   width: 22px;
@@ -642,10 +729,110 @@
 }
 
 .ai-suggestion-text {
+  flex: 1;
+  min-width: 0;
   font-size: 13px;
   color: #111b21;
   line-height: 1.5;
   word-break: break-word;
+}
+
+/* Canned template served because the AI was unavailable. */
+.ai-suggestion-card--fallback {
+  background: #fffdf7;
+  border-color: #fde68a;
+}
+
+.ai-suggestion-card--fallback:hover {
+  border-color: #f59e0b;
+  background: #fffbeb;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.12);
+}
+
+.ai-suggestion-card--fallback .ai-suggestion-number {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.ai-suggestion-card--fallback:hover .ai-suggestion-number {
+  background: #f59e0b;
+  color: #ffffff;
+}
+
+.ai-suggestion-fallback-tag {
+  flex-shrink: 0;
+  align-self: flex-start;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #b45309;
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+}
+
+/* ── Voice lint flags ──────────────────────────────────────────────── */
+/* Rendered when a reply drifts off the store voice. Advisory only — the card
+   stays clickable, the agent decides. Server flags win when the API sends
+   `voiceRulesVersion`; otherwise the client lint fills in. */
+
+.ai-suggestion-card--offvoice {
+  border-left: 2px solid rgba(245, 158, 11, 0.55);
+}
+
+.ai-voice-flags {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 2px 0 0 32px;   /* 22px number bubble + 10px gap = aligns under the text */
+}
+
+.ai-voice-flag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 1.5;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  color: #b45309;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.28);
+}
+
+/* Hard violations — banned phrase, em dash, list, bold, sign-off.
+   These are things the owner's guide bans outright, so they read red. */
+.ai-voice-flag--banned,
+.ai-voice-flag--emdash,
+.ai-voice-flag--list,
+.ai-voice-flag--bold,
+.ai-voice-flag--signoff {
+  color: #b91c1c;
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.30);
+}
+
+/* Modal variant — sits under the expanded reply, not inside a card. */
+.ai-voice-flags--modal {
+  flex-basis: auto;
+  margin: 10px 0 0;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(239, 68, 68, 0.35);
+}
+
+.ai-voice-flags-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #ef4444;
+  margin-right: 2px;
 }
 
 /* ── Detailed replies trigger ──────────────────────────────────────── */
@@ -966,6 +1153,17 @@
 
 .ai-modal-tab-label { line-height: 1; }
 
+/* Off-voice marker on the tab itself, not the label — the label is hidden
+   under 768px and the marker has to survive that. */
+.ai-modal-tab--offvoice::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ef4444;
+  flex-shrink: 0;
+}
+
 .ai-modal-body {
   flex: 1;
   overflow-y: auto;
@@ -1104,32 +1302,33 @@
 
   .ai-modal-tab-label { display: none; }
   .ai-modal-tab       { padding: 14px; }
-}
-.ai-generate-row {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 8px 0;
+
+  .ai-fallback-notice--modal { margin: 12px 16px 0; }
+  .ai-modal-body             { padding: 16px; }
 }
 
-.ai-generate-btn {
-  width: 100%;
-  padding: 10px;
-  background: #6366f1;
-  color: white;
-  border: none;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
+/* ===================================================================
+   Reduced motion
+   =================================================================== */
 
-.ai-generate-btn--secondary {
-  background: transparent;
-  color: #6366f1;
-  border: 1px solid #6366f1;
-  font-weight: 500;
-}
+@media (prefers-reduced-motion: reduce) {
+  .ai-suggestions-panel,
+  .ai-suggestion-card,
+  .ai-detailed-trigger,
+  .ai-btn-icon,
+  .ai-generate-btn {
+    transition: none;
+  }
 
-.ai-generate-btn:hover { opacity: 0.9; }
-.ai-generate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .ai-suggestion-card:hover,
+  .ai-detailed-trigger:active { transform: none; }
+
+  .ai-modal,
+  .ai-modal-overlay,
+  .ai-paste-highlight { animation: none; }
+
+  .ai-loading-dots span {
+    animation: none;
+    opacity: 0.6;
+  }
+}

@@ -51,7 +51,7 @@
 //     setLoading(false);
 //     setImageAnalyzing(false);
 //     setSuggestions([]);
-//     setNeedsReview([]); 
+//     setNeedsReview([]);
 //     setIsFallback(false);
 //     setError(null);
 //     setContextLevel('none');
@@ -92,10 +92,19 @@
 //   }, [conversation, messages]);
 
 //   // ── Helpers ────────────────────────────────────────────────────────────────
+//   // Only ever returns a customer message that BELONGS to the conversation on
+//   // screen. During a switch, a late inbound message for the previous
+//   // conversation can still be in `messages` for a render — filtering by
+//   // conversation id here prevents it from seeding suggestions.
 //   const getLastCustomerMessage = () => {
 //     if (!messages?.length) return null;
+//     const activeId = conversation?.id;
 //     for (let i = messages.length - 1; i >= 0; i--) {
-//       if (messages[i].senderType === 'customer' && !messages[i]._optimistic) return messages[i];
+//       const m = messages[i];
+//       if (m.senderType !== 'customer' || m._optimistic) continue;
+//       const mConv = m.conversationId ?? m.conversation_id;
+//       if (mConv != null && String(mConv) !== String(activeId)) continue; // foreign → skip
+//       return m;
 //     }
 //     return null;
 //   };
@@ -320,7 +329,7 @@
 //   const handleDragOver  = (e) => { e.preventDefault(); e.currentTarget.classList.add('dragging'); };
 //   const handleDragLeave = (e) => { e.currentTarget.classList.remove('dragging'); };
 
-// const analyzeImage = async (imageData) => {
+//   const analyzeImage = async (imageData) => {
 //     const reqConv = conversation?.id;
 //     setImageAnalyzing(true);
 //     setError(null);
@@ -385,7 +394,7 @@
 //       const data = await res.json();
 //       if (reqConv !== activeConvRef.current) return;   // switched mid-request — bail
 //       setSuggestions(data.suggestions || []);
-//       setNeedsReview(data.needsReview || []); 
+//       setNeedsReview(data.needsReview || []);
 //       setIsFallback(isFallbackResponse(data));
 //     } catch (err) {
 //       if (reqConv !== activeConvRef.current) return;
@@ -408,9 +417,16 @@
 //   };
 
 //   // ── New message: mark ready, don't auto-fetch ──────────────────────────────
+//   // Gated on conversation identity so a late inbound message for a DIFFERENT
+//   // conversation (arriving in the same render window as a switch) can never
+//   // flip this panel to "ready" or seed suggestions from a foreign message.
 //   useEffect(() => {
 //     const lastCustomerMsg = getLastCustomerMessage();
 //     if (!lastCustomerMsg) { setSuggestions([]); setIsFallback(false); setContextLevel('none'); setReadyToGenerate(false); return; }
+
+//     // Guard: only react to messages belonging to the conversation on screen.
+//     const msgConvId = lastCustomerMsg.conversationId ?? lastCustomerMsg.conversation_id;
+//     if (msgConvId != null && String(msgConvId) !== String(conversation?.id)) return;
 
 //     const msgId = String(lastCustomerMsg.id);
 //     if (msgId === lastProcessedMsgId.current) return;
@@ -431,7 +447,7 @@
 //     setIsFallback(false);
 //     setError(null);
 //     setReadyToGenerate(true);
-//   }, [messages]);
+//   }, [messages, conversation?.id]);
 
 //   useEffect(() => {
 //     return () => { if (uploadedImage?.previewUrl) URL.revokeObjectURL(uploadedImage.previewUrl); };
@@ -450,7 +466,7 @@
 //       const data = await postToAI(buildPayload(messageText, { adminNote: note || '' }));
 //       if (reqConv !== activeConvRef.current) return;   // switched mid-request — bail
 //       setSuggestions(data.suggestions || []);
-//       setNeedsReview(data.needsReview || []); 
+//       setNeedsReview(data.needsReview || []);
 //       setIsFallback(isFallbackResponse(data));
 //     } catch (err) {
 //       if (reqConv !== activeConvRef.current) return;
@@ -897,9 +913,24 @@
 
 
 
-import React, { useState, useEffect, useRef } from 'react';
+
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import api from '../services/api';
 import '../styles/Aisuggestions.css';
+
+// Unpacks the API's `voiceFlags` into an index-keyed lookup.
+// Server shape: [{ index, flags }] or [{ index, label, flags }]
+// This is shape-handling, not rules. The voice rules live in exactly one
+// place — backend/lib/voice-rules.js — so a second copy cannot drift out of
+// sync and start flagging text the server already scrubbed.
+function flagsByIndex(voiceFlags) {
+  const map = {};
+  if (!Array.isArray(voiceFlags)) return map;
+  for (const entry of voiceFlags) {
+    if (Number.isInteger(entry?.index)) map[entry.index] = Array.isArray(entry.flags) ? entry.flags : [];
+  }
+  return map;
+}
 
 function AISuggestions({ conversation, messages, onSelectSuggestion }) {
   const [suggestions, setSuggestions]           = useState([]);
@@ -911,6 +942,11 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
   const [contextLevel, setContextLevel]         = useState('none');
   const [readyToGenerate, setReadyToGenerate]   = useState(false);
   const lastProcessedMsgId                      = useRef(null);
+
+  // Voice flags come from the API (backend/lib/voice-rules.js). No entry for an
+  // index means that reply was clean. If the backend predates the voice pass it
+  // sends nothing and no chips render — the panel behaves as it did before.
+  const [serverVoiceFlags, setServerVoiceFlags] = useState({});
 
   const [isEditing, setIsEditing]               = useState(false);
   const [editedMessage, setEditedMessage]       = useState('');
@@ -951,6 +987,7 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
     setSuggestions([]);
     setNeedsReview([]);
     setIsFallback(false);
+    setServerVoiceFlags({});
     setError(null);
     setContextLevel('none');
     setReadyToGenerate(false);
@@ -1046,6 +1083,9 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
       return `${role}: ${content}`;
     }).join('\n');
 
+    // Raw samples. The backend filters these through filterOnVoiceSamples()
+    // before extractAdminStyle() learns from them — do not pre-filter here, the
+    // server needs the drop count to spot a team-wide voice problem.
     const agentStyleSamples = agentMessages
       .filter(m => !m._optimistic && m.content && m.content.trim().length > 8)
       .slice(-15)
@@ -1155,8 +1195,21 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
     };
   };
 
-  const buildPayload = (clientMessage, extra = {}) => {
+  // ── Payload ────────────────────────────────────────────────────────────────
+  // No voice text is sent from here. The backend builds the voice block in
+  // lib/voice-rules.js so it cannot be tampered with from the client and so a
+  // rule change is one deploy, not two.
+  //
+  // opts.image / opts.analysisText → attach a specific image (state may not have
+  //                                  flushed yet when called right after upload)
+  // opts.includeImage: false       → hard-exclude the screenshot
+  const buildPayload = (clientMessage, extra = {}, opts = {}) => {
+    const { image = null, analysisText = null, includeImage = true } = opts;
     const { chatHistory, agentStyleSamples, analysis, recentContext } = buildConversationContext();
+
+    const img         = image || (imageDismissed ? null : uploadedImage);
+    const attachImage = includeImage && !!img;
+
     return {
       clientMessage: clientMessage.trim(),
       chatHistory, agentStyleSamples, recentContext, analysis,
@@ -1168,9 +1221,9 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
       adminNote:       adminNoteRef.current || '',
       messageEdited:   isEditedRef.current,
       brainSettings:   (() => { try { return JSON.parse(localStorage.getItem('brain_suggestion_settings') || '{}'); } catch { return {}; } })(),
-      ...(uploadedImage && !imageDismissed ? {
-        adminImage: { base64: uploadedImage.base64, mimeType: uploadedImage.mimeType, name: uploadedImage.name },
-        imageAnalysis: imageAnalysis || null,
+      ...(attachImage ? {
+        adminImage: { base64: img.base64, mimeType: img.mimeType, name: img.name },
+        imageAnalysis: analysisText ?? imageAnalysis ?? null,
       } : {}),
       ...extra,
     };
@@ -1186,6 +1239,43 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
     if (!res.ok) { const text = await res.text(); throw new Error(`Server ${res.status}: ${text.substring(0, 100)}`); }
     return res.json();
   };
+
+  // ── Core fetch — every suggestion path goes through here ───────────────────
+  const runSuggestions = async (messageText, opts = {}) => {
+    if (!messageText?.trim()) return;
+    const { note, image = null, analysisText = null, includeImage = true } = opts;
+    const reqConv = conversation?.id;
+    setReadyToGenerate(false);
+    setLoading(true);
+    setError(null);
+    setSuggestions([]);
+    setNeedsReview([]);
+    setIsFallback(false);
+    setServerVoiceFlags({});
+    try {
+      const payload = buildPayload(
+        messageText,
+        note !== undefined ? { adminNote: note || '' } : {},
+        { image, analysisText, includeImage },
+      );
+      const data = await postToAI(payload);
+      if (reqConv !== activeConvRef.current) return;   // switched mid-request — bail
+      setSuggestions(data.suggestions || []);
+      setNeedsReview(data.needsReview || []);
+      setIsFallback(isFallbackResponse(data));
+      setServerVoiceFlags(flagsByIndex(data.voiceFlags));
+    } catch (err) {
+      if (reqConv !== activeConvRef.current) return;
+      setError(`Could not generate suggestions: ${err.message}`);
+    } finally {
+      if (reqConv === activeConvRef.current) setLoading(false);
+    }
+  };
+
+  const fetchSuggestions = (messageText, note) => runSuggestions(messageText, { note });
+
+  const fetchSuggestionsWithImage = (messageText, imageData, imageAnalysisText) =>
+    runSuggestions(messageText, { image: imageData, analysisText: imageAnalysisText });
 
   // ── Image handling ─────────────────────────────────────────────────────────
   const processImageFile = async (file) => {
@@ -1261,47 +1351,6 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
     }
   };
 
-  const fetchSuggestionsWithImage = async (messageText, imageData, imageAnalysisText) => {
-    if (!messageText?.trim()) return;
-    const reqConv = conversation?.id;
-    setReadyToGenerate(false);
-    setLoading(true);
-    setError(null);
-    setSuggestions([]);
-    setIsFallback(false);
-    const { chatHistory, agentStyleSamples, analysis, recentContext } = buildConversationContext();
-    const payload = {
-      clientMessage: messageText.trim(), chatHistory, agentStyleSamples, recentContext, analysis,
-      conversationId: conversation?.id, customerName: conversation?.customerName,
-      customerEmail: conversation?.customerEmail,
-      storeName: conversation?.storeName || conversation?.storeIdentifier,
-      storeIdentifier: conversation?.storeIdentifier,
-      adminNote: adminNoteRef.current || '', messageEdited: isEditedRef.current,
-      brainSettings: (() => { try { return JSON.parse(localStorage.getItem('brain_suggestion_settings') || '{}'); } catch { return {}; } })(),
-      adminImage: { base64: imageData.base64, mimeType: imageData.mimeType, name: imageData.name },
-      imageAnalysis: imageAnalysisText,
-    };
-    try {
-      const baseUrl = api.baseUrl || import.meta.env.VITE_API_URL || '';
-      const res = await fetch(`${baseUrl}/api/ai/suggestions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) { const text = await res.text(); throw new Error(`Server ${res.status}: ${text.substring(0, 100)}`); }
-      const data = await res.json();
-      if (reqConv !== activeConvRef.current) return;   // switched mid-request — bail
-      setSuggestions(data.suggestions || []);
-      setNeedsReview(data.needsReview || []);
-      setIsFallback(isFallbackResponse(data));
-    } catch (err) {
-      if (reqConv !== activeConvRef.current) return;
-      setError(`Could not generate suggestions: ${err.message}`);
-    } finally {
-      if (reqConv === activeConvRef.current) setLoading(false);
-    }
-  };
-
   const handleRemoveImage = () => {
     if (uploadedImage?.previewUrl) URL.revokeObjectURL(uploadedImage.previewUrl);
     setUploadedImage(null);
@@ -1310,7 +1359,7 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
     // Re-fetch without image only if suggestions already exist
     if (suggestions.length > 0) {
       const msgText = isEditedRef.current ? editedTextRef.current : getLastCustomerMessage()?.content;
-      if (msgText) fetchSuggestions(msgText, adminNoteRef.current);
+      if (msgText) runSuggestions(msgText, { note: adminNoteRef.current, includeImage: false });
     }
   };
 
@@ -1343,6 +1392,7 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
     setIsEditing(false);
     setSuggestions([]);
     setIsFallback(false);
+    setServerVoiceFlags({});
     setError(null);
     setReadyToGenerate(true);
   }, [messages, conversation?.id]);
@@ -1351,86 +1401,40 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
     return () => { if (uploadedImage?.previewUrl) URL.revokeObjectURL(uploadedImage.previewUrl); };
   }, []);
 
-  // ── Core fetch ─────────────────────────────────────────────────────────────
-  const fetchSuggestions = async (messageText, note) => {
-    if (!messageText?.trim()) return;
-    const reqConv = conversation?.id;
-    setReadyToGenerate(false);
-    setLoading(true);
-    setError(null);
-    setSuggestions([]);
-    setIsFallback(false);
-    try {
-      const data = await postToAI(buildPayload(messageText, { adminNote: note || '' }));
-      if (reqConv !== activeConvRef.current) return;   // switched mid-request — bail
-      setSuggestions(data.suggestions || []);
-      setNeedsReview(data.needsReview || []);
-      setIsFallback(isFallbackResponse(data));
-    } catch (err) {
-      if (reqConv !== activeConvRef.current) return;
-      setError(`Could not generate suggestions: ${err.message}`);
-    } finally {
-      if (reqConv === activeConvRef.current) setLoading(false);
-    }
-  };
-
+  // ── Actions ────────────────────────────────────────────────────────────────
   const handleGenerate = () => {
     const text = isEditedRef.current ? editedTextRef.current : getLastCustomerMessage()?.content;
     if (text) fetchSuggestions(text, adminNoteRef.current);
   };
 
-  // Generate without screenshot — explicitly excludes image from payload
+  // Generate without screenshot — hard-excludes the image from the payload
   const handleGenerateWithoutScreenshot = () => {
     const text = isEditedRef.current ? editedTextRef.current : getLastCustomerMessage()?.content;
     if (!text) return;
-    const reqConv = conversation?.id;
     setImageDismissed(true);
-    setReadyToGenerate(false);
-    setLoading(true);
-    setError(null);
-    setSuggestions([]);
-    setIsFallback(false);
-    const { chatHistory, agentStyleSamples, analysis, recentContext } = buildConversationContext();
-    const payload = {
-      clientMessage: text.trim(), chatHistory, agentStyleSamples, recentContext, analysis,
-      conversationId: conversation?.id, customerName: conversation?.customerName,
-      customerEmail: conversation?.customerEmail,
-      storeName: conversation?.storeName || conversation?.storeIdentifier,
-      storeIdentifier: conversation?.storeIdentifier,
-      adminNote: adminNoteRef.current || '', messageEdited: isEditedRef.current,
-      brainSettings: (() => { try { return JSON.parse(localStorage.getItem('brain_suggestion_settings') || '{}'); } catch { return {}; } })(),
-      // no adminImage / imageAnalysis — intentionally excluded
-    };
-    const baseUrl = api.baseUrl || import.meta.env.VITE_API_URL || '';
-    fetch(`${baseUrl}/api/ai/suggestions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
-      body: JSON.stringify(payload),
-    })
-      .then(res => { if (!res.ok) throw new Error(`Server ${res.status}`); return res.json(); })
-      .then(data => {
-        if (reqConv !== activeConvRef.current) return;   // switched mid-request — bail
-        setSuggestions(data.suggestions || []);
-        setIsFallback(isFallbackResponse(data));
-      })
-      .catch(err => { if (reqConv === activeConvRef.current) setError(`Could not generate suggestions: ${err.message}`); })
-      .finally(() => { if (reqConv === activeConvRef.current) setLoading(false); });
+    runSuggestions(text, { note: adminNoteRef.current, includeImage: false });
   };
 
   const handleOpenDetailed = async () => {
     if (!suggestions.length) return;
     const reqConv = conversation?.id;
-    setDetailedModal({ loading: true, error: null, answers: [], fallback: false });
+    setDetailedModal({ loading: true, error: null, answers: [], fallback: false, voiceFlags: {} });
     setActiveTab(0);
     const lastCustomerMsg = getLastCustomerMessage();
     const clientMessage = isEditedRef.current ? editedTextRef.current : (lastCustomerMsg?.content || '');
     try {
       const data = await postToAI(buildPayload(clientMessage, { detailedAnswerMode: true, baseSuggestions: suggestions }));
       if (reqConv !== activeConvRef.current) return;   // switched mid-request — bail
-      setDetailedModal({ loading: false, error: null, answers: data.detailedAnswers || [], fallback: isFallbackResponse(data) });
+      setDetailedModal({
+        loading: false,
+        error: null,
+        answers: data.detailedAnswers || [],
+        fallback: isFallbackResponse(data),
+        voiceFlags: flagsByIndex(data.voiceFlags),
+      });
     } catch (err) {
       if (reqConv !== activeConvRef.current) return;
-      setDetailedModal({ loading: false, error: `Failed to generate: ${err.message}`, answers: [], fallback: false });
+      setDetailedModal({ loading: false, error: `Failed to generate: ${err.message}`, answers: [], fallback: false, voiceFlags: {} });
     }
   };
 
@@ -1472,6 +1476,32 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
     setMessageWasEdited(false);
     setAdminNote('');
     if (msg) fetchSuggestions(msg.content);
+  };
+
+  // ── Voice flags ────────────────────────────────────────────────────────────
+  // Straight from the server. Nothing is linted client-side, so there is no
+  // second rule set to fall out of sync with backend/lib/voice-rules.js.
+  const suggestionFlags = useMemo(
+    () => suggestions.map((_, i) => serverVoiceFlags[i] || []),
+    [suggestions, serverVoiceFlags],
+  );
+
+  const detailedFlags = useMemo(
+    () => (detailedModal?.answers || []).map((_, i) => detailedModal.voiceFlags?.[i] || []),
+    [detailedModal],
+  );
+
+  const renderFlags = (flags) => {
+    if (!flags?.length) return null;
+    const title = flags.map(f => (f.detail ? `${f.label}: ${f.detail}` : f.label)).join('\n');
+    return (
+      <span className="ai-voice-flags" title={`Off-voice:\n${title}`}>
+        {flags.slice(0, 3).map(f => (
+          <span key={f.code} className={`ai-voice-flag ai-voice-flag--${f.code}`}>{f.label}</span>
+        ))}
+        {flags.length > 3 && <span className="ai-voice-flag">+{flags.length - 3}</span>}
+      </span>
+    );
   };
 
   const lastCustomerMsg  = getLastCustomerMessage();
@@ -1696,18 +1726,22 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
                   <p>{error}</p>
                   <button onClick={handleRefresh} type="button" className="ai-retry-btn">Try Again</button>
                 </div>
-              ) : suggestions.map((s, i) => (
-                <button
-                  key={i}
-                  className={`ai-suggestion-card ${isFallback ? 'ai-suggestion-card--fallback' : ''}`}
-                  onClick={() => onSelectSuggestion(s)}
-                  type="button"
-                >
-                  <span className="ai-suggestion-number">{i + 1}</span>
-                  <span className="ai-suggestion-text">{s}</span>
-                  {isFallback && <span className="ai-suggestion-fallback-tag" title="Canned template">template</span>}
-                </button>
-              ))}
+              ) : suggestions.map((s, i) => {
+                const flags = suggestionFlags[i] || [];
+                return (
+                  <button
+                    key={i}
+                    className={`ai-suggestion-card ${isFallback ? 'ai-suggestion-card--fallback' : ''} ${flags.length ? 'ai-suggestion-card--offvoice' : ''}`}
+                    onClick={() => onSelectSuggestion(s)}
+                    type="button"
+                  >
+                    <span className="ai-suggestion-number">{i + 1}</span>
+                    <span className="ai-suggestion-text">{s}</span>
+                    {isFallback && <span className="ai-suggestion-fallback-tag" title="Canned template">template</span>}
+                    {renderFlags(flags)}
+                  </button>
+                );
+              })}
             </div>
 
 
@@ -1759,7 +1793,7 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
                   {[0, 1, 2].map(i => (
                     <button
                       key={i}
-                      className={`ai-modal-tab ${activeTab === i ? 'active' : ''}`}
+                      className={`ai-modal-tab ${activeTab === i ? 'active' : ''} ${detailedFlags[i]?.length ? 'ai-modal-tab--offvoice' : ''}`}
                       style={{ '--tab-color': TAB_COLORS[i]?.color }}
                       onClick={() => setActiveTab(i)}
                       title={suggestions[i] || `Reply ${i + 1}`}
@@ -1777,9 +1811,23 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
                     </div>
                   )}
                   {detailedModal.answers[activeTab] ? (
-                    <div className="ai-modal-answer-block" style={{ '--answer-color': TAB_COLORS[activeTab]?.color }}>
-                      {detailedModal.answers[activeTab].text}
-                    </div>
+                    <>
+                      <div className="ai-modal-answer-block" style={{ '--answer-color': TAB_COLORS[activeTab]?.color }}>
+                        {detailedModal.answers[activeTab].text}
+                      </div>
+                      {detailedFlags[activeTab]?.length > 0 && (
+                        <div className="ai-voice-flags ai-voice-flags--modal">
+                          <span className="ai-voice-flags-label">Off-voice:</span>
+                          {detailedFlags[activeTab].map(f => (
+                            <span
+                              key={f.code}
+                              className={`ai-voice-flag ai-voice-flag--${f.code}`}
+                              title={f.detail || f.label}
+                            >{f.label}</span>
+                          ))}
+                        </div>
+                      )}
+                    </>
                   ) : (
                     <div className="ai-modal-answer-empty">No answer generated for this reply.</div>
                   )}

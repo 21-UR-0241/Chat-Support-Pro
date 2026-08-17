@@ -2771,10 +2771,6 @@ const parseFileData = (raw) => {
   try { return JSON.parse(raw); } catch { return null; }
 };
 
-// const normalizeMessage = (msg) => ({
-//   ...msg,
-//   fileData: parseFileData(msg.fileData || msg.file_data),
-// });
 
 const pickId = (m) =>
   m?.id ?? m?.messageId ?? m?.message_id ?? m?._id ?? null;
@@ -2793,18 +2789,17 @@ const dedupeMessages = (list) => {
   const out = [];
   for (const m of list) {
     const id = m.id != null ? String(m.id) : null;
-    if (id && seenIds.has(id)) continue;                 // exact id dup
+    if (id && seenIds.has(id)) continue;
     const ts = msgTime(m);
     const dupIdx = out.findIndex(o => {
       if (o.senderType !== m.senderType) return false;
       if ((o.content || '') !== (m.content || '')) return false;
       if ((o.fileUrl || '') !== (m.fileUrl || '')) return false;
       const ots = msgTime(o);
-      if (ots === 0 || ts === 0) return true;            // malformed 2nd frame (no ts)
-      return Math.abs(ots - ts) < 2000;                  // same row re-delivered → ~identical ts
+      if (ots === 0 || ts === 0) return true;
+      return Math.abs(ots - ts) < 2000;
     });
     if (dupIdx !== -1) {
-      // keep whichever copy has a real (non-temp) server id
       const existing = out[dupIdx];
       const existingReal = existing.id != null && !String(existing.id).startsWith('temp-');
       const incomingReal = id && !id.startsWith('temp-');
@@ -2936,12 +2931,9 @@ function ActionsDropdown({
 }
 
 // ============ MAIN COMPONENT ============
-// CHANGED: `ws` (the shared singleton) is now a prop. ChatWindow no longer opens
-// its own WebSocket — it subscribes to the one socket App already owns and joins.
-// App still owns join/leave for the active conversation, so we ONLY listen here.
 function ChatWindow({
   conversation,
-  ws,                       // ← NEW: shared websocket from App (useWebSocket)
+  ws,
   onSendMessage,
   onClose,
   onTyping,
@@ -3123,25 +3115,17 @@ function ChatWindow({
   // ============ MESSAGE DELETE HANDLERS ============
   const handleDeleteMessageClick = (message) => { setMessageToDelete(message); };
   const handleCancelMessageDelete = () => { setMessageToDelete(null); };
-
-  // CHANGED: optimistic delete — remove locally first, then call the API.
-  // The UI no longer blocks on the round-trip; on failure we roll the message back.
   const handleConfirmMessageDelete = async () => {
     if (!messageToDelete) return;
     const target = messageToDelete;
-
-    // 1) optimistic local removal + close modal immediately
     displayedMessageIds.current.delete(String(target.id));
     setMessages(prev => prev.filter(m => String(m.id) !== String(target.id)));
     setMessageToDelete(null);
-
-    // 2) fire the request in the background
     setDeletingMessage(true);
     try {
       await api.deleteMessage(target.id);
     } catch (error) {
       console.error('Failed to delete message:', error);
-      // 3) rollback on failure — re-insert in chronological position
       displayedMessageIds.current.add(String(target.id));
       setMessages(prev => {
         if (prev.some(m => String(m.id) === String(target.id))) return prev;
@@ -3368,9 +3352,6 @@ const handleIncomingMessage = (raw, currentConv) => {
     } catch (error) {}
   };
 
-  // Conversation-scope guard for shared-socket WS events.
-  // convId MUST be present AND equal the OPEN conversation, else the event is
-  // dropped. Defined ABOVE the handlers that call it so there's no TDZ concern.
   const isForOpenConversation = (convId) =>
     convId != null && String(convId) === String(conversationRef.current?.id);
 
@@ -3425,9 +3406,6 @@ useEffect(() => {
         }
         let done = false;
         const next = prev.map(m => {
-          // Reconcile agent echoes on clientMsgId ONLY. The old tempId fallback
-          // could match a bubble belonging to another conversation during a fast
-          // A→B switch — the source of "reply shows in wrong conversation".
           if (!done && cmid && m.clientMsgId === cmid) {
             done = true;
             return { ...confirmedMsg, fileData: confirmedMsg.fileData || m.fileData, fileUrl: confirmedMsg.fileUrl || m.fileUrl, sending: false, _optimistic: false };
@@ -3587,8 +3565,6 @@ useEffect(() => {
   const scrollToBottom = () => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); };
 
   // ============ SEND ============
-
-  // ============ SEND ============
   const handleSend = async (e) => {
     if (e) { e.preventDefault(); e.stopPropagation(); }
     const text       = getMessageContent();
@@ -3640,9 +3616,6 @@ useEffect(() => {
         sending:  false,
       };
       setMessages(prev => {
-        // Reconcile by clientMsgId — identical on the optimistic bubble AND every
-        // server event for this message. If the echo already swapped it in, drop
-        // our optimistic twin; otherwise upgrade it in place.
         const already = prev.some(m => m.clientMsgId === clientMsgId && !m._optimistic);
         if (already) return prev.filter(m => !(m._optimistic && m.clientMsgId === clientMsgId));
         return prev.map(m =>
