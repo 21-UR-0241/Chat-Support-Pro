@@ -1780,28 +1780,30 @@ const handleTyping = (isTyping) => {
   // suspended (backgrounded tab) we DON'T await the pending resume() — we fire
   // an <audio> ping immediately so the beep isn't swallowed. Both paths are
   // pre-unlocked by the gesture effect above.
-  const playBeep = useCallback(() => {
-    try {
-      let ctx = audioCtxRef.current;
-      if (!ctx) { ctx = new (window.AudioContext || window.webkitAudioContext)(); audioCtxRef.current = ctx; }
-      if (ctx.state === 'suspended') {
-        ctx.resume().catch(() => {});
-        try { const a = new Audio('/notification.mp3'); a.volume = 0.5; a.play().catch(() => {}); } catch { /* ignore */ }
-        return;
-      }
-      const osc  = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain); gain.connect(ctx.destination);
-      osc.frequency.value = 600; osc.type = 'sine';
-      gain.gain.setValueAtTime(0.3, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.3);
-    } catch {
-      // Last-ditch fallback if WebAudio throws entirely.
-      try { const a = new Audio('/notification.mp3'); a.volume = 0.5; a.play().catch(() => {}); } catch { /* ignore */ }
+const playBeep = useCallback(() => {
+  console.log('[beep] playBeep called, ctx state:', audioCtxRef.current?.state);
+  try {
+    let ctx = audioCtxRef.current;
+    if (!ctx) { ctx = new (window.AudioContext||window.webkitAudioContext)(); audioCtxRef.current = ctx; }
+    console.log('[beep] using ctx, state:', ctx.state);
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(e=>console.log('[beep] resume failed', e));
+      try { const a = new Audio('/notification.mp3'); a.volume=0.5; a.play().then(()=>console.log('[beep] mp3 fallback played')).catch(e=>console.log('[beep] mp3 fallback blocked', e.message)); } catch(e){ console.log('[beep] mp3 threw', e); }
+      return;
     }
-  }, []);
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.value = 600; osc.type='sine';
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime+0.3);
+    osc.start(ctx.currentTime); osc.stop(ctx.currentTime+0.3);
+    console.log('[beep] oscillator fired');
+  } catch (e) {
+    console.log('[beep] threw, trying mp3:', e.message);
+    try { const a = new Audio('/notification.mp3'); a.volume=0.5; a.play().catch(err=>console.log('[beep] final mp3 blocked', err.message)); } catch(_){}
+  }
+}, []);
 
   const showNotification = (convId, name, preview) => {
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
