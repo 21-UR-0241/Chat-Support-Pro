@@ -1,4 +1,5 @@
 
+
 // import React, { useState, useEffect, useRef, useCallback } from 'react';
 // import api from './services/api';
 // import { useConversations } from './hooks/useConversations';
@@ -149,6 +150,7 @@
 //   const pendingUnblacklistEmailsRef = useRef(new Set());
 //   const handlersRef                 = useRef(null);
 //   const wsAuthedOnceRef             = useRef(false);
+//   const audioCtxRef                 = useRef(null); // ← ADDED: WebAudio ctx for the primary beep path
 
 
 //   const groupAccent    = selectedGroupColor || DEFAULT_GROUP_COLOR;
@@ -317,6 +319,47 @@
 
 //   useEffect(() => { loadStores(); loadStats(); loadStoreGroups(); requestNotificationPermission(); }, []);
 
+//   // ── AudioContext unlock (resilient) ─────────────────────────────────────────
+//   // ← ADDED. Browsers only move a suspended AudioContext to "running" on a real
+//   // user gesture, and new Audio().play() is likewise blocked until the tab has
+//   // had one gesture. Prime BOTH here so the very first backgrounded message can
+//   // beep. Re-arms on every gesture until the ctx is genuinely running, and
+//   // re-resumes when the tab returns to the foreground (Chrome suspends WebAudio
+//   // for background tabs — the support-dashboard-in-a-bg-tab case).
+//   useEffect(() => {
+//     const ensureRunning = () => {
+//       try {
+//         if (!audioCtxRef.current)
+//           audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+//         if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume();
+//       } catch { /* ignore */ }
+//       // Prime the HTMLAudio autoplay allowance too (muted, no audible artifact).
+//       try { const a = new Audio('/notification.mp3'); a.volume = 0; a.play().catch(() => {}); } catch { /* ignore */ }
+//     };
+
+//     const onGesture = () => {
+//       ensureRunning();
+//       if (audioCtxRef.current?.state === 'running') {
+//         window.removeEventListener('pointerdown', onGesture);
+//         window.removeEventListener('keydown', onGesture);
+//       }
+//     };
+//     const onVisibility = () => {
+//       if (document.visibilityState === 'visible') {
+//         try { if (audioCtxRef.current?.state === 'suspended') audioCtxRef.current.resume(); } catch { /* ignore */ }
+//       }
+//     };
+
+//     window.addEventListener('pointerdown', onGesture);
+//     window.addEventListener('keydown', onGesture);
+//     document.addEventListener('visibilitychange', onVisibility);
+//     return () => {
+//       window.removeEventListener('pointerdown', onGesture);
+//       window.removeEventListener('keydown', onGesture);
+//       document.removeEventListener('visibilitychange', onVisibility);
+//     };
+//   }, []);
+
 //   useEffect(() => {
 //     const handleClickOutside = (e) => {
 //       if (profileDropdownRef.current && !profileDropdownRef.current.contains(e.target))
@@ -467,10 +510,13 @@
 //       const curList    = conversationsRef.current;
 //       const msg        = data.message || {};
 //       const sender     = msg.senderType || msg.sender_type;
-//       const convId     = data.conversationId || msg.conversationId;
+//       const convId     = data.conversationId || msg.conversationId
+//                        || data.conversation_id || msg.conversation_id; // ← CHANGED: tolerate snake_case id
 //       const isActive   = curConv?.id === convId;
 //       const isAutoReply = msg.isAutoReply === true;
 //       const patch = {};
+
+//       if (!convId) return; // ← ADDED: no id → nothing we can safely target
 
 //       if (!isAutoReply) {
 //         patch.lastMessage           = msg.content || '';
@@ -486,10 +532,25 @@
 //       }
 
 //       if (Object.keys(patch).length > 0) h.updateConversation(convId, patch);
+
+//       // ── Notification ownership: App is the SINGLE source of truth. ──────────
+//       // ← CHANGED. Notify the instant the WS event lands — before any list
+//       // filtering, group scoping, search mode, or state round-trip. This retires
+//       // the fragile diff-based notifier in ConversationList and the duplicate
+//       // beep in useConversations (both of which should have their notify paths
+//       // removed so nothing double-fires).
 //       if (sender === 'agent') { h.clearNotificationsForConversation(convId); return; }
-//       // Notifications for inactive customer messages are owned by ConversationList.
-//       if (sender === 'customer' && isActive) {
-//         h.handleMarkAsRead(convId);
+
+//       if (sender === 'customer') {
+//         if (isActive) {
+//           h.handleMarkAsRead(convId);
+//         } else if (!isAutoReply) {
+//           const existing = curList.find(c => c.id === convId);
+//           const name = existing?.customerName || existing?.customer_name
+//                      || msg.senderName || msg.sender_name || 'Guest';
+//           h.showNotification(convId, name, msg.content || 'New message'); // OS notification
+//           h.playBeep();                                                    // audible cue
+//         }
 //       }
 //     });
 
@@ -502,14 +563,27 @@
 //     const u4  = ws.on('reconnecting', (d) => { setWsStatus('reconnecting'); setWsReconnectAttempt(d?.attempt || 0); });
 //     const uE  = ws.on('error',        () => setWsStatus('reconnecting'));
 
+//     // ── Refocus / network-back resync ──────────────────────────────────────
+//     // ← ADDED. websocket.js emits 'resync' on every tab refocus and 'online'
+//     // event, BEFORE any liveness check. This is the fix for "new messages don't
+//     // show unless I reload": broadcastToAgents() is fire-and-forget, so a frame
+//     // that lands while this tab's event loop is throttled (backgrounded/minimized)
+//     // is dropped from state with the socket still technically OPEN — meaning no
+//     // reconnect, no 'connected', nothing else pulls it. This refetches
+//     // unconditionally on return. One cached GET; idempotent, so the extra fetch
+//     // when a reconnect ALSO fires 'connected' is harmless.
+//     const uR  = ws.on('resync', () => handlersRef.current.refreshConversations());
+
 //     const u5  = ws.on('legal_threat_detected', (data) => {
 //       const h = handlersRef.current;
 //       const a = data.alert;
 //       if (!a?.conversationId) return;
 //       const emoji = a.severity === 'critical' ? '🚨' : a.severity === 'high' ? '⚠️' : '🔔';
 //       h.updateConversation(a.conversationId, { priority: 'urgent', legalFlag: true, legalFlagSeverity: a.severity, legalFlagTerm: a.matchedTerm });
-//       if (String(activeConversationRef.current?.id) !== String(a.conversationId))
+//       if (String(activeConversationRef.current?.id) !== String(a.conversationId)) {
 //         h.showNotification(a.conversationId, `${emoji} Legal Threat — ${a.severity?.toUpperCase()}`, `"${a.matchedTerm}" from ${a.senderName || 'Customer'}`);
+//         h.playBeep(); // ← ADDED: legal threats should beep too
+//       }
 //     });
 
 //     const u6  = ws.on('conversation_unread', (data) => {
@@ -569,7 +643,7 @@
 //       });
 //     });
 
-//     return () => { u1(); u2(); u3(); u4(); uE(); u5(); u6(); u7(); u8(); u9(); u10(); u11(); };
+//     return () => { u1(); u2(); u3(); u4(); uE(); uR(); u5(); u6(); u7(); u8(); u9(); u10(); u11(); };
 
 //   }, [ws]);
 
@@ -582,6 +656,34 @@
 //   }, [activeConversation, ws]);
 
 //   // ── Notification helpers ──────────────────────────────────────────────────
+
+//   // ← ADDED: single audible-cue path. WebAudio primary; if the context is
+//   // suspended (backgrounded tab) we DON'T await the pending resume() — we fire
+//   // an <audio> ping immediately so the beep isn't swallowed. Both paths are
+//   // pre-unlocked by the gesture effect above.
+//   const playBeep = useCallback(() => {
+//     try {
+//       let ctx = audioCtxRef.current;
+//       if (!ctx) { ctx = new (window.AudioContext || window.webkitAudioContext)(); audioCtxRef.current = ctx; }
+//       if (ctx.state === 'suspended') {
+//         ctx.resume().catch(() => {});
+//         try { const a = new Audio('/notification.mp3'); a.volume = 0.5; a.play().catch(() => {}); } catch { /* ignore */ }
+//         return;
+//       }
+//       const osc  = ctx.createOscillator();
+//       const gain = ctx.createGain();
+//       osc.connect(gain); gain.connect(ctx.destination);
+//       osc.frequency.value = 600; osc.type = 'sine';
+//       gain.gain.setValueAtTime(0.3, ctx.currentTime);
+//       gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+//       osc.start(ctx.currentTime);
+//       osc.stop(ctx.currentTime + 0.3);
+//     } catch {
+//       // Last-ditch fallback if WebAudio throws entirely.
+//       try { const a = new Audio('/notification.mp3'); a.volume = 0.5; a.play().catch(() => {}); } catch { /* ignore */ }
+//     }
+//   }, []);
+
 //   const showNotification = (convId, name, preview) => {
 //     if (!('Notification' in window) || Notification.permission !== 'granted') return;
 //     try {
@@ -653,6 +755,7 @@
 //     updateConversation, handleMarkAsRead, setActiveConversationId,
 //     removeFromExcluded, removeEmailFromExcluded, refreshConversations,
 //     showNotification, clearNotificationsForConversation,
+//     playBeep, // ← ADDED
 //   };
 
 //   return (
@@ -1012,7 +1115,7 @@
 // export default App;
 
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, Suspense, lazy } from 'react';
 import api from './services/api';
 import { useConversations } from './hooks/useConversations';
 import { useWebSocket } from './hooks/useWebSocket';
@@ -1020,15 +1123,19 @@ import ConversationList from './components/ConversationList';
 import ChatWindow from './components/ChatWindow';
 import Login from './components/Login';
 import GroupSelector from './components/GroupSelector';
-import EmployeeManagement from './components/EmployeeManagement';
 import ErrorBoundary from './components/ErrorBoundary';
 import MobileMenu from './components/MobileMenu';
 import ConversationNotes from './components/ConversationNotes';
-import AITraining from './components/AITraining';
-import StoreManagement from './components/StoreManagement';
-import ArchivedConversations from './components/Archivedconversations';
-import BlacklistManager from './components/Blacklistmanager';
-import PromoEmailBlast from './components/PromoEmailBlast';
+
+// Admin-only pages: not shown on first paint, and collectively a large slice of
+// the bundle. Lazy-load so they download on demand (on first navigation) instead
+// of blocking initial load. Each is rendered inside a <Suspense> boundary below.
+const EmployeeManagement    = lazy(() => import('./components/EmployeeManagement'));
+const AITraining            = lazy(() => import('./components/AITraining'));
+const StoreManagement       = lazy(() => import('./components/StoreManagement'));
+const ArchivedConversations = lazy(() => import('./components/Archivedconversations'));
+const BlacklistManager      = lazy(() => import('./components/Blacklistmanager'));
+const PromoEmailBlast       = lazy(() => import('./components/PromoEmailBlast'));
 
 const DEFAULT_GROUP_COLOR = '#25d366';
 
@@ -2000,7 +2107,9 @@ const handleTyping = (isTyping) => {
       {activePage === 'archived' && (
         <div className="app-content full-width" style={{ height: 'calc(100vh - 60px)', overflow: 'hidden' }}>
           <ErrorBoundary>
-            <ArchivedConversations onBack={() => setActivePage('dashboard')} onUnarchive={handleUnarchive} stores={stores} />
+            <Suspense fallback={<div className="loading-container"><div className="spinner" /></div>}>
+              <ArchivedConversations onBack={() => setActivePage('dashboard')} onUnarchive={handleUnarchive} stores={stores} />
+            </Suspense>
           </ErrorBoundary>
         </div>
       )}
@@ -2008,7 +2117,9 @@ const handleTyping = (isTyping) => {
       {activePage === 'blacklist' && employee.role === 'admin' && (
         <div className="app-content full-width" style={{ height: 'calc(100vh - 60px)', overflow: 'hidden' }}>
           <ErrorBoundary>
-            <BlacklistManager onBack={() => setActivePage('dashboard')} onUnblacklist={handleUnblacklist} />
+            <Suspense fallback={<div className="loading-container"><div className="spinner" /></div>}>
+              <BlacklistManager onBack={() => setActivePage('dashboard')} onUnblacklist={handleUnblacklist} />
+            </Suspense>
           </ErrorBoundary>
         </div>
       )}
@@ -2016,28 +2127,38 @@ const handleTyping = (isTyping) => {
       {activePage === 'stores' && (
         <div className="app-content full-width" style={{ height: 'calc(100vh - 60px)', overflow: 'hidden', display: 'block' }}>
           <ErrorBoundary>
-            <StoreManagement onBack={() => setActivePage('dashboard')} onStoresUpdated={loadStores} />
+            <Suspense fallback={<div className="loading-container"><div className="spinner" /></div>}>
+              <StoreManagement onBack={() => setActivePage('dashboard')} onStoresUpdated={loadStores} />
+            </Suspense>
           </ErrorBoundary>
         </div>
       )}
 
       {activePage === 'employees' && (
         <div className="app-content full-width" style={{ height: 'calc(100vh - 60px)', overflow: 'hidden', display: 'block' }}>
-          <EmployeeManagement currentUser={employee} onBack={() => setActivePage('dashboard')} />
+          <ErrorBoundary>
+            <Suspense fallback={<div className="loading-container"><div className="spinner" /></div>}>
+              <EmployeeManagement currentUser={employee} onBack={() => setActivePage('dashboard')} />
+            </Suspense>
+          </ErrorBoundary>
         </div>
       )}
 
       {activePage === 'training' && (
         <div className="app-content full-width" style={{ height: 'calc(100vh - 60px)', overflow: 'hidden' }}>
           <ErrorBoundary>
-            <AITraining onBrainUpdate={() => {}} />
+            <Suspense fallback={<div className="loading-container"><div className="spinner" /></div>}>
+              <AITraining onBrainUpdate={() => {}} />
+            </Suspense>
           </ErrorBoundary>
         </div>
       )}
-            {activePage === 'promo' && employee.role === 'admin' && (
+      {activePage === 'promo' && employee.role === 'admin' && (
         <div className="app-content full-width" style={{ height: 'calc(100vh - 60px)', overflow: 'hidden' }}>
           <ErrorBoundary>
-            <PromoEmailBlast onBack={() => setActivePage('dashboard')} />
+            <Suspense fallback={<div className="loading-container"><div className="spinner" /></div>}>
+              <PromoEmailBlast onBack={() => setActivePage('dashboard')} />
+            </Suspense>
           </ErrorBoundary>
         </div>
       )}
