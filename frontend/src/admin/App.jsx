@@ -152,7 +152,8 @@ function DashboardContent({ employee, onLogout, selectedGroup, selectedGroupName
   const pendingUnblacklistEmailsRef = useRef(new Set());
   const handlersRef                 = useRef(null);
   const wsAuthedOnceRef             = useRef(false);
-  const audioCtxRef                 = useRef(null); // WebAudio ctx for the primary beep path
+  const audioCtxRef                 = useRef(null); // WebAudio ctx — foreground enhancement only
+  const beepAudioRef                = useRef(null); // reused, pre-unlocked <audio> — PRIMARY beep (survives bg tab)
 
 
   const groupAccent    = selectedGroupColor || DEFAULT_GROUP_COLOR;
@@ -321,27 +322,43 @@ const getEmployeeName = (emp) => emp.employeeName || emp.name || 'Unknown';
 
   useEffect(() => { loadStores(); loadStats(); loadStoreGroups(); requestNotificationPermission(); }, []);
 
-  // ── AudioContext unlock (resilient) ─────────────────────────────────────────
-  // Browsers only move a suspended AudioContext to "running" on a real user
-  // gesture, and new Audio().play() is likewise blocked until the tab has had one
-  // gesture. Prime BOTH here so the very first backgrounded message can beep.
-  // Re-arms on every gesture until the ctx is genuinely running, and re-resumes
-  // when the tab returns to the foreground (Chrome suspends WebAudio for
-  // background tabs — the support-dashboard-in-a-bg-tab case).
+  // ── Audio unlock (resilient, background-tab aware) ──────────────────────────
+  // The reliable notification path in a BACKGROUNDED tab is a single <audio>
+  // element that was actually played once during a real user gesture — that grant
+  // sticks to the element and survives the tab going to the background. A fresh
+  // Audio() per notification does NOT inherit it, and a WebAudio context gets
+  // suspended by Chrome in background tabs and can't be resumed without another
+  // gesture. So: unlock ONE reused element here (played muted, then reset), and
+  // keep WebAudio only as a foreground nicety. Re-arms on each gesture until the
+  // element is primed, and re-resumes the ctx when the tab returns to foreground.
   useEffect(() => {
-    const ensureRunning = () => {
+    const unlock = () => {
+      // (1) Reused element — the primary path.
+      try {
+        if (!beepAudioRef.current) {
+          beepAudioRef.current = new Audio('/notification.mp3');
+          beepAudioRef.current.preload = 'auto';
+        }
+        const el = beepAudioRef.current;
+        el.muted = true;
+        const p = el.play();
+        if (p && typeof p.then === 'function') {
+          p.then(() => { el.pause(); el.currentTime = 0; el.muted = false; }).catch(() => {});
+        }
+      } catch { /* ignore */ }
+
+      // (2) WebAudio ctx — foreground enhancement only.
       try {
         if (!audioCtxRef.current)
           audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
         if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume();
       } catch { /* ignore */ }
-      // Prime the HTMLAudio autoplay allowance too (muted, no audible artifact).
-      try { const a = new Audio('/notification.mp3'); a.volume = 0; a.play().catch(() => {}); } catch { /* ignore */ }
     };
 
     const onGesture = () => {
-      ensureRunning();
-      if (audioCtxRef.current?.state === 'running') {
+      unlock();
+      // Consider unlocked once the reused element exists (it's the path that matters).
+      if (beepAudioRef.current) {
         window.removeEventListener('pointerdown', onGesture);
         window.removeEventListener('keydown', onGesture);
       }
@@ -355,6 +372,9 @@ const getEmployeeName = (emp) => emp.employeeName || emp.name || 'Unknown';
     window.addEventListener('pointerdown', onGesture);
     window.addEventListener('keydown', onGesture);
     document.addEventListener('visibilitychange', onVisibility);
+    // Try immediately too — the click that picked the store group may already
+    // count as the unlocking gesture on this document.
+    unlock();
     return () => {
       window.removeEventListener('pointerdown', onGesture);
       window.removeEventListener('keydown', onGesture);
@@ -660,41 +680,43 @@ const handleTyping = (isTyping) => {
 
   // ── Notification helpers ──────────────────────────────────────────────────
 
-  // Single audible-cue path. WebAudio oscillator is PRIMARY: it needs no file and
-  // no per-call gesture once the context is running (the unlock effect above moves
-  // it there on the first login/group-select click). The mp3 is only a fallback for
-  // the window where the context is still suspended (e.g. a backgrounded tab mid-
-  // resume) — that path may be autoplay-blocked, which is expected and harmless.
-  const playBeep = useCallback(() => {
+  // Only fires when the context is ALREADY running (foreground). No resume() here —
+  // a resume() off a WS event (not a user gesture) is disallowed and only spams the
+  // "AudioContext was not allowed to start" warning without producing sound.
+  const webAudioBeep = useCallback(() => {
+    const ctx = audioCtxRef.current;
+    if (!ctx || ctx.state !== 'running') return;
     try {
-      let ctx = audioCtxRef.current;
-      if (!ctx) {
-        ctx = new (window.AudioContext || window.webkitAudioContext)();
-        audioCtxRef.current = ctx;
-      }
-      if (ctx.state === 'suspended') ctx.resume();
-
-      if (ctx.state === 'running') {
-        const osc  = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain); gain.connect(ctx.destination);
-        osc.type = 'sine';
-        osc.frequency.value = 600;
-        gain.gain.setValueAtTime(0.3, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
-        osc.start(ctx.currentTime);
-        osc.stop(ctx.currentTime + 0.3);
-        return;
-      }
-      // ctx still suspended (bg tab mid-resume) → fall through to the mp3.
-    } catch { /* fall through to mp3 */ }
-
-    try {
-      const a = new Audio('/notification.mp3');
-      a.volume = 0.5;
-      a.play().catch(() => {});
+      const osc  = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.value = 600;
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.3);
     } catch { /* ignore */ }
   }, []);
+
+  // Audible cue. PRIMARY is the reused, pre-unlocked <audio> element from the
+  // unlock effect — it's the only path that reliably fires in a backgrounded tab.
+  // WebAudio is a SECONDARY that only runs if the context is already `running`
+  // (foreground).
+  const playBeep = useCallback(() => {
+    const el = beepAudioRef.current;
+    if (el) {
+      try {
+        el.muted = false;
+        el.volume = 0.5;
+        el.currentTime = 0;
+        const p = el.play();
+        if (p && typeof p.then === 'function') p.catch(() => webAudioBeep());
+        return;
+      } catch { /* fall through to WebAudio */ }
+    }
+    webAudioBeep();
+  }, [webAudioBeep]);
 
   const showNotification = (convId, name, preview) => {
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
@@ -1139,10 +1161,6 @@ const handleTyping = (isTyping) => {
 }
 
 export default App;
-
-
-
-
 
 
 
