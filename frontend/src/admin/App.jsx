@@ -1115,6 +1115,10 @@
 // export default App;
 
 
+
+
+
+
 import React, { useState, useEffect, useRef, useCallback, Suspense, lazy } from 'react';
 import api from './services/api';
 import { useConversations } from './hooks/useConversations';
@@ -1622,56 +1626,61 @@ const handleTyping = (isTyping) => {
 
   useEffect(() => {
     if (!ws) return;
+const u1 = ws.on('new_message', (data) => {
+  const h       = handlersRef.current;
+  const curConv = activeConversationRef.current;
+  const curList = conversationsRef.current;
+  const msg     = data.message || {};
 
-    const u1 = ws.on('new_message', (data) => {
-      const h          = handlersRef.current;
-      const curConv    = activeConversationRef.current;
-      const curList    = conversationsRef.current;
-      const msg        = data.message || {};
-      const sender     = msg.senderType || msg.sender_type;
-      const convId     = data.conversationId || msg.conversationId
-                       || data.conversation_id || msg.conversation_id; // ← CHANGED: tolerate snake_case id
-      const isActive   = curConv?.id === convId;
-      const isAutoReply = msg.isAutoReply === true;
-      const patch = {};
+  // widen field resolution — tolerate whatever the server actually sends
+  const sender = msg.senderType || msg.sender_type
+              || msg.sender     || msg.role || msg.from || '';
+  const convId = data.conversationId || msg.conversationId
+              || data.conversation_id || msg.conversation_id;
 
-      if (!convId) return; // ← ADDED: no id → nothing we can safely target
+  console.log('[new_message]', {
+    sender, convId,
+    activeId: curConv?.id,
+    isAutoReply: msg.isAutoReply,
+    msgKeys: Object.keys(msg),
+  });
 
-      if (!isAutoReply) {
-        patch.lastMessage           = msg.content || '';
-        patch.lastMessageAt         = msg.createdAt || msg.created_at || new Date().toISOString();
-        patch.lastSenderType        = sender;
-        patch.lastMessageSenderType = sender;
-      }
+  if (!convId) return;
 
-      if (sender === 'customer' && !isActive) {
-        const existing = curList.find(c => c.id === convId);
-        const prev = existing?.unreadCount || existing?.unread_count || 0;
-        patch.unreadCount = prev + 1; patch.unread_count = prev + 1;
-      }
+  // String() everywhere, like the rest of the file
+  const isActive    = curConv != null && String(curConv.id) === String(convId);
+  const isAutoReply = msg.isAutoReply === true;
+  const patch = {};
 
-      if (Object.keys(patch).length > 0) h.updateConversation(convId, patch);
+  if (!isAutoReply) {
+    patch.lastMessage           = msg.content || '';
+    patch.lastMessageAt         = msg.createdAt || msg.created_at || new Date().toISOString();
+    patch.lastSenderType        = sender;
+    patch.lastMessageSenderType = sender;
+  }
 
-      // ── Notification ownership: App is the SINGLE source of truth. ──────────
-      // ← CHANGED. Notify the instant the WS event lands — before any list
-      // filtering, group scoping, search mode, or state round-trip. This retires
-      // the fragile diff-based notifier in ConversationList and the duplicate
-      // beep in useConversations (both of which should have their notify paths
-      // removed so nothing double-fires).
-      if (sender === 'agent') { h.clearNotificationsForConversation(convId); return; }
+  if (sender === 'customer' && !isActive) {
+    const existing = curList.find(c => String(c.id) === String(convId));
+    const prev = existing?.unreadCount || existing?.unread_count || 0;
+    patch.unreadCount = prev + 1; patch.unread_count = prev + 1;
+  }
 
-      if (sender === 'customer') {
-        if (isActive) {
-          h.handleMarkAsRead(convId);
-        } else if (!isAutoReply) {
-          const existing = curList.find(c => c.id === convId);
-          const name = existing?.customerName || existing?.customer_name
-                     || msg.senderName || msg.sender_name || 'Guest';
-          h.showNotification(convId, name, msg.content || 'New message'); // OS notification
-          h.playBeep();                                                    // audible cue
-        }
-      }
-    });
+  if (Object.keys(patch).length > 0) h.updateConversation(convId, patch);
+
+  if (sender === 'agent') { h.clearNotificationsForConversation(convId); return; }
+
+  if (sender === 'customer') {
+    if (isActive) {
+      h.handleMarkAsRead(convId);
+    } else if (!isAutoReply) {
+      const existing = curList.find(c => String(c.id) === String(convId));
+      const name = existing?.customerName || existing?.customer_name
+                 || msg.senderName || msg.sender_name || 'Guest';
+      h.showNotification(convId, name, msg.content || 'New message');
+      h.playBeep();
+    }
+  }
+});
 
     const u2  = ws.on('connected', () => {
       setError(null); setWsStatus('live'); setWsReconnectAttempt(0);
