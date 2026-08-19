@@ -1,6 +1,23 @@
 
+
 // import React from 'react';
 // import { parseMarkdown } from '../../utils/parseMarkdown';
+
+// // Blend a "#rrggbb" accent heavily toward white → a soft, readable fill for the
+// // agent (sent) bubble. Returns a solid rgb() (not rgba) so the chat-background
+// // pattern doesn't show through. Null for non-6-digit-hex so callers fall back to
+// // the stylesheet's default green.
+// const toLightTint = (hex, accentRatio = 0.16) => {
+//   if (!hex || typeof hex !== 'string') return null;
+//   const clean = hex.replace('#', '');
+//   if (clean.length !== 6) return null;
+//   const r = parseInt(clean.slice(0, 2), 16);
+//   const g = parseInt(clean.slice(2, 4), 16);
+//   const b = parseInt(clean.slice(4, 6), 16);
+//   if ([r, g, b].some(Number.isNaN)) return null;
+//   const mix = (c) => Math.round(c * accentRatio + 255 * (1 - accentRatio));
+//   return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
+// };
 
 // function MessageBubble({
 //   message,
@@ -12,6 +29,7 @@
 //   isLastInGroup = true,
 //   nextMessage = null,
 //   actionButton = null,
+//   groupColor = '#00a884',   // ← store group color from ChatWindow (falls back to brand teal)
 // }) {
 //   const formatTime = (date) => {
 //     if (!date) return '';
@@ -126,6 +144,14 @@
 
 //   const messageText = message.text || message.content || '';
 
+//   // ── Agent (sent) bubble follows the store group color ──
+//   // Light tint keeps the dark bubble text readable. Also sets --bg-message-sent
+//   // so any stylesheet rule keyed on that var (e.g. the bubble tail) matches.
+//   const sentTint = isAgent ? toLightTint(groupColor) : null;
+//   const bubbleStyle = sentTint
+//     ? { background: sentTint, '--bg-message-sent': sentTint }
+//     : undefined;
+
 //   const renderAttachment = () => {
 //     if (!hasFile) return null;
 
@@ -218,13 +244,16 @@
 
 //   const bubbleAndTime = (
 //     <div className="message-bubble-wrapper">
-//       <div className={[
-//         'message-bubble',
-//         isAgent ? 'agent' : 'customer',
-//         sending ? 'sending' : '',
-//         isFirstInGroup ? 'first' : '',
-//         isLastInGroup ? 'last' : '',
-//       ].filter(Boolean).join(' ')}>
+//       <div
+//         className={[
+//           'message-bubble',
+//           isAgent ? 'agent' : 'customer',
+//           sending ? 'sending' : '',
+//           isFirstInGroup ? 'first' : '',
+//           isLastInGroup ? 'last' : '',
+//         ].filter(Boolean).join(' ')}
+//         style={bubbleStyle}
+//       >
 
 //         {renderAttachment()}
 //         {messageText && (
@@ -317,10 +346,6 @@
 // }
 
 // export default MessageBubble;
-
-
-
-
 
 
 import React from 'react';
@@ -668,4 +693,49 @@ function MessageBubble({
   );
 }
 
-export default MessageBubble;
+// PERF: memoize so a bubble only re-renders when something that changes its
+// output actually changed. Without this, every keystroke in the composer
+// re-renders ChatWindow → groupedMessages → new `message` object per row → all
+// bubbles re-render. The comparator returns true (skip render) when the relevant
+// fields are unchanged.
+//
+// Note on `actionButton`: ChatWindow creates it as a fresh JSX element every
+// render, so we deliberately DON'T compare it by identity (that would always
+// force a re-render). It's derived purely from isAdmin + message._optimistic +
+// senderType — all captured by the prop checks below — so ignoring its identity
+// is safe: whenever the button's presence/state would change, one of those
+// compared props changes too.
+const fileSig = (m) => {
+  const fd = m.fileData || m.file_data;
+  if (fd && typeof fd === 'object') return (fd.url || '') + '|' + (fd.name || '') + '|' + (fd.size || '');
+  return (typeof fd === 'string' ? fd : '') + '|' + (m.fileUrl || m.file_url || '');
+};
+
+const areEqual = (prev, next) => {
+  const a = prev.message || {};
+  const b = next.message || {};
+  return (
+    a.id === b.id &&
+    (a.content ?? a.text) === (b.content ?? b.text) &&
+    (a.timestamp || a.createdAt || a.created_at) === (b.timestamp || b.createdAt || b.created_at) &&
+    (a.status || '') === (b.status || '') &&
+    (a.senderName || a.sender_name || '') === (b.senderName || b.sender_name || '') &&
+    !!a._optimistic === !!b._optimistic &&
+    fileSig(a) === fileSig(b) &&
+    prev.isAgent === next.isAgent &&
+    prev.sending === next.sending &&
+    prev.isFirstInGroup === next.isFirstInGroup &&
+    prev.isLastInGroup === next.isLastInGroup &&
+    prev.showAvatar === next.showAvatar &&
+    prev.showSender === next.showSender &&
+    prev.groupColor === next.groupColor &&
+    // nextMessage only matters for the date-separator decision, which depends on
+    // its date, not identity. Compare just that.
+    (prev.nextMessage?.timestamp || prev.nextMessage?.createdAt || prev.nextMessage?.created_at || null) ===
+      (next.nextMessage?.timestamp || next.nextMessage?.createdAt || next.nextMessage?.created_at || null) &&
+    // Compare the presence of an action button, not its (always-new) identity.
+    (!!prev.actionButton) === (!!next.actionButton)
+  );
+};
+
+export default React.memo(MessageBubble, areEqual);

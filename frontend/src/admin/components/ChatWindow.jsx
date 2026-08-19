@@ -1,4 +1,5 @@
 
+
 // import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 // import { formatDistanceToNow } from 'date-fns';
 // import heic2any from 'heic2any';
@@ -700,6 +701,22 @@
 
 // const msgTime = (m) =>
 //   new Date(m?.createdAt || m?.created_at || m?.sentAt || m?.sent_at || 0).getTime();
+
+// // An optimistic (client-generated) id is a temp placeholder awaiting its real
+// // server row. Only these participate in content-fuzzy reconciliation below.
+// const isOptimisticId = (id) =>
+//   !!id && (id.startsWith('temp-') || id.startsWith('c-'));
+
+// // Stable ordering rank for equal timestamps. Real server ids are monotonic
+// // integers; optimistic placeholders sort AFTER their eventual real row (so a
+// // pending bubble sits at the tail until its confirm lands and replaces it).
+// const idRank = (m) => {
+//   const id = m?.id != null ? String(m.id) : '';
+//   if (isOptimisticId(id)) return Number.MAX_SAFE_INTEGER;
+//   const n = Number(id);
+//   return Number.isFinite(n) ? n : 0;
+// };
+
 // const dedupeMessages = (list) => {
 //   const seenIds = new Set();
 //   const out = [];
@@ -711,14 +728,25 @@
 //       if (o.senderType !== m.senderType) return false;
 //       if ((o.content || '') !== (m.content || '')) return false;
 //       if ((o.fileUrl || '') !== (m.fileUrl || '')) return false;
+//       // Content-fuzzy matching is ONLY for reconciling an optimistic row with
+//       // its real server echo. If BOTH rows are committed (real ids), they are
+//       // distinct messages — two rapid identical customer sends, for example —
+//       // and must never be merged. Restricting the branch here is what stops
+//       // real messages disappearing under a burst.
+//       const oId  = o.id != null ? String(o.id) : '';
+//       const oOpt = isOptimisticId(oId);
+//       const mOpt = isOptimisticId(id || '');
+//       if (!oOpt && !mOpt) return false;
+//       // No reliable timestamp on one side → don't guess-merge (the old
+//       // `ts === 0 → dup` shortcut silently collapsed distinct messages).
 //       const ots = msgTime(o);
-//       if (ots === 0 || ts === 0) return true;
-//       return Math.abs(ots - ts) < 2000;
+//       if (ots === 0 || ts === 0) return false;
+//       return Math.abs(ots - ts) < 5000;
 //     });
 //     if (dupIdx !== -1) {
 //       const existing = out[dupIdx];
-//       const existingReal = existing.id != null && !String(existing.id).startsWith('temp-');
-//       const incomingReal = id && !id.startsWith('temp-');
+//       const existingReal = existing.id != null && !String(existing.id).startsWith('temp-') && !String(existing.id).startsWith('c-');
+//       const incomingReal = id && !id.startsWith('temp-') && !id.startsWith('c-');
 //       if (!existingReal && incomingReal) out[dupIdx] = m;
 //       if (id) seenIds.add(id);
 //       continue;
@@ -1577,9 +1605,19 @@
 // const groupedMessages = useMemo(() => {
 //     const deduped = dedupeMessages(messages || []);
 //     if (deduped.length === 0) return [];
-//     return deduped.map((message, index) => {
-//       const prevMessage = index > 0 ? deduped[index - 1] : null;
-//       const nextMessage = index < deduped.length - 1 ? deduped[index + 1] : null;
+//     // Deterministic order BEFORE grouping. The messages array is appended to in
+//     // event-arrival order (optimistic sends, async WS new_message/confirmed,
+//     // poll fallback), which is NOT chronological under a burst — that is what
+//     // produced "mixed" ordering. Sort by timestamp, then by monotonic server id
+//     // as a stable tiebreaker so equal-timestamp messages never swap.
+//     const sorted = [...deduped].sort((a, b) => {
+//       const ta = msgTime(a), tb = msgTime(b);
+//       if (ta !== tb) return ta - tb;
+//       return idRank(a) - idRank(b);
+//     });
+//     return sorted.map((message, index) => {
+//       const prevMessage = index > 0 ? sorted[index - 1] : null;
+//       const nextMessage = index < sorted.length - 1 ? sorted[index + 1] : null;
 //       return {
 //         ...message,
 //         isFirstInGroup: !prevMessage || prevMessage.senderType !== message.senderType,
@@ -2087,10 +2125,6 @@
 // }
 
 // export default ChatWindow;
-
-
-
-
 
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
@@ -2813,38 +2847,52 @@ const idRank = (m) => {
 const dedupeMessages = (list) => {
   const seenIds = new Set();
   const out = [];
+  // PERF: the content-fuzzy scan below is O(n) per message → O(n²) for the list.
+  // It only ever reconciles an optimistic row with its real echo, so it's pure
+  // waste in steady state (no pending sends). Track how many optimistic rows are
+  // actually present and skip the scan entirely when none are — that turns the
+  // common case (a settled thread receiving one new committed message) into O(n)
+  // and is the main relief for "freezes under churn" on long threads.
+  let optimisticCount = 0;
   for (const m of list) {
     const id = m.id != null ? String(m.id) : null;
     if (id && seenIds.has(id)) continue;
-    const ts = msgTime(m);
-    const dupIdx = out.findIndex(o => {
-      if (o.senderType !== m.senderType) return false;
-      if ((o.content || '') !== (m.content || '')) return false;
-      if ((o.fileUrl || '') !== (m.fileUrl || '')) return false;
-      // Content-fuzzy matching is ONLY for reconciling an optimistic row with
-      // its real server echo. If BOTH rows are committed (real ids), they are
-      // distinct messages — two rapid identical customer sends, for example —
-      // and must never be merged. Restricting the branch here is what stops
-      // real messages disappearing under a burst.
-      const oId  = o.id != null ? String(o.id) : '';
-      const oOpt = isOptimisticId(oId);
-      const mOpt = isOptimisticId(id || '');
-      if (!oOpt && !mOpt) return false;
-      // No reliable timestamp on one side → don't guess-merge (the old
-      // `ts === 0 → dup` shortcut silently collapsed distinct messages).
-      const ots = msgTime(o);
-      if (ots === 0 || ts === 0) return false;
-      return Math.abs(ots - ts) < 5000;
-    });
+    const mOpt = isOptimisticId(id || '');
+
+    let dupIdx = -1;
+    if (mOpt || optimisticCount > 0) {           // reconciliation only possible then
+      const ts = msgTime(m);
+      dupIdx = out.findIndex(o => {
+        if (o.senderType !== m.senderType) return false;
+        if ((o.content || '') !== (m.content || '')) return false;
+        if ((o.fileUrl || '') !== (m.fileUrl || '')) return false;
+        // Content-fuzzy matching is ONLY for reconciling an optimistic row with
+        // its real server echo. If BOTH rows are committed (real ids), they are
+        // distinct messages — two rapid identical customer sends, for example —
+        // and must never be merged.
+        const oOpt = isOptimisticId(o.id != null ? String(o.id) : '');
+        if (!oOpt && !mOpt) return false;
+        // No reliable timestamp on one side → don't guess-merge.
+        const ots = msgTime(o);
+        if (ots === 0 || ts === 0) return false;
+        return Math.abs(ots - ts) < 5000;
+      });
+    }
+
     if (dupIdx !== -1) {
       const existing = out[dupIdx];
-      const existingReal = existing.id != null && !String(existing.id).startsWith('temp-') && !String(existing.id).startsWith('c-');
-      const incomingReal = id && !id.startsWith('temp-') && !id.startsWith('c-');
-      if (!existingReal && incomingReal) out[dupIdx] = m;
+      const existingOpt  = existing.id != null && isOptimisticId(String(existing.id));
+      const existingReal = existing.id != null && !existingOpt;
+      const incomingReal = id && !mOpt;
+      if (!existingReal && incomingReal) {
+        if (existingOpt) optimisticCount--;       // optimistic row replaced by real
+        out[dupIdx] = m;
+      }
       if (id) seenIds.add(id);
       continue;
     }
     if (id) seenIds.add(id);
+    if (mOpt) optimisticCount++;
     out.push(m);
   }
   return out;
@@ -2995,6 +3043,14 @@ function ChatWindow({
   const [deleting,          setDeleting]          = useState(false);
   const [showAISuggestions, setShowAISuggestions] = useState(true);
 
+  // PERF: cap how many message bubbles are actually rendered to the DOM. All
+  // messages stay in `messages` state (counts, dedup, notifications unaffected);
+  // we only grid the most recent `visibleCount`. Rendering a whole long thread
+  // as live DOM every state change is the freeze; this bounds it. "Show earlier"
+  // bumps the count. Reset to the base window on every conversation switch.
+  const RENDER_WINDOW = 150;
+  const [visibleCount, setVisibleCount] = useState(RENDER_WINDOW);
+
   const [unreadToast,       setUnreadToast]       = useState(false);
   const unreadToastTimerRef                       = useRef(null);
 
@@ -3027,6 +3083,10 @@ function ChatWindow({
   const activeNotificationsRef = useRef(new Map());
   const pollIntervalRef      = useRef(null);
   const prevMsgCountRef      = useRef(0);
+  // PERF: per-conversation message cache. On switch we paint cached messages
+  // instantly (no blank pane, no spinner) and revalidate in the background,
+  // instead of cold-fetching every time. This is the switch-lag fix.
+  const messageCacheRef      = useRef(new Map());
 
   const conversationRef    = useRef(conversation);
   const employeeNameRef    = useRef(employeeName);
@@ -3509,8 +3569,25 @@ useEffect(() => {
   }, [conversation?.id]);
 
 useEffect(() => {
-    if (conversation) { setMessages([]); displayedMessageIds.current.clear(); loadMessages(); }
-    else { setMessages([]); setLoading(false); }
+    setVisibleCount(RENDER_WINDOW); // reset render window on every switch
+    if (conversation) {
+      const cached = messageCacheRef.current.get(String(conversation.id));
+      if (cached && cached.length) {
+        // Instant paint from cache — no blank pane, no spinner. Seed the seen-set
+        // from the cache so incoming echoes dedup correctly, then revalidate.
+        displayedMessageIds.current = new Set(cached.map(m => String(m.id)).filter(Boolean));
+        setMessages(cached);
+        setLoading(false);
+        loadMessages(conversation.id, { silent: true }); // background refresh
+      } else {
+        // Cold path: nothing cached, show spinner while we fetch.
+        setMessages([]);
+        displayedMessageIds.current.clear();
+        loadMessages(conversation.id);
+      }
+    } else {
+      setMessages([]); setLoading(false);
+    }
     dismissLegalAlert();
     setTypingUsers(new Set());
     setShowEmailModal(false);
@@ -3580,21 +3657,23 @@ useEffect(() => {
     return () => window.removeEventListener('paste', handleGlobalPaste);
   }, [selectedFile]);
 
-  const loadMessages = useCallback(async (convId = conversationRef.current?.id) => {
+  const loadMessages = useCallback(async (convId = conversationRef.current?.id, opts = {}) => {
     if (!convId) return;
+    const { silent = false } = opts; // silent = background revalidate, don't blank the pane
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const data = await api.getMessages(convId);
       if (String(conversationRef.current?.id) !== String(convId)) return; // switched away — discard
       const messageArray = (Array.isArray(data) ? data : []).map(normalizeMessage);
       messageArray.forEach(msg => { if (msg.id) displayedMessageIds.current.add(String(msg.id)); });
+      messageCacheRef.current.set(String(convId), messageArray); // refresh cache
       setMessages(messageArray);
     } catch (error) {
       if (String(conversationRef.current?.id) !== String(convId)) return;
       console.error('Failed to load messages:', error);
-      setMessages([]);
+      if (!silent) setMessages([]); // a failed background revalidate keeps the cached view
     } finally {
-      if (String(conversationRef.current?.id) === String(convId)) setLoading(false);
+      if (!silent && String(conversationRef.current?.id) === String(convId)) setLoading(false);
     }
   }, []);
 
@@ -3708,16 +3787,25 @@ const groupedMessages = useMemo(() => {
       if (ta !== tb) return ta - tb;
       return idRank(a) - idRank(b);
     });
-    return sorted.map((message, index) => {
-      const prevMessage = index > 0 ? sorted[index - 1] : null;
-      const nextMessage = index < sorted.length - 1 ? sorted[index + 1] : null;
+    // Only the last `visibleCount` are turned into DOM. Grouping is computed on
+    // the window, so first/last-in-group flags are correct within what's shown.
+    const windowed = sorted.length > visibleCount ? sorted.slice(-visibleCount) : sorted;
+    return windowed.map((message, index) => {
+      const prevMessage = index > 0 ? windowed[index - 1] : null;
+      const nextMessage = index < windowed.length - 1 ? windowed[index + 1] : null;
       return {
         ...message,
         isFirstInGroup: !prevMessage || prevMessage.senderType !== message.senderType,
         isLastInGroup:  !nextMessage || nextMessage.senderType !== message.senderType,
       };
     });
-  }, [messages]);
+  }, [messages, visibleCount]);
+
+  // How many messages exist beyond the rendered window (for the "Show earlier" control).
+  const hiddenOlderCount = useMemo(() => {
+    const total = dedupeMessages(messages || []).length;
+    return Math.max(0, total - visibleCount);
+  }, [messages, visibleCount]);
 
   const storeDetails = useMemo(() => {
     if (!stores || !conversation) return null;
@@ -3942,6 +4030,21 @@ const groupedMessages = useMemo(() => {
               </div>
             ) : (
               <>
+                {hiddenOlderCount > 0 && (
+                  <div style={{ textAlign: 'center', padding: '8px 0 4px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setVisibleCount(c => c + RENDER_WINDOW)}
+                      style={{
+                        background: '#fff', border: '1px solid #e9edef', borderRadius: '16px',
+                        padding: '6px 16px', fontSize: '12.5px', fontWeight: 600, color: '#54656f',
+                        cursor: 'pointer', boxShadow: '0 1px 2px rgba(11,20,26,0.06)',
+                      }}
+                    >
+                      Show earlier messages ({hiddenOlderCount})
+                    </button>
+                  </div>
+                )}
                 {groupedMessages.map((message, index) => {
                   const msgKey       = message.id || `msg-${index}`;
                   const showRepliedBy = message.senderType === 'agent'
