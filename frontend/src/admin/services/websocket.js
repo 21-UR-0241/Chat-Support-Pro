@@ -1,5 +1,6 @@
 
 
+
 // const WS_URL = import.meta.env.PROD
 //   ? (import.meta.env.VITE_WS_URL || 'wss://chat-support-pro.onrender.com/ws')
 //   : 'ws://localhost:3000/ws';
@@ -10,7 +11,7 @@
 
 // const HEARTBEAT_INTERVAL = 25000; // < Render's ~60s idle timeout
 // const MAX_RECONNECT_DELAY = 30000; // backoff caps here, but never gives up
-// const HANDSHAKE_TIMEOUT   = 10000; // must reach OPEN within this or we retry
+// const HANDSHAKE_TIMEOUT   = 45000; // Render cold-boot can take 30-60s; must ride it out
 // const PONG_TIMEOUT        = 10000; // must see a pong within this of a ping
 // const STALE_AFTER         = 30000; // OPEN-but-silent longer than this ⇒ treat as dead
 
@@ -71,15 +72,19 @@
 //       // ── Handshake watchdog ──────────────────────────────────────────────
 //       // If a proxy accepts the TCP connection but never completes the WS
 //       // upgrade, the socket sits in CONNECTING forever: no onopen, no onclose,
-//       // no onerror. Force it closed so onclose runs the normal reconnect path.
+//       // no onerror. Force it closed — close() on a CONNECTING socket fires
+//       // onclose, which owns the single reconnect. We do NOT schedule here, or
+//       // we'd double-schedule (and double-increment the backoff) against onclose.
+//       //
+//       // The 45s ceiling is deliberate: a cold Render instance can take 30-60s
+//       // to wake, so a shorter timeout would kill every attempt mid-boot and
+//       // never let one complete. A warm handshake finishes in well under a
+//       // second, so the long ceiling only ever matters during a cold start.
 //       this.connectTimeout = setTimeout(() => {
 //         if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
 //           console.warn('WS handshake timeout — forcing close to retry');
-//           try { this.ws.close(); } catch { /* ignore */ }
-//           // Some browsers don't fire onclose on a force-close from CONNECTING;
-//           // recover directly if that happens.
 //           this.isConnecting = false;
-//           this.scheduleReconnect();
+//           try { this.ws.close(); } catch { /* onclose runs the reconnect */ }
 //         }
 //       }, HANDSHAKE_TIMEOUT);
 
@@ -357,6 +362,27 @@
 
 
 
+// ============================================================================
+// services/websocket.js — agent WebSocket singleton (Chat Support Pro)
+// ============================================================================
+// CHANGE vs previous version (single, surgical):
+//   handleNetworkBack() now emits a 'resync' event on EVERY refocus / network
+//   return, BEFORE its liveness logic. Previously, if the socket was still
+//   technically OPEN and had seen inbound traffic recently, this method
+//   returned silently — no reconnect, so no 'connected', so nothing told the
+//   app to refetch. But broadcastToAgents() on the server is fire-and-forget:
+//   a frame dropped while a backgrounded tab's event loop was throttled is
+//   gone permanently, leaving the conversation list stale even though the
+//   socket never "died." The app only recovered on a full page reload.
+//
+//   'resync' fires unconditionally on refocus so the app can pull the gap with
+//   one cached GET. The reconnect paths below still fire 'connected' as before;
+//   a double refetch is harmless (idempotent, server-cached with a short TTL).
+//
+//   Wire in App.jsx alongside the other ws.on(...) handlers:
+//     const uR = ws.on('resync', () => handlersRef.current.refreshConversations());
+//   ...and include uR() in the effect's cleanup.
+// ============================================================================
 
 const WS_URL = import.meta.env.PROD
   ? (import.meta.env.VITE_WS_URL || 'wss://chat-support-pro.onrender.com/ws')
@@ -612,6 +638,18 @@ class WebSocketService {
 
   handleNetworkBack() {
     if (this.intentionalClose || !this.employeeId) return;
+
+    // ── THE FIX ────────────────────────────────────────────────────────────
+    // Emit 'resync' on EVERY refocus / network return, before any liveness
+    // check. A backgrounded tab's event loop is throttled (timers clamped to
+    // ~1/min; a minimized renderer can be paused outright), so a broadcast that
+    // arrived during that window can be dropped from app state without the
+    // socket ever closing. When that happens, none of the branches below fire a
+    // reconnect — the socket is still OPEN and recently active — so nothing
+    // pulls the missed data and the list stays stale until a manual reload.
+    // 'resync' lets the app refetch unconditionally (one cached GET). Reconnect
+    // paths still emit 'connected' too; a duplicate refetch is idempotent.
+    this.emit('resync');
 
     if (this.isConnected()) {
       const quietMs = Date.now() - (this.lastInboundAt || 0);

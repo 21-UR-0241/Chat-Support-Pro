@@ -1,5 +1,4 @@
 
-
 // import React, { useMemo, useEffect, useRef, useState, useCallback } from 'react';
 // import '../styles/ConversationList.css';
 
@@ -102,25 +101,44 @@
 //     }
 //   }, []);
 
+//   // ── AudioContext unlock (resilient) ────────────────────────────────────────
+//   // Browsers only let a *user gesture* move a suspended AudioContext to
+//   // "running". A resume() triggered later from a WebSocket message handler is
+//   // ignored, so the beep silently fails. This effect keeps re-arming on every
+//   // gesture until the context is genuinely running (a single {once:true}
+//   // listener could fire before the context is ready and then never retry), and
+//   // re-resumes whenever the tab comes back to the foreground — which covers the
+//   // support-dashboard-in-a-background-tab case where Chrome suspends the context.
 //   useEffect(() => {
-//     if ('Notification' in window) {
-//       setNotificationPermission(Notification.permission);
-//     }
-//   }, []);
-
-//   useEffect(() => {
-//     const unlock = () => {
+//     const ensureRunning = () => {
 //       try {
 //         if (!audioCtxRef.current)
 //           audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
 //         if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume();
 //       } catch {}
 //     };
-//     window.addEventListener('pointerdown', unlock, { once: true });
-//     window.addEventListener('keydown',     unlock, { once: true });
+
+//     const onGesture = () => {
+//       ensureRunning();
+//       // Only stop listening once the context has actually reached "running".
+//       if (audioCtxRef.current?.state === 'running') {
+//         window.removeEventListener('pointerdown', onGesture);
+//         window.removeEventListener('keydown', onGesture);
+//       }
+//     };
+
+//     const onVisibility = () => {
+//       if (document.visibilityState === 'visible') ensureRunning();
+//     };
+
+//     window.addEventListener('pointerdown', onGesture);
+//     window.addEventListener('keydown', onGesture);
+//     document.addEventListener('visibilitychange', onVisibility);
+
 //     return () => {
-//       window.removeEventListener('pointerdown', unlock);
-//       window.removeEventListener('keydown', unlock);
+//       window.removeEventListener('pointerdown', onGesture);
+//       window.removeEventListener('keydown', onGesture);
+//       document.removeEventListener('visibilitychange', onVisibility);
 //     };
 //   }, []);
 
@@ -331,34 +349,29 @@
 //     setDismissTick(t => t + 1);
 //   }, []);
 
-//   const activeGroupConversationIds = useMemo(() => {
-//     if (!activeConversation || !groupedConversations) return new Set();
-//     const activeGroup = groupedConversations.find(group =>
-//       group.conversations.some(c => c.id === activeConversation.id)
-//     );
-//     if (!activeGroup) return new Set([activeConversation.id]);
-//     return new Set(activeGroup.conversations.map(c => c.id));
-//   }, [activeConversation, groupedConversations]);
-
+//   // Unread now reflects ONLY the conversation that is actually open — never the
+//   // whole email+store group. Opening one thread no longer silently zeroes (and
+//   // marks-read in the DB) a customer's sibling threads, so a new message on a
+//   // sibling keeps its badge until that thread is itself opened.
 //   const getEffectiveUnread = useCallback((conv) => {
-//     if (activeGroupConversationIds.has(conv.id)) return 0;
+//     if (conv.id === activeConversation?.id) return 0;
 //     return conv.unreadCount || conv.unread_count || conv.unread || 0;
-//   }, [activeGroupConversationIds]);
+//   }, [activeConversation]);
 
 //   const getGroupUnread = useCallback((group) => {
 //     return group.conversations.reduce((sum, c) => sum + getEffectiveUnread(c), 0);
 //   }, [getEffectiveUnread]);
 
+//   // Auto-mark-read is scoped to the OPEN conversation only. Sibling threads in
+//   // the same group are left untouched (they clear on explicit click via
+//   // handleGroupClick, not on message arrival).
 //   useEffect(() => {
 //     if (!activeConversation || !conversations || !onMarkAsRead) return;
-//     if (activeGroupConversationIds.size === 0) return;
-//     activeGroupConversationIds.forEach((convId) => {
-//       const conv = conversations.find(c => c.id === convId);
-//       if (!conv) return;
-//       const unreadCount = conv.unreadCount || conv.unread_count || conv.unread || 0;
-//       if (unreadCount > 0) onMarkAsRead(convId);
-//     });
-//   }, [activeConversation, conversations, onMarkAsRead, activeGroupConversationIds]);
+//     const conv = conversations.find(c => c.id === activeConversation.id);
+//     if (!conv) return;
+//     const unreadCount = conv.unreadCount || conv.unread_count || conv.unread || 0;
+//     if (unreadCount > 0) onMarkAsRead(activeConversation.id);
+//   }, [activeConversation, conversations, onMarkAsRead]);
 
 //   const filteredGroupedConversations = useMemo(() => {
 //     if (!groupedConversations) return [];
@@ -1126,7 +1139,6 @@
 
 
 
-
 import React, { useMemo, useEffect, useRef, useState, useCallback } from 'react';
 import '../styles/ConversationList.css';
 
@@ -1166,9 +1178,15 @@ function ConversationList({
   loadingMore = false,   // ← a page fetch is in flight
   isServerSearch = false, // ← rows came from /api/conversations/search (message-body match)
 }) {
+  // NOTE (notifications): the audible beep + OS notification are owned SOLELY by
+  // App, which fires them straight off the raw WS `new_message` event — before
+  // any list filtering / search / group scoping. This component intentionally no
+  // longer plays sounds or raises Notifications (doing so double-fired: two beeps
+  // + two popups per message, and missed anything filtered out of the list). All
+  // that remains here is the lightweight in-app toast, which App does NOT do, so
+  // there's no duplication. The bell button still lets an agent grant OS
+  // notification permission, which App needs in order to notify at all.
   const [notificationPermission, setNotificationPermission] = useState('default');
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const [soundEnabled, setSoundEnabled] = useState(true);
   const [showNotificationSettings, setShowNotificationSettings] = useState(false);
   const [toast, setToast] = useState(null);
   const toastTimeoutRef = useRef(null);
@@ -1178,7 +1196,6 @@ function ConversationList({
   const [confirmModal, setConfirmModal] = useState(null);
   const [dismissTick, setDismissTick] = useState(0);
   const acknowledgedGroupsRef = useRef(new Set());
-  const audioCtxRef = useRef(null);
   const storeIndex = useMemo(() => {
     const byIdentifier = new Map();
     const byId = new Map();
@@ -1229,47 +1246,6 @@ function ConversationList({
     }
   }, []);
 
-  // ── AudioContext unlock (resilient) ────────────────────────────────────────
-  // Browsers only let a *user gesture* move a suspended AudioContext to
-  // "running". A resume() triggered later from a WebSocket message handler is
-  // ignored, so the beep silently fails. This effect keeps re-arming on every
-  // gesture until the context is genuinely running (a single {once:true}
-  // listener could fire before the context is ready and then never retry), and
-  // re-resumes whenever the tab comes back to the foreground — which covers the
-  // support-dashboard-in-a-background-tab case where Chrome suspends the context.
-  useEffect(() => {
-    const ensureRunning = () => {
-      try {
-        if (!audioCtxRef.current)
-          audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-        if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume();
-      } catch {}
-    };
-
-    const onGesture = () => {
-      ensureRunning();
-      // Only stop listening once the context has actually reached "running".
-      if (audioCtxRef.current?.state === 'running') {
-        window.removeEventListener('pointerdown', onGesture);
-        window.removeEventListener('keydown', onGesture);
-      }
-    };
-
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') ensureRunning();
-    };
-
-    window.addEventListener('pointerdown', onGesture);
-    window.addEventListener('keydown', onGesture);
-    document.addEventListener('visibilitychange', onVisibility);
-
-    return () => {
-      window.removeEventListener('pointerdown', onGesture);
-      window.removeEventListener('keydown', onGesture);
-      document.removeEventListener('visibilitychange', onVisibility);
-    };
-  }, []);
-
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (contextMenuRef.current && !contextMenuRef.current.contains(e.target)) {
@@ -1307,62 +1283,9 @@ function ConversationList({
     toastTimeoutRef.current = setTimeout(() => setToast(null), 3500);
   };
 
-
-  const playNotificationSound = () => {
-    if (!soundEnabled) return;
-    try {
-      let ctx = audioCtxRef.current;
-      if (!ctx) {
-        ctx = new (window.AudioContext || window.webkitAudioContext)();
-        audioCtxRef.current = ctx;        // create ONCE, reuse for the component's life
-      }
-      const beep = () => {
-        const oscillator = ctx.createOscillator();
-        const gainNode   = ctx.createGain();
-        oscillator.connect(gainNode);
-        gainNode.connect(ctx.destination);
-        oscillator.frequency.value = 600;
-        oscillator.type = 'sine';
-        gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
-        gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
-        oscillator.start(ctx.currentTime);
-        oscillator.stop(ctx.currentTime + 0.3);
-      };
-      if (ctx.state === 'suspended') ctx.resume().then(beep).catch(() => {});
-      else beep();
-    } catch (error) {
-      console.error('Error playing notification sound:', error);
-    }
-  };
-
-
-
-const showNotification = (conversation, newMessage) => {
-    if (!notificationsEnabled || notificationPermission !== 'granted') return;
-    const title = conversation.customerName || 'New Message';
-    const options = {
-      body: newMessage || conversation.lastMessage || 'You have a new message',
-      icon: '/notification-icon.png',
-      badge: '/notification-badge.png',
-      tag: `conversation-${conversation.id}`,
-      requireInteraction: false,
-      silent: !soundEnabled,
-      data: { conversationId: conversation.id, url: window.location.href }
-    };
-    try {
-      const notification = new Notification(title, options);
-      notification.onclick = () => {
-        window.focus();
-        if (!activeConversation) onSelectConversation(conversation);
-        notification.close();
-      };
-      setTimeout(() => notification.close(), 5000);
-    } catch (error) {
-      console.error('Error showing notification:', error);
-    }
-  };
-
-
+  // In-app toast only. Beep + OS notification are App's job (single owner) — see
+  // the note at the top of this component. We still diff to surface the small
+  // toast strip, but we no longer make any sound or raise a Notification here.
   useEffect(() => {
     if (!conversations || loading) return;
     if (isServerSearch) { previousConversationsRef.current = conversations; return; }
@@ -1378,8 +1301,6 @@ const showNotification = (conversation, newMessage) => {
             (currentConv.lastMessage !== previousConv.lastMessage &&
               currentConv.lastMessageAt !== previousConv.lastMessageAt);
           if (hasNewMessage && currentConv.id !== activeConversation?.id) {
-            playNotificationSound();
-            showNotification(currentConv, currentConv.lastMessage);
             if (currentConv.legalFlag) {
               showToast(`🚨 Legal threat from ${currentConv.customerName || 'Guest'}`, 'legal');
             } else {
@@ -1388,8 +1309,6 @@ const showNotification = (conversation, newMessage) => {
           }
         } else {
           if (currentConv.unreadCount > 0) {
-            playNotificationSound();
-            showNotification(currentConv, currentConv.lastMessage);
             showToast(`New conversation from ${currentConv.customerName || 'Guest'}`, 'default');
           }
         }
@@ -1397,7 +1316,7 @@ const showNotification = (conversation, newMessage) => {
     }
 
     previousConversationsRef.current = conversations;
-  }, [conversations, activeConversation, loading, notificationsEnabled, soundEnabled, isServerSearch]);
+  }, [conversations, activeConversation, loading, isServerSearch]);
 
   const resolveStoreId = useCallback((conv) => {
     const match = findStore(conv);
@@ -1808,7 +1727,7 @@ const showNotification = (conversation, newMessage) => {
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
               <path d="M10 2C9.45 2 9 2.45 9 3V3.5C7.16 4.08 5.82 5.75 5.82 7.75V11.5L4.5 13V14H15.5V13L14.18 11.5V7.75C14.18 5.75 12.84 4.08 11 3.5V3C11 2.45 10.55 2 10 2ZM10 17C10.83 17 11.5 16.33 11.5 15.5H8.5C8.5 16.33 9.17 17 10 17Z" fill="currentColor" />
             </svg>
-            {notificationPermission === 'granted' && notificationsEnabled && (
+            {notificationPermission === 'granted' && (
               <span className="notification-active-indicator"></span>
             )}
           </button>
@@ -1827,23 +1746,18 @@ const showNotification = (conversation, newMessage) => {
           <div className="notification-setting-item">
             <span>Browser Notifications</span>
             {notificationPermission === 'granted' ? (
-              <label className="toggle-switch">
-                <input type="checkbox" checked={notificationsEnabled} onChange={(e) => setNotificationsEnabled(e.target.checked)} />
-                <span className="toggle-slider"></span>
-              </label>
+              <span className="permission-status granted">Enabled</span>
             ) : notificationPermission === 'denied' ? (
               <span className="permission-status denied">Blocked</span>
             ) : (
               <button className="permission-request-btn" onClick={requestNotificationPermission}>Enable</button>
             )}
           </div>
-          <div className="notification-setting-item">
-            <span>Notification Sound</span>
-            <label className="toggle-switch">
-              <input type="checkbox" checked={soundEnabled} onChange={(e) => setSoundEnabled(e.target.checked)} />
-              <span className="toggle-slider"></span>
-            </label>
-          </div>
+          {notificationPermission === 'granted' && (
+            <div className="permission-help">
+              <small>Desktop alerts and sound are on. They play whenever a customer messages a chat you don't have open.</small>
+            </div>
+          )}
           {notificationPermission === 'denied' && (
             <div className="permission-help">
               <small>Notifications are blocked. Click the lock icon 🔒 in your browser's address bar, then change Notifications to "Allow" and reload.</small>

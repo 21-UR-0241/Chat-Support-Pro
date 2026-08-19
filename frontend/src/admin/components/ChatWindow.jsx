@@ -1,6 +1,4 @@
 
-
-
 // import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 // import { formatDistanceToNow } from 'date-fns';
 // import heic2any from 'heic2any';
@@ -689,13 +687,47 @@
 //   try { return JSON.parse(raw); } catch { return null; }
 // };
 
+
+// const pickId = (m) =>
+//   m?.id ?? m?.messageId ?? m?.message_id ?? m?._id ?? null;
+
 // const normalizeMessage = (msg) => ({
 //   ...msg,
-//   fileData: parseFileData(msg.fileData || msg.file_data),
+//   id:          pickId(msg),
+//   clientMsgId: msg.clientMsgId ?? msg.client_msg_id ?? null,
+//   fileData:    parseFileData(msg.fileData || msg.file_data),
 // });
 
 // const msgTime = (m) =>
 //   new Date(m?.createdAt || m?.created_at || m?.sentAt || m?.sent_at || 0).getTime();
+// const dedupeMessages = (list) => {
+//   const seenIds = new Set();
+//   const out = [];
+//   for (const m of list) {
+//     const id = m.id != null ? String(m.id) : null;
+//     if (id && seenIds.has(id)) continue;
+//     const ts = msgTime(m);
+//     const dupIdx = out.findIndex(o => {
+//       if (o.senderType !== m.senderType) return false;
+//       if ((o.content || '') !== (m.content || '')) return false;
+//       if ((o.fileUrl || '') !== (m.fileUrl || '')) return false;
+//       const ots = msgTime(o);
+//       if (ots === 0 || ts === 0) return true;
+//       return Math.abs(ots - ts) < 2000;
+//     });
+//     if (dupIdx !== -1) {
+//       const existing = out[dupIdx];
+//       const existingReal = existing.id != null && !String(existing.id).startsWith('temp-');
+//       const incomingReal = id && !id.startsWith('temp-');
+//       if (!existingReal && incomingReal) out[dupIdx] = m;
+//       if (id) seenIds.add(id);
+//       continue;
+//     }
+//     if (id) seenIds.add(id);
+//     out.push(m);
+//   }
+//   return out;
+// };
 
 // const INPUT_STYLE = {
 //   fontSize:     '14px',
@@ -815,12 +847,9 @@
 // }
 
 // // ============ MAIN COMPONENT ============
-// // CHANGED: `ws` (the shared singleton) is now a prop. ChatWindow no longer opens
-// // its own WebSocket — it subscribes to the one socket App already owns and joins.
-// // App still owns join/leave for the active conversation, so we ONLY listen here.
 // function ChatWindow({
 //   conversation,
-//   ws,                       // ← NEW: shared websocket from App (useWebSocket)
+//   ws,
 //   onSendMessage,
 //   onClose,
 //   onTyping,
@@ -1002,25 +1031,17 @@
 //   // ============ MESSAGE DELETE HANDLERS ============
 //   const handleDeleteMessageClick = (message) => { setMessageToDelete(message); };
 //   const handleCancelMessageDelete = () => { setMessageToDelete(null); };
-
-//   // CHANGED: optimistic delete — remove locally first, then call the API.
-//   // The UI no longer blocks on the round-trip; on failure we roll the message back.
 //   const handleConfirmMessageDelete = async () => {
 //     if (!messageToDelete) return;
 //     const target = messageToDelete;
-
-//     // 1) optimistic local removal + close modal immediately
 //     displayedMessageIds.current.delete(String(target.id));
 //     setMessages(prev => prev.filter(m => String(m.id) !== String(target.id)));
 //     setMessageToDelete(null);
-
-//     // 2) fire the request in the background
 //     setDeletingMessage(true);
 //     try {
 //       await api.deleteMessage(target.id);
 //     } catch (error) {
 //       console.error('Failed to delete message:', error);
-//       // 3) rollback on failure — re-insert in chronological position
 //       displayedMessageIds.current.add(String(target.id));
 //       setMessages(prev => {
 //         if (prev.some(m => String(m.id) === String(target.id))) return prev;
@@ -1167,14 +1188,15 @@
 //     setLegalAlert(null);
 //   };
 
-// const handleIncomingMessage = (message, currentConv) => {
+// const handleIncomingMessage = (raw, currentConv) => {
+//     const message = normalizeMessage(raw);        // normalize FIRST → id is canonical
 //     const msgId  = message.id;
 //     const convId = message.conversationId || message.conversation_id;
 //     if (!convId || String(convId) !== String(currentConv?.id)) return;
 //     if (msgId && displayedMessageIds.current.has(String(msgId))) return;
 
-//     const cmid = message.clientMsgId || message.client_msg_id || null;
-//     const normalized = normalizeMessage(message);
+//     const cmid = message.clientMsgId || null;
+//     const normalized = message;
 
 //     setMessages(prev => {
 //       if (msgId && prev.some(m => String(m.id) === String(msgId))) return prev;
@@ -1246,9 +1268,12 @@
 //     } catch (error) {}
 //   };
 
+//   const isForOpenConversation = (convId) =>
+//     convId != null && String(convId) === String(conversationRef.current?.id);
+
 //   const handleTypingIndicator = (data) => {
 //     const convId = data.conversationId ?? data.conversation_id ?? null;
-//     if (convId != null && String(convId) !== String(conversationRef.current?.id)) return;
+//     if (!isForOpenConversation(convId)) return;
 //     if (data.senderType === 'agent') return;
 //     const senderName = data.senderName || 'Customer';
 //     if (data.isTyping) {
@@ -1260,9 +1285,6 @@
 //       setTypingUsers(prev => { const next = new Set(prev); next.delete(senderName); return next; });
 //     }
 //   };
-
-//     const isForOpenConversation = (convId) =>
-//     convId != null && String(convId) === String(conversationRef.current?.id);
 
 // useEffect(() => {
 //     if (!ws) return;
@@ -1285,7 +1307,7 @@
 
 //       const convId = data.message.conversationId ?? data.message.conversation_id
 //         ?? data.conversationId ?? data.conversation_id ?? null;
-//       if (convId != null && String(convId) !== String(conversationRef.current?.id)) return;
+//       if (!isForOpenConversation(convId)) return;
 
 //       const confirmedMsg = normalizeMessage(data.message);
 //       const cmid = data.clientMsgId || data.message.clientMsgId || null;
@@ -1294,20 +1316,20 @@
 //       setMessages(prev => {
 //         if (prev.some(m => String(m.id) === String(data.message.id))) {
 //           return prev.filter(m =>
-//             !((cmid && m.clientMsgId === cmid) || String(m.id) === String(data.tempId)) ||
+//             !(cmid && m.clientMsgId === cmid) ||
 //             String(m.id) === String(data.message.id)
 //           );
 //         }
 //         let done = false;
 //         const next = prev.map(m => {
-//           if (!done && ((cmid && m.clientMsgId === cmid) || String(m.id) === String(data.tempId))) {
+//           if (!done && cmid && m.clientMsgId === cmid) {
 //             done = true;
 //             return { ...confirmedMsg, fileData: confirmedMsg.fileData || m.fileData, fileUrl: confirmedMsg.fileUrl || m.fileUrl, sending: false, _optimistic: false };
 //           }
 //           return m;
 //         });
 //         if (done) return next;
-//         if (convId != null && String(convId) === String(conversationRef.current?.id)) {
+//         if (isForOpenConversation(convId)) {
 //           return [...next, confirmedMsg];
 //         }
 //         return prev;
@@ -1317,7 +1339,7 @@
 //     const offDeleted = ws.on('message_deleted', (data) => {
 //       if (!data.messageId) return;
 //       const convId = data.conversationId ?? data.conversation_id ?? null;
-//       if (convId != null && String(convId) !== String(conversationRef.current?.id)) return;
+//       if (!isForOpenConversation(convId)) return;
 //       displayedMessageIds.current.delete(String(data.messageId));
 //       setMessages(prev => {
 //         if (!prev.some(m => String(m.id) === String(data.messageId))) return prev;
@@ -1459,8 +1481,6 @@
 //   const scrollToBottom = () => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); };
 
 //   // ============ SEND ============
-
-//   // ============ SEND ============
 //   const handleSend = async (e) => {
 //     if (e) { e.preventDefault(); e.stopPropagation(); }
 //     const text       = getMessageContent();
@@ -1486,7 +1506,7 @@
 
 //       const clientMsgId = `c-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 //       const optimisticMessage = {
-//         id:             `temp-${Date.now()}`,
+//         id:             `temp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
 //         clientMsgId,                          // stable cross-event key
 //         conversationId: conversation.id,
 //         senderType:     'agent',
@@ -1512,9 +1532,6 @@
 //         sending:  false,
 //       };
 //       setMessages(prev => {
-//         // Reconcile by clientMsgId — identical on the optimistic bubble AND every
-//         // server event for this message. If the echo already swapped it in, drop
-//         // our optimistic twin; otherwise upgrade it in place.
 //         const already = prev.some(m => m.clientMsgId === clientMsgId && !m._optimistic);
 //         if (already) return prev.filter(m => !(m._optimistic && m.clientMsgId === clientMsgId));
 //         return prev.map(m =>
@@ -1557,11 +1574,12 @@
 //     return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
 //   };
 
-//   const groupedMessages = useMemo(() => {
-//     if (!messages || messages.length === 0) return [];
-//     return messages.map((message, index) => {
-//       const prevMessage = index > 0 ? messages[index - 1] : null;
-//       const nextMessage = index < messages.length - 1 ? messages[index + 1] : null;
+// const groupedMessages = useMemo(() => {
+//     const deduped = dedupeMessages(messages || []);
+//     if (deduped.length === 0) return [];
+//     return deduped.map((message, index) => {
+//       const prevMessage = index > 0 ? deduped[index - 1] : null;
+//       const nextMessage = index < deduped.length - 1 ? deduped[index + 1] : null;
 //       return {
 //         ...message,
 //         isFirstInGroup: !prevMessage || prevMessage.senderType !== message.senderType,
@@ -2069,14 +2087,6 @@
 // }
 
 // export default ChatWindow;
-
-
-
-
-
-
-
-
 
 
 
@@ -2784,6 +2794,22 @@ const normalizeMessage = (msg) => ({
 
 const msgTime = (m) =>
   new Date(m?.createdAt || m?.created_at || m?.sentAt || m?.sent_at || 0).getTime();
+
+// An optimistic (client-generated) id is a temp placeholder awaiting its real
+// server row. Only these participate in content-fuzzy reconciliation below.
+const isOptimisticId = (id) =>
+  !!id && (id.startsWith('temp-') || id.startsWith('c-'));
+
+// Stable ordering rank for equal timestamps. Real server ids are monotonic
+// integers; optimistic placeholders sort AFTER their eventual real row (so a
+// pending bubble sits at the tail until its confirm lands and replaces it).
+const idRank = (m) => {
+  const id = m?.id != null ? String(m.id) : '';
+  if (isOptimisticId(id)) return Number.MAX_SAFE_INTEGER;
+  const n = Number(id);
+  return Number.isFinite(n) ? n : 0;
+};
+
 const dedupeMessages = (list) => {
   const seenIds = new Set();
   const out = [];
@@ -2795,14 +2821,25 @@ const dedupeMessages = (list) => {
       if (o.senderType !== m.senderType) return false;
       if ((o.content || '') !== (m.content || '')) return false;
       if ((o.fileUrl || '') !== (m.fileUrl || '')) return false;
+      // Content-fuzzy matching is ONLY for reconciling an optimistic row with
+      // its real server echo. If BOTH rows are committed (real ids), they are
+      // distinct messages — two rapid identical customer sends, for example —
+      // and must never be merged. Restricting the branch here is what stops
+      // real messages disappearing under a burst.
+      const oId  = o.id != null ? String(o.id) : '';
+      const oOpt = isOptimisticId(oId);
+      const mOpt = isOptimisticId(id || '');
+      if (!oOpt && !mOpt) return false;
+      // No reliable timestamp on one side → don't guess-merge (the old
+      // `ts === 0 → dup` shortcut silently collapsed distinct messages).
       const ots = msgTime(o);
-      if (ots === 0 || ts === 0) return true;
-      return Math.abs(ots - ts) < 2000;
+      if (ots === 0 || ts === 0) return false;
+      return Math.abs(ots - ts) < 5000;
     });
     if (dupIdx !== -1) {
       const existing = out[dupIdx];
-      const existingReal = existing.id != null && !String(existing.id).startsWith('temp-');
-      const incomingReal = id && !id.startsWith('temp-');
+      const existingReal = existing.id != null && !String(existing.id).startsWith('temp-') && !String(existing.id).startsWith('c-');
+      const incomingReal = id && !id.startsWith('temp-') && !id.startsWith('c-');
       if (!existingReal && incomingReal) out[dupIdx] = m;
       if (id) seenIds.add(id);
       continue;
@@ -3661,9 +3698,19 @@ useEffect(() => {
 const groupedMessages = useMemo(() => {
     const deduped = dedupeMessages(messages || []);
     if (deduped.length === 0) return [];
-    return deduped.map((message, index) => {
-      const prevMessage = index > 0 ? deduped[index - 1] : null;
-      const nextMessage = index < deduped.length - 1 ? deduped[index + 1] : null;
+    // Deterministic order BEFORE grouping. The messages array is appended to in
+    // event-arrival order (optimistic sends, async WS new_message/confirmed,
+    // poll fallback), which is NOT chronological under a burst — that is what
+    // produced "mixed" ordering. Sort by timestamp, then by monotonic server id
+    // as a stable tiebreaker so equal-timestamp messages never swap.
+    const sorted = [...deduped].sort((a, b) => {
+      const ta = msgTime(a), tb = msgTime(b);
+      if (ta !== tb) return ta - tb;
+      return idRank(a) - idRank(b);
+    });
+    return sorted.map((message, index) => {
+      const prevMessage = index > 0 ? sorted[index - 1] : null;
+      const nextMessage = index < sorted.length - 1 ? sorted[index + 1] : null;
       return {
         ...message,
         isFirstInGroup: !prevMessage || prevMessage.senderType !== message.senderType,

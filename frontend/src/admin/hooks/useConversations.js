@@ -1,4 +1,6 @@
 
+
+
 // import { useState, useEffect, useCallback, useRef } from 'react';
 // import api from '../services/api';
 
@@ -72,7 +74,7 @@
 //     loadConversations(true);
 //   }, [loadConversations]);
 
-//     const refetchTimer = useRef(null);
+//   const refetchTimer = useRef(null);
 //   const scheduleRefetch = useCallback(() => {
 //     clearTimeout(refetchTimer.current);
 //     refetchTimer.current = setTimeout(() => loadConversations(false), 1500);
@@ -129,13 +131,11 @@
 //         );
 //       } else {
 //         console.log('🆕 [useConversations] New conversation detected, refreshing...');
-//         // loadConversations(false);
-//         scheduleRefetch();  
+//         scheduleRefetch();
 //         return prev;
 //       }
 //     });
-//   // }, [loadConversations]);
-//     }, [scheduleRefetch]);  
+//   }, [scheduleRefetch]);
 
 //   const addNewConversation = useCallback((conversationData) => {
 //     setConversations(prev => {
@@ -158,7 +158,13 @@
 
 //     console.log('👂 [useConversations] Setting up WebSocket listeners...');
 
-//     const unsubMessage = ws.on('new_message', (data) => {
+//     // Collect every unsubscribe here. Teardown iterates whatever's in the array,
+//     // so adding/removing a listener is a single push() with no separate teardown
+//     // line to keep in sync — this structurally prevents the "off() references an
+//     // undeclared handler" ReferenceError.
+//     const subs = [];
+
+//     subs.push(ws.on('new_message', (data) => {
 //       // Skip preview update for auto-replies — conversation_updated corrects it
 //       if (data.message?.isAutoReply === true) {
 //         console.log('🤖 [useConversations] Auto-reply skipped, waiting for conversation_updated');
@@ -183,9 +189,9 @@
 //       }
 
 //       playNotificationSound();
-//     });
+//     }));
 
-//     const unsubRead = ws.on('conversation_read', (data) => {
+//     subs.push(ws.on('conversation_read', (data) => {
 //       console.log('📖 [useConversations] Conversation read:', { conversationId: data.conversationId });
 //       if (data.conversation) {
 //         const readConversation = {
@@ -203,28 +209,34 @@
 //           lastReadAt: new Date().toISOString(),
 //         });
 //       }
-//     });
+//     }));
 
-//     const unsubNewConv = ws.on('new_conversation', (data) => {
+//     subs.push(ws.on('new_conversation', (data) => {
 //       console.log('🆕 [useConversations] New conversation:', data);
 //       if (data.conversation) {
 //         addNewConversation(data.conversation);
 //       } else {
-//         // loadConversations(false);
-//         scheduleRefetch(); 
-
+//         scheduleRefetch();
 //       }
-//     });
+//     }));
+
+//     // ── Gap recovery for the LIST ─────────────────────────────────────────
+//     // While the socket was dead (inactive tab, sleep, edge drop), customers may
+//     // have messaged conversations that weren't open. Reconnect resumes the live
+//     // stream but does NOT replay the gap — so re-pull the list to refresh unread
+//     // badges, previews, and ordering. Debounced (scheduleRefetch) + no spinner
+//     // (loadConversations(false)), so it's invisible to the agent.
+//     subs.push(ws.on('connected', () => {
+//       console.log('🔌 [useConversations] Reconnected — refreshing list to backfill gap');
+//       scheduleRefetch();
+//     }));
 
 //     return () => {
 //       console.log('🔇 [useConversations] Cleaning up WebSocket listeners');
-//       unsubMessage();
-//       unsubRead();
-//       unsubReconnect(); 
-//       unsubNewConv();
+//       subs.forEach(unsub => { try { unsub && unsub(); } catch (e) {} });
 //       clearTimeout(refetchTimer.current);
 //     };
-//   }, [ws, updateConversationFromData, updateConversationFromMessage, addNewConversation, loadConversations]);
+//   }, [ws, updateConversationFromData, updateConversationFromMessage, addNewConversation, scheduleRefetch]);
 
 //   const updateFilters = useCallback((newFilters) => {
 //     setFilters(prev => ({ ...prev, ...newFilters }));
@@ -296,6 +308,12 @@ import api from '../services/api';
 // NOTE: `ws` is now passed in from the single useWebSocket() owner (App).
 // This hook no longer calls useWebSocket() itself, so there is exactly ONE
 // socket connection in the tree — no more connect/disconnect stomping.
+//
+// NOTE (notifications): this hook NO LONGER plays any sound. App is the single
+// owner of both the audible beep and the OS notification — it notifies straight
+// off the raw WS event, before any list filtering/search/group scoping. Leaving
+// a second sound here would double-fire (and beep on agent echoes + the open
+// conversation). This hook's only job is keeping the list data in sync.
 export function useConversations(employeeId, ws, initialFilters = {}) {
   const [conversations, setConversations] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -477,7 +495,7 @@ export function useConversations(employeeId, ws, initialFilters = {}) {
         updateConversationFromMessage(data);
       }
 
-      playNotificationSound();
+      // NO sound here — App owns the audible cue + OS notification (single owner).
     }));
 
     subs.push(ws.on('conversation_read', (data) => {
@@ -576,14 +594,4 @@ export function useConversations(employeeId, ws, initialFilters = {}) {
     optimisticUpdate,
     setActiveConversationId,
   };
-}
-
-function playNotificationSound() {
-  try {
-    const audio = new Audio('/notification.mp3');
-    audio.volume = 0.5;
-    audio.play().catch(() => {});
-  } catch (error) {
-    // Ignore
-  }
 }
