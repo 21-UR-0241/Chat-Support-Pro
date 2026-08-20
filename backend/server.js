@@ -3526,9 +3526,32 @@ app.delete('/api/conversation-notes/:noteId', authenticateToken, async (req, res
 
 // ============ CONVERSATION ENDPOINTS ============
 
+// app.get('/api/conversations', authenticateToken, async (req, res) => {
+//   try {
+//     const { storeId, status, limit, offset, storeGroup } = req.query;
+//     const filters = {};
+//     if (storeId) filters.storeId = parseInt(storeId, 10);
+//     if (status) filters.status = status;
+//     else filters.excludeArchived = true;
+//     if (limit) filters.limit = parseInt(limit, 10);
+//     if (offset) filters.offset = parseInt(offset, 10);
+//     if (storeGroup) filters.storeGroup = storeGroup;
+
+//     const cacheKey = `convs:${storeId || 'all'}:${status || 'open'}:${limit || 'def'}:${offset || '0'}:${storeGroup || 'allgroups'}`;
+//     const cached = appCache.get(cacheKey);
+//     if (cached) return res.json(cached);
+
+//     const conversations = await db.getConversations(filters);
+//     const result = conversations.map(snakeToCamel);
+//     appCache.set(cacheKey, result, TTL.CONVS);
+//     res.json(result);
+//   } catch (error) { console.error('Get conversations error:', error.message); res.status(500).json({ error: error.message }); }
+// });
+
+
 app.get('/api/conversations', authenticateToken, async (req, res) => {
   try {
-    const { storeId, status, limit, offset, storeGroup } = req.query;
+    const { storeId, status, limit, offset, storeGroup, dateFrom, dateTo } = req.query;
     const filters = {};
     if (storeId) filters.storeId = parseInt(storeId, 10);
     if (status) filters.status = status;
@@ -3536,8 +3559,14 @@ app.get('/api/conversations', authenticateToken, async (req, res) => {
     if (limit) filters.limit = parseInt(limit, 10);
     if (offset) filters.offset = parseInt(offset, 10);
     if (storeGroup) filters.storeGroup = storeGroup;
+    // Naive-UTC bounds ('YYYY-MM-DD HH:MM:SS.SSS') built client-side from the
+    // agent's local day — compared against the naive last_message_at column.
+    if (dateFrom) filters.dateFrom = dateFrom;
+    if (dateTo) filters.dateTo = dateTo;
 
-    const cacheKey = `convs:${storeId || 'all'}:${status || 'open'}:${limit || 'def'}:${offset || '0'}:${storeGroup || 'allgroups'}`;
+    // NOTE: the date bounds MUST be part of the key — otherwise a date-filtered
+    // request and an unfiltered one collide and serve each other's rows.
+    const cacheKey = `convs:${storeId || 'all'}:${status || 'open'}:${limit || 'def'}:${offset || '0'}:${storeGroup || 'allgroups'}:${dateFrom || 'any'}:${dateTo || 'any'}`;
     const cached = appCache.get(cacheKey);
     if (cached) return res.json(cached);
 
@@ -3547,6 +3576,7 @@ app.get('/api/conversations', authenticateToken, async (req, res) => {
     res.json(result);
   } catch (error) { console.error('Get conversations error:', error.message); res.status(500).json({ error: error.message }); }
 });
+
 
 app.get('/api/widget/history', async (req, res) => {
   try {

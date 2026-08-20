@@ -38,9 +38,15 @@
 //   loadingMore = false,   // ← a page fetch is in flight
 //   isServerSearch = false, // ← rows came from /api/conversations/search (message-body match)
 // }) {
+//   // NOTE (notifications): the audible beep + OS notification are owned SOLELY by
+//   // App, which fires them straight off the raw WS `new_message` event — before
+//   // any list filtering / search / group scoping. This component intentionally no
+//   // longer plays sounds or raises Notifications (doing so double-fired: two beeps
+//   // + two popups per message, and missed anything filtered out of the list). All
+//   // that remains here is the lightweight in-app toast, which App does NOT do, so
+//   // there's no duplication. The bell button still lets an agent grant OS
+//   // notification permission, which App needs in order to notify at all.
 //   const [notificationPermission, setNotificationPermission] = useState('default');
-//   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-//   const [soundEnabled, setSoundEnabled] = useState(true);
 //   const [showNotificationSettings, setShowNotificationSettings] = useState(false);
 //   const [toast, setToast] = useState(null);
 //   const toastTimeoutRef = useRef(null);
@@ -50,7 +56,6 @@
 //   const [confirmModal, setConfirmModal] = useState(null);
 //   const [dismissTick, setDismissTick] = useState(0);
 //   const acknowledgedGroupsRef = useRef(new Set());
-//   const audioCtxRef = useRef(null);
 //   const storeIndex = useMemo(() => {
 //     const byIdentifier = new Map();
 //     const byId = new Map();
@@ -101,47 +106,6 @@
 //     }
 //   }, []);
 
-//   // ── AudioContext unlock (resilient) ────────────────────────────────────────
-//   // Browsers only let a *user gesture* move a suspended AudioContext to
-//   // "running". A resume() triggered later from a WebSocket message handler is
-//   // ignored, so the beep silently fails. This effect keeps re-arming on every
-//   // gesture until the context is genuinely running (a single {once:true}
-//   // listener could fire before the context is ready and then never retry), and
-//   // re-resumes whenever the tab comes back to the foreground — which covers the
-//   // support-dashboard-in-a-background-tab case where Chrome suspends the context.
-//   useEffect(() => {
-//     const ensureRunning = () => {
-//       try {
-//         if (!audioCtxRef.current)
-//           audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-//         if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume();
-//       } catch {}
-//     };
-
-//     const onGesture = () => {
-//       ensureRunning();
-//       // Only stop listening once the context has actually reached "running".
-//       if (audioCtxRef.current?.state === 'running') {
-//         window.removeEventListener('pointerdown', onGesture);
-//         window.removeEventListener('keydown', onGesture);
-//       }
-//     };
-
-//     const onVisibility = () => {
-//       if (document.visibilityState === 'visible') ensureRunning();
-//     };
-
-//     window.addEventListener('pointerdown', onGesture);
-//     window.addEventListener('keydown', onGesture);
-//     document.addEventListener('visibilitychange', onVisibility);
-
-//     return () => {
-//       window.removeEventListener('pointerdown', onGesture);
-//       window.removeEventListener('keydown', onGesture);
-//       document.removeEventListener('visibilitychange', onVisibility);
-//     };
-//   }, []);
-
 //   useEffect(() => {
 //     const handleClickOutside = (e) => {
 //       if (contextMenuRef.current && !contextMenuRef.current.contains(e.target)) {
@@ -179,62 +143,9 @@
 //     toastTimeoutRef.current = setTimeout(() => setToast(null), 3500);
 //   };
 
-
-//   const playNotificationSound = () => {
-//     if (!soundEnabled) return;
-//     try {
-//       let ctx = audioCtxRef.current;
-//       if (!ctx) {
-//         ctx = new (window.AudioContext || window.webkitAudioContext)();
-//         audioCtxRef.current = ctx;        // create ONCE, reuse for the component's life
-//       }
-//       const beep = () => {
-//         const oscillator = ctx.createOscillator();
-//         const gainNode   = ctx.createGain();
-//         oscillator.connect(gainNode);
-//         gainNode.connect(ctx.destination);
-//         oscillator.frequency.value = 600;
-//         oscillator.type = 'sine';
-//         gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
-//         gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
-//         oscillator.start(ctx.currentTime);
-//         oscillator.stop(ctx.currentTime + 0.3);
-//       };
-//       if (ctx.state === 'suspended') ctx.resume().then(beep).catch(() => {});
-//       else beep();
-//     } catch (error) {
-//       console.error('Error playing notification sound:', error);
-//     }
-//   };
-
-
-
-// const showNotification = (conversation, newMessage) => {
-//     if (!notificationsEnabled || notificationPermission !== 'granted') return;
-//     const title = conversation.customerName || 'New Message';
-//     const options = {
-//       body: newMessage || conversation.lastMessage || 'You have a new message',
-//       icon: '/notification-icon.png',
-//       badge: '/notification-badge.png',
-//       tag: `conversation-${conversation.id}`,
-//       requireInteraction: false,
-//       silent: !soundEnabled,
-//       data: { conversationId: conversation.id, url: window.location.href }
-//     };
-//     try {
-//       const notification = new Notification(title, options);
-//       notification.onclick = () => {
-//         window.focus();
-//         if (!activeConversation) onSelectConversation(conversation);
-//         notification.close();
-//       };
-//       setTimeout(() => notification.close(), 5000);
-//     } catch (error) {
-//       console.error('Error showing notification:', error);
-//     }
-//   };
-
-
+//   // In-app toast only. Beep + OS notification are App's job (single owner) — see
+//   // the note at the top of this component. We still diff to surface the small
+//   // toast strip, but we no longer make any sound or raise a Notification here.
 //   useEffect(() => {
 //     if (!conversations || loading) return;
 //     if (isServerSearch) { previousConversationsRef.current = conversations; return; }
@@ -250,8 +161,6 @@
 //             (currentConv.lastMessage !== previousConv.lastMessage &&
 //               currentConv.lastMessageAt !== previousConv.lastMessageAt);
 //           if (hasNewMessage && currentConv.id !== activeConversation?.id) {
-//             playNotificationSound();
-//             showNotification(currentConv, currentConv.lastMessage);
 //             if (currentConv.legalFlag) {
 //               showToast(`🚨 Legal threat from ${currentConv.customerName || 'Guest'}`, 'legal');
 //             } else {
@@ -260,8 +169,6 @@
 //           }
 //         } else {
 //           if (currentConv.unreadCount > 0) {
-//             playNotificationSound();
-//             showNotification(currentConv, currentConv.lastMessage);
 //             showToast(`New conversation from ${currentConv.customerName || 'Guest'}`, 'default');
 //           }
 //         }
@@ -269,7 +176,7 @@
 //     }
 
 //     previousConversationsRef.current = conversations;
-//   }, [conversations, activeConversation, loading, notificationsEnabled, soundEnabled, isServerSearch]);
+//   }, [conversations, activeConversation, loading, isServerSearch]);
 
 //   const resolveStoreId = useCallback((conv) => {
 //     const match = findStore(conv);
@@ -680,7 +587,7 @@
 //             <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
 //               <path d="M10 2C9.45 2 9 2.45 9 3V3.5C7.16 4.08 5.82 5.75 5.82 7.75V11.5L4.5 13V14H15.5V13L14.18 11.5V7.75C14.18 5.75 12.84 4.08 11 3.5V3C11 2.45 10.55 2 10 2ZM10 17C10.83 17 11.5 16.33 11.5 15.5H8.5C8.5 16.33 9.17 17 10 17Z" fill="currentColor" />
 //             </svg>
-//             {notificationPermission === 'granted' && notificationsEnabled && (
+//             {notificationPermission === 'granted' && (
 //               <span className="notification-active-indicator"></span>
 //             )}
 //           </button>
@@ -699,23 +606,18 @@
 //           <div className="notification-setting-item">
 //             <span>Browser Notifications</span>
 //             {notificationPermission === 'granted' ? (
-//               <label className="toggle-switch">
-//                 <input type="checkbox" checked={notificationsEnabled} onChange={(e) => setNotificationsEnabled(e.target.checked)} />
-//                 <span className="toggle-slider"></span>
-//               </label>
+//               <span className="permission-status granted">Enabled</span>
 //             ) : notificationPermission === 'denied' ? (
 //               <span className="permission-status denied">Blocked</span>
 //             ) : (
 //               <button className="permission-request-btn" onClick={requestNotificationPermission}>Enable</button>
 //             )}
 //           </div>
-//           <div className="notification-setting-item">
-//             <span>Notification Sound</span>
-//             <label className="toggle-switch">
-//               <input type="checkbox" checked={soundEnabled} onChange={(e) => setSoundEnabled(e.target.checked)} />
-//               <span className="toggle-slider"></span>
-//             </label>
-//           </div>
+//           {notificationPermission === 'granted' && (
+//             <div className="permission-help">
+//               <small>Desktop alerts and sound are on. They play whenever a customer messages a chat you don't have open.</small>
+//             </div>
+//           )}
 //           {notificationPermission === 'denied' && (
 //             <div className="permission-help">
 //               <small>Notifications are blocked. Click the lock icon 🔒 in your browser's address bar, then change Notifications to "Allow" and reload.</small>
@@ -1137,8 +1039,6 @@
 
 
 
-
-
 import React, { useMemo, useEffect, useRef, useState, useCallback } from 'react';
 import '../styles/ConversationList.css';
 
@@ -1157,6 +1057,32 @@ function hexToTriple(hex) {
 function hexToRgba(hex, alpha) {
   const triple = hexToTriple(hex);
   return triple ? `rgba(${triple}, ${alpha})` : null;
+}
+
+// ── Date-filter helpers ───────────────────────────────────────────────────────
+// All windows are inclusive and snapped to local-day boundaries so "Today"
+// means 00:00:00.000 → 23:59:59.999 in the agent's own timezone, not UTC.
+function startOfDay(d) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+function endOfDay(d) {
+  const x = new Date(d);
+  x.setHours(23, 59, 59, 999);
+  return x;
+}
+
+// "YYYY-MM-DD" (what <input type="date"> gives us) → local Date, NOT UTC.
+// new Date("2026-08-20") parses as UTC midnight and shifts a day in +08:00,
+// which is exactly the bug this avoids.
+function parseInputDate(value) {
+  if (!value || typeof value !== 'string') return null;
+  const [y, m, d] = value.split('-').map(Number);
+  if (!y || !m || !d) return null;
+  const dt = new Date(y, m - 1, d);
+  return Number.isNaN(dt.getTime()) ? null : dt;
 }
 
 function ConversationList({
@@ -1420,6 +1346,24 @@ function ConversationList({
     if (unreadCount > 0) onMarkAsRead(activeConversation.id);
   }, [activeConversation, conversations, onMarkAsRead]);
 
+  // ── DATE FILTER ─────────────────────────────────────────────────────────────
+  // The agent picks ONE calendar day; the filter shows conversations that had
+  // activity on that day. Boundaries are the agent's local midnight → end of the
+  // same local day, as an inclusive { start, end } ms window (null when unset).
+  const dateWindow = useMemo(() => {
+    const d = parseInputDate(filters.date);
+    if (!d) return null;
+    return { start: startOfDay(d).getTime(), end: endOfDay(d).getTime() };
+  }, [filters.date]);
+
+  // Human-readable label for the active-filter chip under the controls.
+  const dateWindowLabel = useMemo(() => {
+    const d = parseInputDate(filters.date);
+    return d
+      ? d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+      : '';
+  }, [filters.date]);
+
   const filteredGroupedConversations = useMemo(() => {
     if (!groupedConversations) return [];
     return groupedConversations.filter((group) => {
@@ -1457,6 +1401,15 @@ function ConversationList({
         if (filters.readStatus === 'unread' && !hasUnread) return false;
         if (filters.readStatus === 'read' && hasUnread) return false;
       }
+      // ── date filter ──
+      // NOT re-applied here. The server filters by date (useConversations sends
+      // naive-UTC dateFrom/dateTo bounds for the picked local day, and the
+      // conversations route passes them to SQL), so every row that arrives has
+      // already matched. Re-checking client-side could only ever subtract rows —
+      // and did, because a client window computed from a differently-serialized
+      // timestamp disagreed with the server's at the day boundary. One filter,
+      // one source of truth. dateWindow is still computed above, but only for the
+      // chip label and the empty-state text.
       return true;
     });
   }, [groupedConversations, filters, findStore, getGroupUnread, isServerSearch]);
@@ -1488,11 +1441,19 @@ function ConversationList({
   const itemsScrollRef = useRef(null);
   const [visibleNormal, setVisibleNormal] = useState(NORMAL_CHUNK);
   const searchActive = !isServerSearch && (filters.search || '').trim().length > 0;
+  const dateActive = !!dateWindow;
 
   useEffect(() => {
     setVisibleNormal(NORMAL_CHUNK);
     if (itemsScrollRef.current) itemsScrollRef.current.scrollTop = 0;
-  }, [filters.search, filters.status, filters.priority, filters.storeId, filters.readStatus]);
+  }, [
+    filters.search,
+    filters.status,
+    filters.priority,
+    filters.storeId,
+    filters.readStatus,
+    filters.date,
+  ]);
 
   const handleItemsScroll = (e) => {
     const el = e.currentTarget;
@@ -1537,7 +1498,14 @@ function ConversationList({
   );
 
   const clearFilters = () => {
-    onFilterChange({ search: '', status: '', priority: '', storeId: '', readStatus: '' });
+    onFilterChange({
+      search: '',
+      status: '',
+      priority: '',
+      storeId: '',
+      readStatus: '',
+      date: '',
+    });
   };
 
   const handleGroupClick = (group) => {
@@ -1574,7 +1542,12 @@ function ConversationList({
     setConfirmModal(null);
   };
 
-  const hasActiveFilters = filters.status || filters.priority || filters.storeId || filters.readStatus;
+  const hasActiveFilters =
+    filters.status ||
+    filters.priority ||
+    filters.storeId ||
+    filters.readStatus ||
+    filters.date;
 
   const getGroupLegalSeverity = (group) => {
     const severityOrder = ['critical', 'high', 'medium'];
@@ -1622,6 +1595,14 @@ function ConversationList({
         ? { '--group-accent': groupColor, '--group-accent-rgb': accentTriple }
         : { '--group-accent': groupColor })
     : undefined;
+
+  // Today, in the <input type="date"> format — used as the max on both pickers
+  // so an agent can't select a future day that can never match anything.
+  const todayInputValue = useMemo(() => {
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }, []);
 
   return (
     <div className="conversation-list" style={listStyle}>
@@ -1706,6 +1687,56 @@ function ConversationList({
         .conversation-list .search-clear:focus-visible {
           outline-color: var(--group-accent, #00a884);
         }
+
+        /* ── Date filter ─────────────────────────────────────────────── */
+        /* Single-day picker sits in the filters row next to the store select and
+           borrows .filter-select's box; these rules just tidy the native control
+           and tint its focus ring with the group color. */
+        .conversation-list .conv-date-picker {
+          color-scheme: light;
+          cursor: pointer;
+        }
+        .conversation-list .conv-date-picker::-webkit-calendar-picker-indicator {
+          cursor: pointer;
+          opacity: 0.55;
+        }
+        .conversation-list .conv-date-picker:hover::-webkit-calendar-picker-indicator {
+          opacity: 1;
+        }
+        .conversation-list .conv-date-picker:hover,
+        .conversation-list .conv-date-picker:focus {
+          border-color: var(--group-accent, #00a884);
+        }
+        .conversation-list .conv-date-picker:focus {
+          box-shadow: 0 0 0 3px rgba(var(--group-accent-rgb, 0, 168, 132), 0.1);
+        }
+        .conversation-list .conv-date-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          margin: 0 12px 8px;
+          padding: 3px 8px;
+          border-radius: 999px;
+          font-size: 11px;
+          font-weight: 600;
+          color: var(--group-accent, #00a884);
+          background: rgba(var(--group-accent-rgb, 0, 168, 132), 0.10);
+          border: 1px solid rgba(var(--group-accent-rgb, 0, 168, 132), 0.30);
+          width: fit-content;
+          max-width: calc(100% - 24px);
+        }
+        .conversation-list .conv-date-chip button {
+          border: 0;
+          background: none;
+          padding: 0;
+          margin: 0;
+          cursor: pointer;
+          color: inherit;
+          font-size: 12px;
+          line-height: 1;
+          opacity: .7;
+        }
+        .conversation-list .conv-date-chip button:hover { opacity: 1; }
       `}</style>
 
       <div className="conversation-list-header">
@@ -1801,8 +1832,39 @@ function ConversationList({
             ))}
           </select>
         )}
+
+        {/* Date filter — pick ONE day; matches a group when ANY of its threads
+            had activity that day (last_message_at, falling back to updated/created). */}
+        <input
+          type="date"
+          className="filter-select conv-date-picker"
+          value={filters.date || ''}
+          max={todayInputValue}
+          onChange={(e) => onFilterChange({ ...filters, date: e.target.value })}
+          aria-label="Filter by date"
+          title="Filter by date"
+        />
+
         {hasActiveFilters && <button className="filter-clear" onClick={clearFilters}>Clear</button>}
       </div>
+
+      {dateActive && (
+        <div className="conv-date-chip">
+          <span>📅 {dateWindowLabel}</span>
+          <button
+            type="button"
+            onClick={() => onFilterChange({ ...filters, date: '' })}
+            aria-label="Clear date filter"
+            title="Clear date filter"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* No "loaded chats only" hint here anymore: the date filter is applied by
+          the server across the whole group, so the picked day is never truncated
+          by what happens to be loaded. Paging still works normally within the day. */}
 
       <div className="conversation-items" ref={itemsScrollRef} onScroll={handleItemsScroll}>
         {loading ? (
@@ -1814,7 +1876,13 @@ function ConversationList({
           <div className="empty-conversations">
             <div className="empty-icon">💬</div>
             <h3>No chats</h3>
-            <p>{filters.search || hasActiveFilters ? 'No conversations match your search' : 'Start a new conversation'}</p>
+            <p>
+              {dateActive
+                ? `No conversations in ${dateWindowLabel}`
+                : (filters.search || hasActiveFilters
+                    ? 'No conversations match your search'
+                    : 'Start a new conversation')}
+            </p>
           </div>
         ) : (
           (() => {

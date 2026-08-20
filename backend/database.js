@@ -2696,6 +2696,7 @@ const MIGRATIONS = [
   ['021_store_groups_table',     migration_021_add_store_groups_table],
   ['022_group_color',            migration_022_add_group_color],
   ['023_brain_backups',          migration_023_add_brain_backups],
+  ['024_last_message_at_index',  migration_024_last_message_at_index],
 ];
 
 async function runMigrations() {
@@ -3103,6 +3104,12 @@ async function migration_023_add_brain_backups(db) {
                     ON ai_training_brain_backups (backed_up_at DESC)`);
 }
 
+
+async function migration_024_last_message_at_index(db) {
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_conversations_last_message_at
+                    ON conversations (last_message_at DESC)`);
+}
+
 // ============================================================================
 // SEARCH INDEXES — build out of band. See scripts/build-search-indexes.js
 // ============================================================================
@@ -3269,6 +3276,41 @@ async function getConversation(conversationId, storeId = null) {
   return r.rows[0] || null;
 }
 
+// async function getConversations(filters = {}) {
+//   let query = `
+//     SELECT c.*, s.brand_name, s.logo_url, s.primary_color, s.store_identifier,
+//            lcm.content AS last_customer_message
+//       FROM conversations c
+//       JOIN stores s ON c.shop_id = s.id
+//       LEFT JOIN LATERAL (
+//         SELECT content FROM messages
+//          WHERE conversation_id = c.id AND sender_type = 'customer'
+//          ORDER BY id DESC LIMIT 1
+//       ) lcm ON true
+//      WHERE 1=1
+//   `;
+//   const params = [];
+//   let n = 1;
+//   if (filters.storeId)         { query += ` AND c.shop_id = $${n++}`;        params.push(filters.storeId); }
+//   if (filters.storeIdentifier) { query += ` AND c.shop_domain = $${n++}`;    params.push(filters.storeIdentifier); }
+//   if (filters.storeGroup)      { query += ` AND s.store_group = $${n++}`;    params.push(filters.storeGroup); }
+//   if (filters.customerEmail)   { query += ` AND c.customer_email = $${n++}`; params.push(filters.customerEmail); }
+//   if (filters.status)          { query += ` AND c.status = $${n++}`;         params.push(filters.status); }
+//   if (!filters.status && filters.excludeArchived) query += ` AND c.status != 'archived'`;
+//   if (filters.priority)        { query += ` AND c.priority = $${n++}`;       params.push(filters.priority); }
+//   if (filters.assignedTo)      { query += ` AND c.assigned_to = $${n++}`;    params.push(filters.assignedTo); }
+//   if (filters.search) {
+//     query += ` AND (c.customer_email ILIKE $${n} OR c.customer_name ILIKE $${n})`;
+//     params.push(`%${filters.search}%`); n++;
+//   }
+//   const limit  = Math.min(parseInt(filters.limit, 10) || 50, 100);
+//   const offset = Math.max(parseInt(filters.offset, 10) || 0, 0);
+//   query += ` ORDER BY c.updated_at DESC LIMIT $${n} OFFSET $${n + 1}`;
+//   params.push(limit, offset);
+//   const r = await pool.query(query, params);
+//   return r.rows;
+// }
+
 async function getConversations(filters = {}) {
   let query = `
     SELECT c.*, s.brand_name, s.logo_url, s.primary_color, s.store_identifier,
@@ -3296,6 +3338,11 @@ async function getConversations(filters = {}) {
     query += ` AND (c.customer_email ILIKE $${n} OR c.customer_name ILIKE $${n})`;
     params.push(`%${filters.search}%`); n++;
   }
+  // ── date range: naive-UTC bounds matching the naive last_message_at column.
+  //    Half-open (>= … <) so it stays index-usable. Filters on message activity,
+  //    NOT updated_at (which bumps on read via markConversationRead). ──
+  if (filters.dateFrom) { query += ` AND c.last_message_at >= $${n++}`; params.push(filters.dateFrom); }
+  if (filters.dateTo)   { query += ` AND c.last_message_at <  $${n++}`; params.push(filters.dateTo); }
   const limit  = Math.min(parseInt(filters.limit, 10) || 50, 100);
   const offset = Math.max(parseInt(filters.offset, 10) || 0, 0);
   query += ` ORDER BY c.updated_at DESC LIMIT $${n} OFFSET $${n + 1}`;

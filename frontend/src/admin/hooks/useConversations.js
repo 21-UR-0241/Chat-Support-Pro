@@ -3,10 +3,6 @@
 
 // import { useState, useEffect, useCallback, useRef } from 'react';
 // import api from '../services/api';
-
-// // NOTE: `ws` is now passed in from the single useWebSocket() owner (App).
-// // This hook no longer calls useWebSocket() itself, so there is exactly ONE
-// // socket connection in the tree — no more connect/disconnect stomping.
 // export function useConversations(employeeId, ws, initialFilters = {}) {
 //   const [conversations, setConversations] = useState([]);
 //   const [loading, setLoading] = useState(true);
@@ -188,7 +184,7 @@
 //         updateConversationFromMessage(data);
 //       }
 
-//       playNotificationSound();
+//       // NO sound here — App owns the audible cue + OS notification (single owner).
 //     }));
 
 //     subs.push(ws.on('conversation_read', (data) => {
@@ -289,21 +285,41 @@
 //   };
 // }
 
-// function playNotificationSound() {
-//   try {
-//     const audio = new Audio('/notification.mp3');
-//     audio.volume = 0.5;
-//     audio.play().catch(() => {});
-//   } catch (error) {
-//     // Ignore
-//   }
-// }
-
-
 
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../services/api';
+
+// ── Date filter → wire params ────────────────────────────────────────────────
+// The agent picks ONE calendar day (filters.date, 'YYYY-MM-DD'). We turn it into
+// the { dateFrom, dateTo } NAIVE-UTC timestamp strings the server compares against
+// the naive last_message_at column: [local midnight of that day, local midnight
+// of the NEXT day) — half-open, from inclusive, to exclusive.
+//
+// Boundaries are the agent's LOCAL day converted to UTC, so the picked date means
+// that date in the agent's own timezone and the UI, the SQL, and the server all
+// agree on where the day starts and ends. Returns {} when no date is picked (so
+// nothing is sent, not `undefined`).
+//
+// NOTE: filters.date is a UI-only key ('YYYY-MM-DD'); the wire keys dateFrom/dateTo
+// are full 'YYYY-MM-DD HH:MM:SS.SSS' UTC timestamps. toFetchParams strips the UI
+// key before merging these in, so the raw picker string never reaches the server.
+function dateBounds(filters = {}) {
+  const toBound = (d) => new Date(d).toISOString().replace('T', ' ').replace('Z', '');
+  const [y, mo, d] = String(filters.date || '').split('-').map(Number);
+  if (!y || !mo || !d) return {};
+  const start = new Date(y, mo - 1, d);        // local 00:00 of the picked day
+  const end   = new Date(y, mo - 1, d + 1);    // local 00:00 of the next day (exclusive)
+  return { dateFrom: toBound(start), dateTo: toBound(end) };
+}
+
+// Build the params sent to api.getConversations: drop the UI-only `date` key and
+// splice in the computed naive-UTC bounds — so the raw 'YYYY-MM-DD' picker string
+// never leaks into the SQL.
+function toFetchParams(filters, offset) {
+  const { date: _d, ...rest } = filters;
+  return { ...rest, offset, ...dateBounds(filters) };
+}
 
 // NOTE: `ws` is now passed in from the single useWebSocket() owner (App).
 // This hook no longer calls useWebSocket() itself, so there is exactly ONE
@@ -327,6 +343,7 @@ export function useConversations(employeeId, ws, initialFilters = {}) {
     search: '',
     storeGroup: '',
     limit: 50,
+    date: '',        // UI picker only ('YYYY-MM-DD') — never sent raw; see dateBounds
     ...initialFilters,
   });
 
@@ -338,7 +355,7 @@ export function useConversations(employeeId, ws, initialFilters = {}) {
       if (showLoading) setLoading(true);
       setError(null);
       const pageSize = filters.limit || 50;
-      const data = await api.getConversations({ ...filters, offset: 0 });
+      const data = await api.getConversations(toFetchParams(filters, 0));
       console.log('📥 [useConversations] Loaded conversations:', data.length);
       setConversations(data);
       offsetRef.current = data.length;
@@ -357,7 +374,7 @@ export function useConversations(employeeId, ws, initialFilters = {}) {
       setLoadingMore(true);
       setError(null);
       const pageSize = filters.limit || 50;
-      const data = await api.getConversations({ ...filters, offset: offsetRef.current });
+      const data = await api.getConversations(toFetchParams(filters, offsetRef.current));
       console.log('📥 [useConversations] Loaded more:', data.length, 'at offset', offsetRef.current);
       setConversations(prev => {
         const seen = new Set(prev.map(c => c.id));
