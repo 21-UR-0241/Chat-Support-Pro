@@ -1,7 +1,5 @@
 
 
-
-
 // const express = require('express');
 // const db = require('../database');
 // const { authenticateToken } = require('../auth');
@@ -244,7 +242,14 @@
 // // Do NOT lower this to throttle latency. It is a reasoning model: cap the budget
 // // below the reasoning spend and it never reaches the JSON, parseAIResponse returns
 // // null, and every request silently serves canned templates instead.
-// const SUGGEST_MAX_TOKENS = 4000;
+// //
+// // 3768 reasoning tokens was the WORST measured run, and ~84 tokens of JSON on top
+// // of it lands at ~3852 against a 4000 ceiling — a 4% margin. A run at or past the
+// // top of that range truncates mid-reasoning and never emits the closing brace,
+// // which is the single most likely cause of an intermittent template fallback.
+// // Env-overridable so this can be raised without a deploy while the non-reasoning
+// // model question is settled.
+// const SUGGEST_MAX_TOKENS = Number(process.env.SUGGEST_MAX_TOKENS) || 6000;
 
 // // DeepSeek stays primary for BOTH modes. Haiku is only reached when DeepSeek is
 // // unavailable or out of credit — unchanged.
@@ -273,6 +278,26 @@
 // // 'low' is already the module default and I have not verified which other values
 // // this account accepts.
 // const DEEPSEEK_SUGGEST_EFFORT = process.env.DEEPSEEK_SUGGEST_EFFORT || null;
+
+// // ── FALLBACK REASONS ───────────────────────────────────────────────────────────
+// // Every template response carries one of these. Before this existed, nine
+// // separate exits all returned an identical `{ fallback: true }` and the agent saw
+// // one undifferentiated "AI unavailable" chip — a config miss, a truncated
+// // completion, and a safety guard doing its job were indistinguishable in the UI
+// // and only separable by tailing server logs. The codes are the contract the
+// // client's FALLBACK_REASONS map renders; an unknown code degrades to the raw
+// // string there rather than being swallowed, so adding one here is safe.
+// const FALLBACK_REASON = {
+//   NO_API_KEY:      'no_api_key',
+//   PARSE_FAILED:    'parse_failed',
+//   SHAPE_MISMATCH:  'shape_mismatch',
+//   CONTAMINATION:   'number_contamination',
+//   DOSE_LEAK:       'unauthorised_dose_leak',
+//   COMMITMENT:      'unauthorised_commitment',
+//   UPGRADE:         'unauthorised_upgrade',
+//   ALL_FILTERED:    'all_filtered',
+//   ENDPOINT_ERROR:  'endpoint_error',
+// };
 
 // // Widened after a live miss. "tracking number said I would receive my package on
 // // Wednesday" is a missed-promise complaint, but matched none of the old terms, so
@@ -308,6 +333,46 @@
 //   const voicedFallback = (profile, ...args) =>
 //     generateSmartFallbackSuggestions(...args, { supportEmail: profile?.supportEmail || null })
 //       .map(s => scrubVoice(s, profile));
+
+//   // The single exit for a template response. Stamping the reason here rather than
+//   // at nine call sites means a new fallback path cannot ship without one.
+//   // `detail` is trimmed hard: it is rendered to an agent mid-conversation, not
+//   // read as a stack trace.
+//   const fallbackReply = (res, { reason, detail = null, provider = 'none', detailed = false, suggestions, extra = {} }) => {
+//     console.warn(`⚠️  [AI] FALLBACK reason=${reason} provider=${provider}${detail ? ` detail=${detail}` : ''}`);
+//     const body = {
+//       fallback: true,
+//       source: 'fallback',
+//       provider,
+//       fallbackReason: reason,
+//       ...(detail && { fallbackDetail: String(detail).slice(0, 200) }),
+//       ...extra,
+//     };
+//     return res.json(detailed
+//       ? { ...body, detailedAnswers: detailedFromFallback(suggestions) }
+//       : { ...body, suggestions });
+//   };
+
+//   // Why a completion could not be parsed. `stop_reason: 'max_tokens'` is the one
+//   // that matters: it means the model spent the whole budget on chain-of-thought
+//   // and was cut off before the closing brace. That is a config problem, not a
+//   // provider outage, and it reads completely differently to an agent.
+//   const describeParseFailure = (data, raw, provider, maxTokens) => {
+//     const stop = data?.stop_reason || data?.stopReason || 'unknown';
+//     const parts = [`${provider} returned ${raw.length} chars`, `stop_reason=${stop}`];
+//     if (stop === 'max_tokens') parts.push(`truncated at max_tokens=${maxTokens} before emitting JSON`);
+//     else if (!raw.length) parts.push('empty completion');
+//     return parts.join(', ');
+//   };
+
+//   const warnIfTruncated = (data, maxTokens, label) => {
+//     const stop = data?.stop_reason || data?.stopReason;
+//     if (stop !== 'max_tokens') return;
+//     console.error(
+//       `✦ [AI] ${label} TRUNCATED at max_tokens=${maxTokens}. A reasoning model spent the budget on chain-of-thought and never emitted the JSON. ` +
+//       `Fix: raise SUGGEST_MAX_TOKENS, or set DEEPSEEK_SUGGEST_MODEL to a non-reasoning entry from GET /api/ai/deepseek-models.`
+//     );
+//   };
 
 //   // Resolve the store's voice. Never throws, never blocks a reply — an unknown
 //   // or unreachable store falls through to the fleet default.
@@ -368,9 +433,12 @@
 
 //       const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 //       if (!ANTHROPIC_API_KEY) {
-//         const fallback = voicedFallback(voiceProfile, clientMessage, chatHistory, analysis, adminNote);
-//         if (detailedAnswerMode) return res.json({ detailedAnswers: detailedFromFallback(fallback), fallback: true, source: 'fallback', provider: 'none' });
-//         return res.json({ suggestions: fallback, fallback: true, source: 'fallback', provider: 'none' });
+//         return fallbackReply(res, {
+//           reason: FALLBACK_REASON.NO_API_KEY,
+//           detail: 'ANTHROPIC_API_KEY is not set, so no model was called.',
+//           detailed: !!detailedAnswerMode,
+//           suggestions: voicedFallback(voiceProfile, clientMessage, chatHistory, analysis, adminNote),
+//         });
 //       }
 
 //       const conversationState = analyzeConversationState(chatHistory, clientMessage, analysis);
@@ -527,9 +595,10 @@
 //         // Detailed mode keeps the reasoning model: the agent chose to expand, so a
 //         // slower, better answer is the point. No timeout override, so it uses the
 //         // provider default.
+//         const DETAILED_MAX_TOKENS = 3000;
 //         const requestBody = JSON.stringify({
 //           model: DETAILED_MODEL,
-//           max_tokens: 3000,
+//           max_tokens: DETAILED_MAX_TOKENS,
 //           temperature: 0.5,
 //           system: systemPrompt,
 //           messages: [{ role: 'user', content: userPrompt }],
@@ -542,16 +611,28 @@
 
 //         const rawContent = anthropicData.content?.[0]?.text || '';
 //         console.log(`✦ [AI] Detailed raw (first 300): ${rawContent.substring(0, 300)}`);
+//         warnIfTruncated(anthropicData, DETAILED_MAX_TOKENS, 'Detailed');
+
 //         const parsed = parseAIResponse(rawContent, 'detailedAnswers');
 //         if (!parsed) {
-//           const fallback = voicedFallback(voiceProfile, clientMessage, chatHistory, analysis, adminNote);
-//           return res.json({ detailedAnswers: detailedFromFallback(fallback), fallback: true, source: 'fallback', provider });
+//           return fallbackReply(res, {
+//             reason: FALLBACK_REASON.PARSE_FAILED,
+//             detail: describeParseFailure(anthropicData, rawContent, provider, DETAILED_MAX_TOKENS),
+//             provider,
+//             detailed: true,
+//             suggestions: voicedFallback(voiceProfile, clientMessage, chatHistory, analysis, adminNote),
+//           });
 //         }
 //         let detailedAnswers = Array.isArray(parsed.detailedAnswers) ? parsed.detailedAnswers.slice(0, 3) : null;
 //         if (!detailedAnswers) {
 //           console.warn('✦ [AI] Detailed parsed but detailedAnswers not an array — serving fallback');
-//           const fallback = voicedFallback(voiceProfile, clientMessage, chatHistory, analysis, adminNote);
-//           return res.json({ detailedAnswers: detailedFromFallback(fallback), fallback: true, source: 'fallback', provider });
+//           return fallbackReply(res, {
+//             reason: FALLBACK_REASON.SHAPE_MISMATCH,
+//             detail: 'The model returned JSON without a detailedAnswers array.',
+//             provider,
+//             detailed: true,
+//             suggestions: voicedFallback(voiceProfile, clientMessage, chatHistory, analysis, adminNote),
+//           });
 //         }
 
 //         // Essay mode is MORE prone to both failures — a longer reply gives it far more
@@ -560,10 +641,18 @@
 //         const { contaminated } = detectNumberContamination(texts, brainContext, conversationState.productName);
 //         const { blocked: cBlocked } = validateCommitments(texts, brainContext);
 //         if (contaminated.length || cBlocked.length) {
-//           const why = contaminated.length ? 'number_contamination' : 'unauthorised_commitment';
+//           const why = contaminated.length ? FALLBACK_REASON.CONTAMINATION : FALLBACK_REASON.COMMITMENT;
 //           console.error(`🚨 [AI] Detailed mode blocked (${why}) — serving fallback rather than a borrowed dose or an invented promise`);
-//           const fallback = voicedFallback(voiceProfile, clientMessage, chatHistory, analysis, adminNote);
-//           return res.json({ detailedAnswers: detailedFromFallback(fallback), fallback: true, source: 'fallback', provider, blocked: why });
+//           return fallbackReply(res, {
+//             reason: why,
+//             detail: contaminated.length
+//               ? 'Every detailed reply carried a dose figure the brain does not authorise.'
+//               : 'Every detailed reply made a promise the brain does not authorise.',
+//             provider,
+//             detailed: true,
+//             suggestions: voicedFallback(voiceProfile, clientMessage, chatHistory, analysis, adminNote),
+//             extra: { blocked: why },
+//           });
 //         }
 
 //         // Voice pass LAST — after every safety guard has had its say, so a scrub
@@ -622,7 +711,7 @@
 //         deepseekTimeoutMs: DEEPSEEK_SUGGEST_TIMEOUT_MS,
 //       });
 
-//       console.log(`✦ [AI] Calling suggestions (DeepSeek primary / ${SUGGEST_MODEL} fallback) — brain: ${brainContext.length}c, style: ${adminStyleBlock.length}c, voice: ${voiceProfile.id}, budget: ${brainBudget}c, dsModel: ${DEEPSEEK_SUGGEST_MODEL || process.env.DEEPSEEK_MODEL || 'provider default'}, sysPrompt: ${systemPrompt.length}c, userPrompt: ${userPrompt.length}c, examples: ${responseExamples.length}, image: ${!!imageAnalysis}, productAnswer: ${brainHasProductAnswer}`);
+//       console.log(`✦ [AI] Calling suggestions (DeepSeek primary / ${SUGGEST_MODEL} fallback) — brain: ${brainContext.length}c, style: ${adminStyleBlock.length}c, voice: ${voiceProfile.id}, budget: ${brainBudget}c, dsModel: ${DEEPSEEK_SUGGEST_MODEL || process.env.DEEPSEEK_MODEL || 'provider default'}, maxTokens: ${SUGGEST_MAX_TOKENS}, sysPrompt: ${systemPrompt.length}c, userPrompt: ${userPrompt.length}c, examples: ${responseExamples.length}, image: ${!!imageAnalysis}, productAnswer: ${brainHasProductAnswer}`);
 //       console.time('✦ [AI] llmSuggest');
 //       const { data: anthropicData, provider } = await callAIForSuggestions(buildBody(userPrompt), ANTHROPIC_API_KEY);
 //       console.timeEnd('✦ [AI] llmSuggest');
@@ -630,20 +719,41 @@
 //       const rawContent = anthropicData.content?.[0]?.text || '';
 //       console.log(`✦ [AI] Served by: ${provider} — Raw (first 300): ${rawContent.substring(0, 300)}`);
 
+//       // Token accounting is the difference between "the provider is down" and "the
+//       // budget is too small". Log it on every call, not only on failure, so the
+//       // reasoning-vs-output split is visible before it starts truncating.
+//       const usage = anthropicData?.usage || {};
+//       if (usage.output_tokens != null || usage.completion_tokens != null) {
+//         console.log(`✦ [AI] usage — in:${usage.input_tokens ?? usage.prompt_tokens ?? '?'} out:${usage.output_tokens ?? usage.completion_tokens ?? '?'} reasoning:${usage.reasoning_tokens ?? '?'} cap:${SUGGEST_MAX_TOKENS} stop:${anthropicData?.stop_reason || 'unknown'}`);
+//       }
+//       warnIfTruncated(anthropicData, SUGGEST_MAX_TOKENS, 'Suggestions');
+
 //       let usedFallback = false;
 //       let blocked = null;
+//       let fallbackReason = null;
+//       let fallbackDetail = null;
 //       let safetyReview = [];
 
 //       const parsed = parseAIResponse(rawContent, 'suggestions');
 //       if (!parsed) {
 //         console.error(`✦ [AI] JSON parse failed (provider=${provider}). Raw:`, rawContent.substring(0, 500));
-//         return res.json({ suggestions: voicedFallback(voiceProfile, clientMessage, chatHistory, analysis, adminNote), fallback: true, source: 'fallback', provider });
+//         return fallbackReply(res, {
+//           reason: FALLBACK_REASON.PARSE_FAILED,
+//           detail: describeParseFailure(anthropicData, rawContent, provider, SUGGEST_MAX_TOKENS),
+//           provider,
+//           suggestions: voicedFallback(voiceProfile, clientMessage, chatHistory, analysis, adminNote),
+//         });
 //       }
 
 //       let suggestions;
 //       if (Array.isArray(parsed.suggestions)) suggestions = parsed.suggestions.slice(0, 3);
 //       else if (Array.isArray(parsed)) suggestions = parsed.slice(0, 3);
-//       else { suggestions = voicedFallback(voiceProfile, clientMessage, chatHistory, analysis, adminNote); usedFallback = true; }
+//       else {
+//         suggestions = voicedFallback(voiceProfile, clientMessage, chatHistory, analysis, adminNote);
+//         usedFallback = true;
+//         fallbackReason = FALLBACK_REASON.SHAPE_MISMATCH;
+//         fallbackDetail = 'The model returned JSON without a suggestions array.';
+//       }
 
 //       console.log(`✦ [AI] BEFORE VALIDATE (${suggestions.length}):`, JSON.stringify(suggestions));
 //       if (!usedFallback) {
@@ -654,12 +764,14 @@
 //       if (!usedFallback) {
 //         const { clean, contaminated } = detectNumberContamination(suggestions, brainContext, conversationState.productName);
 //         if (contaminated.length) {
-//           blocked = 'number_contamination';
+//           blocked = FALLBACK_REASON.CONTAMINATION;
 //           suggestions = clean;
 //           if (!suggestions.length) {
 //             console.error('🚨 [AI] Every suggestion carried an unauthorised dosing number — serving honest fallback');
 //             suggestions = voicedFallback(voiceProfile, clientMessage, chatHistory, analysis, adminNote);
 //             usedFallback = true;
+//             fallbackReason = FALLBACK_REASON.CONTAMINATION;
+//             fallbackDetail = `Every reply carried a dose figure the brain does not authorise for ${conversationState.productName || 'this product'}.`;
 //           }
 //         }
 //         if (!brainHasProductAnswer && !usedFallback) {
@@ -673,7 +785,9 @@
 //             leaked.forEach(s => console.error(`   leaked: "${String(s).slice(0, 110)}"`));
 //             suggestions = voicedFallback(voiceProfile, clientMessage, chatHistory, analysis, adminNote);
 //             usedFallback = true;
-//             blocked = 'unauthorised_dose_leak';
+//             blocked = FALLBACK_REASON.DOSE_LEAK;
+//             fallbackReason = FALLBACK_REASON.DOSE_LEAK;
+//             fallbackDetail = `The brain has no dosing entry for ${conversationState.productName || 'this product'}, but every reply stated one. Author the brain entry to unblock this.`;
 //           }
 //         }
 //       }
@@ -681,12 +795,14 @@
 //       if (!usedFallback) {
 //         const { clean, blocked: cBlocked, review } = validateCommitments(suggestions, brainContext);
 //         if (cBlocked.length) {
-//           blocked = blocked || 'unauthorised_commitment';
+//           blocked = blocked || FALLBACK_REASON.COMMITMENT;
 //           suggestions = clean;
 //           if (!suggestions.length) {
 //             console.error('🚨 [AI] Every suggestion made an unauthorised promise — serving honest fallback');
 //             suggestions = voicedFallback(voiceProfile, clientMessage, chatHistory, analysis, adminNote);
 //             usedFallback = true;
+//             fallbackReason = FALLBACK_REASON.COMMITMENT;
+//             fallbackDetail = 'Every reply promised something the brain does not authorise.';
 //           }
 //         }
 //         if (review.length) safetyReview = [...safetyReview, ...review];
@@ -700,6 +816,7 @@
 //             console.time('✦ [AI] llmStallRetry');
 //             const retry = await callAIForSuggestions(buildBody(userPrompt + STALL_RETRY_INSTRUCTION), ANTHROPIC_API_KEY);
 //             console.timeEnd('✦ [AI] llmStallRetry');
+//             warnIfTruncated(retry.data, SUGGEST_MAX_TOKENS, 'Stall retry');
 //             const retryParsed = parseAIResponse(retry.data.content?.[0]?.text || '', 'suggestions');
 //             const retrySuggestions = Array.isArray(retryParsed?.suggestions) ? retryParsed.suggestions.slice(0, 3) : null;
 //             if (retrySuggestions?.length) {
@@ -722,6 +839,8 @@
 //         console.log('✦ [AI] All suggestions filtered — using fallback');
 //         suggestions = voicedFallback(voiceProfile, clientMessage, chatHistory, analysis, adminNote);
 //         usedFallback = true;
+//         fallbackReason = FALLBACK_REASON.ALL_FILTERED;
+//         fallbackDetail = 'Validation removed every reply the model produced.';
 //       }
 
 //       if (isSafetyDosing && !usedFallback) {
@@ -738,12 +857,14 @@
 //       if (!usedFallback) {
 //         const { clean, blocked: upBlocked } = detectUnauthorisedUpgrade(suggestions, brainContext);
 //         if (upBlocked.length) {
-//           blocked = blocked || 'unauthorised_upgrade';
+//           blocked = blocked || FALLBACK_REASON.UPGRADE;
 //           suggestions = clean;
 //           if (!suggestions.length) {
 //             console.error('🚫 [AI] Every suggestion offered an unauthorised shipping upgrade — serving honest fallback');
 //             suggestions = voicedFallback(voiceProfile, clientMessage, chatHistory, analysis, adminNote);
 //             usedFallback = true;
+//             fallbackReason = FALLBACK_REASON.UPGRADE;
+//             fallbackDetail = 'Every reply offered a shipping upgrade the brain does not authorise.';
 //           }
 //         }
 //       }
@@ -779,7 +900,8 @@
 //         }
 //       });
 
-//       console.log(`✦ [AI] FINAL (${suggestions.length}) — fallback:${usedFallback}, blocked:${blocked || 'none'}, needsReview:${safetyReview.length}, voiceFlags:${voiceFlags.length}, placeholders:${placeholderCount}`);
+//       console.log(`✦ [AI] FINAL (${suggestions.length}) — fallback:${usedFallback}${usedFallback ? ` (${fallbackReason})` : ''}, blocked:${blocked || 'none'}, needsReview:${safetyReview.length}, voiceFlags:${voiceFlags.length}, placeholders:${placeholderCount}`);
+//       if (usedFallback) console.warn(`⚠️  [AI] FALLBACK reason=${fallbackReason} provider=${provider}`);
 
 //       res.json({
 //         suggestions,
@@ -790,6 +912,8 @@
 //         placeholders: placeholderCount,
 //         voiceProfile: voiceProfile.id,
 //         voiceRulesVersion: VOICE_VERSION,
+//         ...(usedFallback && { fallbackReason: fallbackReason || FALLBACK_REASON.ALL_FILTERED }),
+//         ...(usedFallback && fallbackDetail && { fallbackDetail }),
 //         ...(voiceFlags.length && { voiceFlags }),
 //         ...(blocked && { blocked }),
 //         ...(isSafetyDosing && { coverage: { product: coverage.product, complete: coverage.complete } }),
@@ -797,11 +921,12 @@
 
 //     } catch (error) {
 //       console.error('✦ [AI] Endpoint error:', error.message, error.stack);
-//       const fallback = voicedFallback(voiceProfile, req.body?.clientMessage || '', req.body?.chatHistory || '', req.body?.analysis || {}, req.body?.adminNote || '');
-//       if (req.body?.detailedAnswerMode) {
-//         return res.json({ detailedAnswers: detailedFromFallback(fallback), fallback: true, source: 'fallback', provider: 'none' });
-//       }
-//       res.json({ suggestions: fallback, fallback: true, source: 'fallback', provider: 'none' });
+//       return fallbackReply(res, {
+//         reason: FALLBACK_REASON.ENDPOINT_ERROR,
+//         detail: error.message,
+//         detailed: !!req.body?.detailedAnswerMode,
+//         suggestions: voicedFallback(voiceProfile, req.body?.clientMessage || '', req.body?.chatHistory || '', req.body?.analysis || {}, req.body?.adminNote || ''),
+//       });
 //     }
 //   });
 
@@ -864,6 +989,19 @@
 //     } catch (err) { return res.status(500).json({ error: err.message }); }
 //   });
 
+//   // ── FALLBACK REASON REFERENCE ──────────────────────────────────────────────
+//   // The client renders these codes. Exposing the list means the frontend map can
+//   // be checked against the server's actual vocabulary instead of drifting quietly
+//   // — a code the client does not know still renders, but as a raw slug.
+//   router.get('/fallback-reasons', authenticateToken, async (req, res) => {
+//     return res.json({
+//       reasons: Object.values(FALLBACK_REASON),
+//       suggestMaxTokens: SUGGEST_MAX_TOKENS,
+//       deepseekSuggestModel: DEEPSEEK_SUGGEST_MODEL || process.env.DEEPSEEK_MODEL || 'provider default',
+//       hint: 'parse_failed with stop_reason=max_tokens means the budget went to reasoning. Raise SUGGEST_MAX_TOKENS or move fast mode to a non-reasoning model.',
+//     });
+//   });
+
 //   // ── DEEPSEEK MODEL PROBE ───────────────────────────────────────────────────
 //   // Lists what the account actually serves. Uses getProviderKey, the same DB-first
 //   // lookup tryDeepSeekFallback uses — a curl with $DEEPSEEK_API_KEY will not work
@@ -904,8 +1042,6 @@
 
 //   return router;
 // };
-
-
 
 
 
@@ -1758,22 +1894,26 @@ module.exports = function createAiRoutes({ getCachedStore }) {
         safetyReview = [...safetyReview, ...result.needsReview];
       }
 
-      // ── UNAUTHORISED UPGRADE — BLOCKS ────────────────────────────────────────
-      // COMPENSATION_BLOCK bans expedited upgrades on the AI's own authority. An
-      // express reship the warehouse never agreed to is a real cost the store did
-      // not approve, and the customer has already been told it is happening. So
-      // this drops the suggestion rather than flagging it.
+      // ── UNAUTHORISED UPGRADE — BLOCKS GRANTS, FLAGS DESCRIPTIONS ──────────────
+      // COMPENSATION_BLOCK bans expedited upgrades on the AI's own authority. A GRANT
+      // (an express reship the warehouse never agreed to) is a real cost the store
+      // did not approve and the customer has been told is happening, so it is
+      // dropped. A DESCRIPTION of an existing conditional/automatic tier ("express
+      // applies automatically over $150") is a factual policy claim the brain may
+      // simply have truncated — the guard flags it for review rather than dropping a
+      // correct reply and leaving the agent with templates.
       if (!usedFallback) {
-        const { clean, blocked: upBlocked } = detectUnauthorisedUpgrade(suggestions, brainContext);
+        const { clean, blocked: upBlocked, review: upReview } = detectUnauthorisedUpgrade(suggestions, brainContext);
+        if (upReview.length) safetyReview = [...safetyReview, ...upReview];
         if (upBlocked.length) {
           blocked = blocked || FALLBACK_REASON.UPGRADE;
           suggestions = clean;
           if (!suggestions.length) {
-            console.error('🚫 [AI] Every suggestion offered an unauthorised shipping upgrade — serving honest fallback');
+            console.error('🚫 [AI] Every suggestion GRANTED an unauthorised shipping upgrade — serving honest fallback');
             suggestions = voicedFallback(voiceProfile, clientMessage, chatHistory, analysis, adminNote);
             usedFallback = true;
             fallbackReason = FALLBACK_REASON.UPGRADE;
-            fallbackDetail = 'Every reply offered a shipping upgrade the brain does not authorise.';
+            fallbackDetail = 'Every reply granted a shipping upgrade the brain does not authorise.';
           }
         }
       }

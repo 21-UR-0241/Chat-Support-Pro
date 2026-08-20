@@ -1,5 +1,7 @@
 
-// const { firstProduct, matchProducts } = require('./product-match');
+
+
+// const { matchProducts } = require('./product-match');
 // const { canonicalProductName } = require('./product-facts');
 // const NON_ANCHOR_PRODUCT_RE = /^(bac(?:teriostatic)? water|bacteriostatic|sterile water|saline|sodium chloride|water|syringes?|insulin syringes?|needles?|alcohol (?:swabs?|wipes?|pads?)|swabs?|wipes?|vials?|caps?)$/i;
 
@@ -12,6 +14,7 @@
 //     .map(l => l.replace(/^\s*(customer|client)\s*:\s*/i, '').trim())
 //     .filter(Boolean);
 // }
+
 // function resolveProductAnchor(clientMessage = '', chatHistory = '') {
 //   const pick = (hits) => {
 //     const usable = (hits || []).filter(_isAnchorable);
@@ -32,6 +35,7 @@
 
 // const _MG_RE = /(\d+(?:\.\d+)?)\s*mg\b/gi;
 // const _strengthsIn = (text) => [...String(text || '').matchAll(_MG_RE)].map(m => m[1]);
+
 // function resolveStrengthAnchor(clientMessage = '', chatHistory = '') {
 //   const inMsg = _strengthsIn(clientMessage);
 //   if (inMsg.length) return `${inMsg.at(-1)}mg`;
@@ -58,7 +62,6 @@
 //   return substantive ? `${msg} ${substantive}`.trim() : msg;
 // }
 
-// const _IS_CLOSER_RE = /^(thanks|thank you|ty|thx|tysm|got it|gotcha|perfect|great|awesome|nice|cool|ok|okay|k|sounds good|will do|bye)\b/i;
 // function resolveOpenQuestion(clientMessage = '', chatHistory = '') {
 //   const msg = String(clientMessage || '').trim();
 //   const words = msg.split(/\s+/).filter(Boolean).length;
@@ -100,8 +103,10 @@
 //   [/\bi would be happy to\b/gi, 'I can'],
 
 //   // — ownership theatre —
-//   [/\bi['’]m personally (?:handling|taking care of|looking into) this\b[.!]?/gi, ''],
-//   [/\bi am personally (?:handling|taking care of|looking into) this\b[.!]?/gi, ''],
+//   // Widened after "I'm personally on this now" survived both the ban list and the
+//   // scrubber. Match the construction, not an enumerated verb list.
+//   [/\b(?:i['’]m|i am|im) personally (?:handling|taking care of|looking into|on|overseeing|seeing to|dealing with|sorting|chasing)\s*(?:this|it)?\b[,.!]?\s*(?:now|right now|myself)?/gi, ''],
+//   [/\b(?:i['’]m|i am|im) personally\b/gi, "I'm"],
 //   [/\b(?:i['’]m|i am) (?:personally )?taking (?:full )?ownership(?: of this)?\b[.!]?/gi, ''],
 //   [/\bi['’]ll personally\b/gi, "I'll"],
 //   [/\bi will personally\b/gi, "I'll"],
@@ -375,8 +380,198 @@
 
 // Give the numbers NOW, exactly as the brain states them: the BAC water volume, the
 // resulting mg/mL, and the syringe units for the dose. Complete, in one reply, in
-// Sam's voice. Both suggestions must contain the actual numbers. Neither may stall.
+// the voice defined in the system prompt. Both suggestions must contain the actual
+// numbers. Neither may stall.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+
+// // ============ INVENTED TIMEFRAME + UNAUTHORISED UPGRADE GUARDS ============
+// // The prompt forbids stating a timeframe the brain didn't give, and
+// // COMPENSATION_BLOCK bans expedited upgrades outright. The model does both anyway.
+// //
+// // AUTHORISATION IS LINE-SCOPED AND NEGATION-AWARE. A bare
+// // brainContext.includes('express') against a 12,000-character blob is meaningless —
+// // it is the same blob-wide flaw the detectStall docstring warns about. It cleared
+// // "reshipping express" on a brain that said "We do not offer express shipping",
+// // because the word was present. Presence is not permission.
+// //
+// // So: find the brain LINES containing the phrase, reject any that are negated, and
+// // for cost-bearing offers require the line to actually read like an offer. No
+// // qualifying line means NOT AUTHORISED. Default deny.
+
+// const _NEGATION_RE = /\b(?:no|not|never|cannot|can'?t|don'?t|doesn'?t|won'?t|unable|unavailable|except|excluding|without|instead of|rather than|no longer|discontinued|unsupported|prohibited)\b/i;
+// const _OFFER_RE = /\b(?:offer(?:s|ed)?|available|approv(?:e|ed|al)|permit(?:s|ted)?|allow(?:s|ed)?|includ(?:e|es|ed)|option|upgrade to|we ship|ships? (?:via|with)|service|eligible|authoris(?:e|ed)|authoriz(?:e|ed)|may|can)\b/i;
+
+// const _brainLinesWith = (brainContext, phrase) => {
+//   const needle = String(phrase).toLowerCase();
+//   return String(brainContext || '')
+//     .split(/[\n;.]+/)
+//     .map(l => l.trim())
+//     .filter(l => l && l.toLowerCase().includes(needle));
+// };
+
+// /**
+//  * @param {{ requireOffer?: boolean }} opts  requireOffer for anything that costs
+//  *   the store money. Then an incidental mention ("expressly agreed") is not enough.
+//  * @returns {{ authorised: boolean, line: string|null }}
+//  */
+// function _brainAuthorises(brainContext, phrase, { requireOffer = false } = {}) {
+//   for (const line of _brainLinesWith(brainContext, phrase)) {
+//     if (_NEGATION_RE.test(line)) continue;
+//     if (requireOffer && !_OFFER_RE.test(line)) continue;
+//     return { authorised: true, line };
+//   }
+//   return { authorised: false, line: null };
+// }
+
+// // Bracketed spans are REMOVED before matching, not unwrapped.
+// //
+// // I originally debracketed, reasoning that "by [end of today]" is still a deadline.
+// // Measured over seven live fires: all seven were bracketed. The voice block
+// // MANDATES a bracket for any date the model does not have, so the guard was
+// // flagging compliant output 100% of the time — and the bracket already tells the
+// // agent to fill it in, so the flag added nothing but noise. Noise is how agents
+// // learn to ignore flags.
+// //
+// // Now: only an UNBRACKETED promise the brain does not back gets flagged. Bracketed
+// // ones are counted instead, which is information the agent can act on.
+// const _stripPlaceholders = (t) => String(t || '').replace(/\[[^\]]*\]/g, ' ');
+// const _countPlaceholders = (t) => (String(t || '').match(/\[[^\]]*\]/g) || []).length;
+
+// // Two live misses fixed here:
+// //   "by [today/tomorrow]" — debrackets to "by today/tomorrow", and "today" was
+// //                           missing from the by-alternation.
+// //   "can take [1-2 days]" — a bare range with no "within" or "in" in front.
+// const TIME_PROMISE_RE = /\bwithin (?:the next )?(?:\d+|one|two|three|a few|24|48|72)\s*(?:hour|hr|minute|min|day|business day|week)s?\b|\bin (?:\d+|one|two|a few)\s*(?:hour|hr|day|business day)s?\b|\bby (?:today|tomorrow|tonight|end of (?:day|today)|eod|close of business|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|\bend of (?:day|today)\b|\b(?:same|next)[- ]day\b|\bovernight\b|\bthis (?:afternoon|evening|week|weekend)\b|\b(?:today|tonight|tomorrow) at\b|\bshortly\b|\b\d+\s*(?:-|–|—|to)\s*\d+\s*(?:business\s+)?(?:hour|day|week)s?\b/gi;
+
+// // A time expression only needs brain authorisation when it is a CLAIM about the
+// // customer getting their package. "If it hasnt scanned by tomorrow, I'll reship"
+// // is not a delivery promise — it is a checkpoint the AGENT controls, and the real
+// // commitment is the reship. Flagging it made an approved reply unwritable: bracket
+// // the "tomorrow" and pickeddeadline fires, leave it plain and TimeGuard fires.
+// //
+// // So: scope per sentence, and only flag when that sentence actually claims arrival.
+// const ARRIVAL_RE = /\b(?:arriv\w*|deliver\w*|at your door|door\s?step|in your hands|lands?|reach(?:es)? you|gets? to you|shows? up|turns? up|be there|you'?ll have it|you will have it)\b/i;
+
+// /**
+//  * Flags time promises the brain does not authorise.
+//  * Advisory: returns review entries rather than dropping, because a genuinely
+//  * brain-sourced date phrased differently should not be silently deleted.
+//  *
+//  * @returns {{ review: {index:number, reasons:string[]}[], flagged: string[] }}
+//  */
+// function detectInventedTimeframe(suggestions, brainContext = '') {
+//   const review = [], flagged = [];
+//   let placeholders = 0;
+//   if (!Array.isArray(suggestions)) return { review, flagged, placeholders };
+
+//   suggestions.forEach((sug, index) => {
+//     if (typeof sug !== 'string') return;
+//     placeholders += _countPlaceholders(sug);
+
+//     // Only sentences that claim the customer gets their package by some time can
+//     // make an unauthorised promise. A checkpoint the agent controls cannot.
+//     // Split on paragraph breaks as well as sentence enders. The voice says a reply
+//     // "just stops", so a paragraph often ends with no punctuation — and splitting
+//     // on punctuation alone glued the reference reply's "...by tomorrow" onto the
+//     // next paragraph's "at your door step" and read one claim where there are two.
+//     const claimSentences = _stripPlaceholders(sug)
+//       .split(/(?<=[.!?])\s+|\n\s*\n/)
+//       .filter(x => ARRIVAL_RE.test(x));
+
+//     const hits = [...new Set(claimSentences.flatMap(x => (x.match(TIME_PROMISE_RE) || [])).map(h => h.trim().toLowerCase()))]
+//       .filter(h => !_brainAuthorises(brainContext, h).authorised);
+//     if (hits.length) {
+//       review.push({ index, reasons: hits.map(h => `unverified time promise, stated flat: "${h}"`) });
+//       flagged.push(...hits);
+//       console.warn(`⏱️  [TimeGuard] #${index + 1} states ${hits.map(h => `"${h}"`).join(', ')} unbracketed — no affirmative brain line says so`);
+//     }
+//   });
+//   return { review, flagged, placeholders };
+// }
+
+// // ── UNGROUNDED DATE GUARD ────────────────────────────────────────────────────
+// // nonNegotiablesBlock: "Never invent a date or deadline of any kind." TimeGuard
+// // only inspects FORWARD promises, so a past date asserted as fact walks through.
+// //
+// // Live, twice: the customer wrote "would receive my package on Wednesday" and the
+// // model replied "the 12th passed with no movement". Nothing in the conversation
+// // says the 12th. Telling a waiting customer a specific date that came from nowhere
+// // is the same failure as inventing a ship date, pointed backwards.
+// //
+// // Grounding is checked against the whole turn — customer message, chat history,
+// // screenshot analysis, brain — because any of those legitimately supplies a date.
+// // Bracketed spans are stripped first: [Friday] is a slot, not a claim.
+
+// const CALENDAR_RE = /\b(?:the\s+)?\d{1,2}(?:st|nd|rd|th)\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}\b|\b\d{1,2}\s*[\/\-]\s*\d{1,2}(?:\s*[\/\-]\s*\d{2,4})?\b|\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi;
+
+// /**
+//  * @param {string[]} suggestions
+//  * @param {string} context  clientMessage + chatHistory + imageAnalysis + brain,
+//  *   concatenated. Anything the model was legitimately shown.
+//  * @returns {{ review: {index:number, reasons:string[]}[], flagged: string[] }}
+//  */
+// function detectUngroundedDate(suggestions, context = '') {
+//   const review = [], flagged = [];
+//   if (!Array.isArray(suggestions)) return { review, flagged };
+//   const ctx = String(context || '').toLowerCase();
+
+//   suggestions.forEach((sug, index) => {
+//     if (typeof sug !== 'string') return;
+//     const bare = _stripPlaceholders(sug);
+//     const hits = [...new Set((bare.match(CALENDAR_RE) || []).map(h => h.trim().toLowerCase()))]
+//       .map(h => h.replace(/^the\s+/, ''))
+//       .filter(h => !ctx.includes(h));
+//     if (hits.length) {
+//       review.push({ index, reasons: hits.map(h => `date not in the conversation: "${h}"`) });
+//       flagged.push(...hits);
+//       console.warn(`📅 [DateGuard] #${index + 1} asserts ${hits.map(h => `"${h}"`).join(', ')} — not found in the customer message, history, screenshot or brain`);
+//     }
+//   });
+//   return { review, flagged };
+// }
+
+// // COMPENSATION_BLOCK: "Never offer a discount, a shipping-cost refund, an
+// // expedited upgrade, or a cancellation on your own authority." Nothing enforced it.
+// // This does, and it BLOCKS rather than flags: an expedited reship the warehouse
+// // never agreed to is a real cost the store did not sign off on, and the customer
+// // has now been told it is happening.
+// // "on us" and "on the house" were here and had to come out. In this house they
+// // mean OUR FAULT, not a comped cost — generateSmartFallbackSuggestionsRaw ships
+// // "That's on us. Same shipping address as the order, or a new one?" as approved
+// // copy. The guard blocked a correct, on-voice suggestion for saying "which is on
+// // us", and the agent lost the better of the two replies with no way to see why.
+// //
+// // Only unambiguous cost-comping stays. Every phrase below can ONLY mean money the
+// // store is giving up; none of them can mean an apology.
+// const UPGRADE_RE = /\bexpress\b|\bexpedit(?:e|ed|ing)\b|\brush(?:ed|ing)? (?:it|this|your|the|ship|deliver)|\bovernight\b|\bpriority (?:ship|mail|post|deliver)|\bupgrad(?:e|ed|ing) (?:your|the) (?:ship|deliver|order)|\bfree (?:ship|upgrade|expedit|of charge)|\bnext[- ]day (?:ship|deliver|air)|\bno charge\b|\bat no (?:cost|charge)\b|\bwaiv(?:e|ed|ing)\s+(?:the\s+)?(?:ship|fee|cost|charge|deliver)|\bwon'?t charge you\b|\bnot charging you\b/gi;
+
+// /**
+//  * @returns {{ clean: string[], blocked: {index:number, hits:string[]}[] }}
+//  *   `clean` excludes any suggestion offering something the brain does not
+//  *   affirmatively authorise. Caller falls back to templates if nothing survives,
+//  *   same as the dosing and free-product guards.
+//  */
+// function detectUnauthorisedUpgrade(suggestions, brainContext = '') {
+//   const clean = [], blocked = [];
+//   if (!Array.isArray(suggestions)) return { clean, blocked };
+
+//   suggestions.forEach((sug, index) => {
+//     if (typeof sug !== 'string') { clean.push(sug); return; }
+//     const hits = [];
+//     for (const raw of new Set((sug.match(UPGRADE_RE) || []).map(h => h.trim().toLowerCase()))) {
+//       const { authorised, line } = _brainAuthorises(brainContext, raw, { requireOffer: true });
+//       if (authorised) console.log(`   [UpgradeGuard] "${raw}" authorised by brain line: "${line.slice(0, 90)}"`);
+//       else hits.push(raw);
+//     }
+//     if (hits.length) {
+//       blocked.push({ index, hits });
+//       console.error(`🚫 [UpgradeGuard] #${index + 1} offers ${hits.map(h => `"${h}"`).join(', ')} — no affirmative brain line authorises it. Blocked.`);
+//     } else {
+//       clean.push(sug);
+//     }
+//   });
+//   return { clean, blocked };
+// }
 
 // // ============ BRAIN RETRIEVAL QUERY ============
 
@@ -511,29 +706,61 @@
 //   return { avgWords, lengthStyle, greetingNote, greetingRatio, writesLowercase, usesExclamation, usesEllipsis, usesEmoji, emojiMatches: emojiMatches.slice(0, 3), usesContractions, vocab, signoffs, empathyPhrases, writesSingleSentence, writesMultipleSentences, recurringPhrases, sampleLines, totalSamplesAnalyzed: agentLines.length };
 // }
 
-// function buildAdminStyleBlock(style) {
+// /**
+//  * @param {{ voiceOwnedByProfile?: boolean }} opts
+//  *   When a voice profile supplies its own voiceBlock, THAT is the voice. This
+//  *   block then must not emit sentence-shape rules, because it sits lower in the
+//  *   prompt and is labelled non-negotiable, so it wins every conflict.
+//  *
+//  *   Observed in production: 8 formal agent samples produced "Avoid contractions",
+//  *   "Don't use exclamation marks" and "jumps straight into the reply without a
+//  *   greeting" — the exact inverse of the owner-fast voice — and the model obeyed
+//  *   this block instead, returning "I am submitting a replacement order" with zero
+//  *   contractions, zero exclamations and no "Hello!" opener.
+//  *
+//  *   With the flag set, only word choice survives (vocabulary, recurring phrases).
+//  *   Sentence shape, greeting, casing, contractions, exclamations, empathy phrasing
+//  *   and the verbatim sample block are all dropped.
+//  */
+// function buildAdminStyleBlock(style, opts = {}) {
 //   if (!style) return '';
+//   const voiceOwned = opts.voiceOwnedByProfile === true;
 //   const rules = [];
-//   rules.push(`Match the agent's message length: ${style.lengthStyle} per reply.`);
-//   rules.push(`The agent ${style.greetingNote}.`);
-//   if (style.writesLowercase) rules.push(`The agent often writes in lowercase — mirror that. Don't correct their casing style.`);
-//   if (style.usesContractions) rules.push(`Use contractions freely (I'll, we'll, don't, it's, you're) — the agent does.`);
-//   else rules.push(`Avoid contractions — the agent writes without them.`);
-//   if (style.usesExclamation) rules.push(`Use exclamation marks naturally — the agent uses them to sound warm and enthusiastic.`);
-//   else rules.push(`Don't use exclamation marks — the agent keeps an even, calm tone.`);
-//   if (style.usesEllipsis) rules.push(`The agent uses ellipses (…) as a natural pause or trail-off. Mirror this sparingly.`);
+//   if (!voiceOwned) {
+//     rules.push(`Match the agent's message length: ${style.lengthStyle} per reply.`);
+//     rules.push(`The agent ${style.greetingNote}.`);
+//   }
+//   if (!voiceOwned && style.writesLowercase) rules.push(`The agent often writes in lowercase — mirror that. Don't correct their casing style.`);
+//   if (!voiceOwned && style.usesContractions) rules.push(`Use contractions freely (I'll, we'll, don't, it's, you're) — the agent does.`);
+//   else if (!voiceOwned) rules.push(`Avoid contractions — the agent writes without them.`);
+//   if (!voiceOwned && style.usesExclamation) rules.push(`Use exclamation marks naturally — the agent uses them to sound warm and enthusiastic.`);
+//   else if (!voiceOwned) rules.push(`Don't use exclamation marks — the agent keeps an even, calm tone.`);
+//   if (!voiceOwned && style.usesEllipsis) rules.push(`The agent uses ellipses (…) as a natural pause or trail-off. Mirror this sparingly.`);
 //   if (style.usesEmoji && style.emojiMatches.length > 0) rules.push(`The agent uses emoji: ${style.emojiMatches.join(' ')} — use these same ones where natural. Never add a lone "safe" emoji just to seem warm.`);
-//   if (style.writesSingleSentence) rules.push(`The agent usually writes in single sentences. Keep replies tight and punchy.`);
-//   else if (style.writesMultipleSentences) rules.push(`The agent writes in multi-sentence paragraphs — match that flow, but still one topic per reply.`);
+//   if (!voiceOwned && style.writesSingleSentence) rules.push(`The agent usually writes in single sentences. Keep replies tight and punchy.`);
+//   else if (!voiceOwned && style.writesMultipleSentences) rules.push(`The agent writes in multi-sentence paragraphs — match that flow, but still one topic per reply.`);
 //   const casualWords = Object.entries(style.vocab).filter(([, v]) => v).map(([k]) => k.replace('uses', '').replace('Uses', '').toLowerCase()).filter(w => w.length > 1);
 //   if (casualWords.length > 0) rules.push(`The agent naturally uses words like: "${casualWords.join('", "')}". Use them where they fit.`);
-//   if (style.signoffs.lmk) rules.push(`When there's a genuine open question, "let me know" / "lmk" is fine — but never tack it on when the reply is already complete.`);
-//   else if (style.signoffs.cheers) rules.push(`The agent signs off with "cheers" — use this where appropriate.`);
-//   else if (style.signoffs.takecare) rules.push(`The agent uses "take care" as a sign-off.`);
-//   if (style.empathyPhrases.length > 0) rules.push(`When empathy is needed, use phrasing close to what the agent actually says: "${style.empathyPhrases.slice(0, 3).join('", "')}" — and only ONCE, fused into the sentence that does the work.`);
-//   if (style.recurringPhrases.length > 0) rules.push(`The agent habitually uses these phrases — weave them in naturally: "${style.recurringPhrases.join('", "')}".`);
-//   const sampleBlock = style.sampleLines.length > 0 ? `\nREAL MESSAGES from this agent — match this exact voice, rhythm, and vocabulary:\n${style.sampleLines.map(l => `  • "${l}"`).join('\n')}` : '';
-//   return `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nADMIN WRITING STYLE — mirror this precisely (non-negotiable)\nBased on ${style.totalSamplesAnalyzed} real messages from this agent.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${rules.map((r, i) => `${i + 1}. ${r}`).join('\n')}\n${sampleBlock}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+//   if (!voiceOwned && style.signoffs.lmk) rules.push(`When there's a genuine open question, "let me know" / "lmk" is fine — but never tack it on when the reply is already complete.`);
+//   else if (!voiceOwned && style.signoffs.cheers) rules.push(`The agent signs off with "cheers" — use this where appropriate.`);
+//   else if (!voiceOwned && style.signoffs.takecare) rules.push(`The agent uses "take care" as a sign-off.`);
+//   if (!voiceOwned && style.empathyPhrases.length > 0) rules.push(`When empathy is needed, use phrasing close to what the agent actually says: "${style.empathyPhrases.slice(0, 3).join('", "')}" — and only ONCE, fused into the sentence that does the work.`);
+//   // Recurring bigrams are harvested from the samples verbatim, so on a formal
+//   // corpus they come back as "has been" / "will be" / "reviewing the" — passive
+//   // grammar, not vocabulary. Feeding those back rebuilds the formal register the
+//   // voiceOwned flag just stripped out. Single casual words (style.vocab) are safe;
+//   // bigrams are not.
+//   if (!voiceOwned && style.recurringPhrases.length > 0) rules.push(`The agent habitually uses these phrases — weave them in naturally: "${style.recurringPhrases.join('", "')}".`);
+//   // No rules left to state, so emit nothing rather than an empty labelled block.
+//   if (rules.length === 0) return '';
+
+//   // The verbatim samples are the strongest voice signal in the whole prompt.
+//   // Never show them when a profile owns the voice.
+//   const sampleBlock = (!voiceOwned && style.sampleLines.length > 0) ? `\nREAL MESSAGES from this agent — match this exact voice, rhythm, and vocabulary:\n${style.sampleLines.map(l => `  • "${l}"`).join('\n')}` : '';
+//   const header = voiceOwned
+//     ? `AGENT WORD CHOICE — vocabulary only. The voice rules above own sentence shape,\ngreeting, contractions and punctuation. Nothing here overrides them.`
+//     : `ADMIN WRITING STYLE — mirror this precisely (non-negotiable)\nBased on ${style.totalSamplesAnalyzed} real messages from this agent.`;
+//   return `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${header}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${rules.map((r, i) => `${i + 1}. ${r}`).join('\n')}\n${sampleBlock}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
 // }
 
 // // ============ PROMPT BUILDERS ============
@@ -742,7 +969,15 @@
 //   return FAILURE_SIGNAL_RE.test(analysisBlock || '');
 // }
 
-// function buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness, brainContext = '', brainSettings = {}, adminStyleBlock = '', imageAnalysis = '', sentiment = 'neutral', responseExamples = [], isTrustQuestion = false, isSafetyDosing = false, brainHasProductAnswer = false) {
+// /**
+//  * @param {object|null} voiceProfile  from lib/voice.js resolveVoiceProfile(store).
+//  *   A profile REPLACES humanVoiceBlock, ROBOT_VS_HUMAN_BLOCK and the length rule.
+//  *   It never appends. Stacking the built-in voice with a profile voice produces a
+//  *   prompt that mandates and forbids the same opener in the same breath, and the
+//  *   model splits the difference. Pass null (or a profile whose fields are null) to
+//  *   keep the built-in behaviour byte-for-byte.
+//  */
+// function buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness, brainContext = '', brainSettings = {}, adminStyleBlock = '', imageAnalysis = '', sentiment = 'neutral', responseExamples = [], isTrustQuestion = false, isSafetyDosing = false, brainHasProductAnswer = false, voiceProfile = null) {
 //   const hasBrain = brainContext && brainContext.trim().length > 0;
 //   const trustBlock = isTrustQuestion ? TRUST_QUESTION_BLOCK : '';
 //   const safetyBlock = isSafetyDosing ? SAFETY_DOSING_BLOCK : '';
@@ -812,16 +1047,23 @@
 //     .map(r => (typeof r === 'string' ? r : r?.text))
 //     .filter(t => t && t.trim().length > 15)
 //     .slice(0, 4);
+//   // When a profile owns the voice, this block must NOT claim to define it. It sits
+//   // BELOW the voice block, and "copy this exact rhythm / Match this voice" is the
+//   // same conflict that let the learned adminStyleBlock override the profile. The
+//   // caller is expected to have filtered these through filterOnVoiceSamples with
+//   // strict: true, so what is left is on-voice; the header just stops overreaching.
+//   const examplesHeader = voiceProfile?.voiceBlock
+//     ? `PAST REPLIES FOR REFERENCE — real examples, already checked against the voice\nrules above. Use them for what we say. The voice rules above own HOW we say it.`
+//     : `HOW WE ACTUALLY TALK — copy this exact rhythm, word choice, and warmth.\nReal replies our best agent has sent. Match this voice.`;
 //   const voiceExamplesBlock = cleanExamples.length ? `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// HOW WE ACTUALLY TALK — copy this exact rhythm, word choice, and warmth.
-// Real replies our best agent has sent. Match this voice.
+// ${examplesHeader}
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // ${cleanExamples.map(t => `  • "${t.trim()}"`).join('\n')}
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 // ` : '';
 
-//  const brainBlock = hasBrain ? `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nBRAIN RULES, READ THIS BEFORE ANYTHING ELSE\nMandatory store-owner FACTS: products, doses, protocols, policies, prices, timeframes. These override every other source of FACTS, including chat history and your own knowledge. They do NOT override the voice rules above, say these facts in Sam's voice.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nA BRAIN DATA block appears in the user message below. It is the only source of truth for facts, use it exactly as given there.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCRITICAL BRAIN ENFORCEMENT:\n1. If the customer asks about a product, protocol, dosing, reconstitution, or anything the BRAIN DATA block covers, ANSWER IT NOW with the actual numbers. Do NOT say "let me check", "still pulling", "confirming that", or "one moment". Stalling on data you already have is the worst failure mode in this system.\n2. Only stall when the BRAIN DATA does NOT contain the answer AND you genuinely need external info (order status, tracking, account details).\n3. Do NOT cross-apply one product's rule to another.\n4. Every number, dose, product name, and policy term must come verbatim from the matching brain rule, never invent or round. Everything around those values, sentence shape, word choice, warmth, follows the #1 RULE voice, and still ONE thing at a time unless this is a service failure or reconstitution math, where the full answer is required. Do not copy brain-rule sentences word-for-word, restate the facts the way Sam talks.\n5. Never narrate that the brain exists or that any rules conflict. Just answer in your own voice.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` : '';
+//  const brainBlock = hasBrain ? `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nBRAIN RULES, READ THIS BEFORE ANYTHING ELSE\nMandatory store-owner FACTS: products, doses, protocols, policies, prices, timeframes. These override every other source of FACTS, including chat history and your own knowledge. They do NOT override the voice rules above, say these facts in the voice defined above.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nA BRAIN DATA block appears in the user message below. It is the only source of truth for facts, use it exactly as given there.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCRITICAL BRAIN ENFORCEMENT:\n1. If the customer asks about a product, protocol, dosing, reconstitution, or anything the BRAIN DATA block covers, ANSWER IT NOW with the actual numbers. Do NOT say "let me check", "still pulling", "confirming that", or "one moment". Stalling on data you already have is the worst failure mode in this system.\n2. Only stall when the BRAIN DATA does NOT contain the answer AND you genuinely need external info (order status, tracking, account details).\n3. Do NOT cross-apply one product's rule to another.\n4. Every number, dose, product name, and policy term must come verbatim from the matching brain rule, never invent or round. Everything around those values, sentence shape, word choice, warmth, follows the voice rules above, and still ONE thing at a time unless this is a service failure or reconstitution math, where the full answer is required. Do not copy brain-rule sentences word-for-word, restate the facts in that same voice.\n5. Never narrate that the brain exists or that any rules conflict. Just answer in your own voice.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` : '';
 //   const imageBlock = imageAnalysis && imageAnalysis.trim() ? `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nSCREENSHOT DATA, full analysis of the agent's uploaded image, appears in the user message below.\nAll values there are CONFIRMED FACTS extracted from the screenshot.\nReference exact order numbers, statuses, amounts, dates, and names directly from that block.\nDo NOT ask for information that is already visible there.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` : '';
 //   const styleSection = adminStyleBlock ? `${adminStyleBlock}\n` : '';
 //   let contextGuidance = '';
@@ -847,10 +1089,23 @@
 //         ? `1 to 2 sentences. Say the one thing, then stop. MAX 30 words. EXCEPTION: reconstitution/dosing math must be complete (water volume + mg/mL + syringe units) even if that runs longer.`
 //         : `1 to 3 sentences, usually 1 or 2. Answer the one thing they asked, then stop. MAX 45 words. The only exception is reconstitution/dosing math, where the numbers must be complete and exact even if that runs a bit longer.`;
 
+//   // ── VOICE PROFILE SWAP ────────────────────────────────────────────────────
+//   // Each of these REPLACES the built-in block when the profile supplies one.
+//   // Nothing is appended, ever.
+//   //
+//   // Service failure keeps the dynamic lengthRule. It is the only length computed
+//   // per-request, and it is the single case where trimming a reply to stay short
+//   // drops the resolution and turns an annoyed customer into a chargeback.
+//   const voiceText    = voiceProfile?.voiceBlock    ?? humanVoiceBlock;
+//   const examplesText = voiceProfile?.examplesBlock ?? ROBOT_VS_HUMAN_BLOCK;
+//   const lengthText   = isServiceFailure
+//     ? lengthRule
+//     : (voiceProfile?.structureShort ?? lengthRule);
+
 //   const toneRule = tone === 'formal' ? `Formal, professional, but still a real person, not a form letter. No contractions.` : tone === 'casual' ? `Casual, conversational. Contractions and fragments encouraged.` : `Friendly, direct, a little blunt, genuinely on their side. Warm but not eager or performing.`;
 //   const empathyRule = empathy === 'high' ? `When something actually went wrong, lead with a short genuine acknowledgment fused into the fix. One acknowledgment, never stacked. On a routine question, skip empathy entirely and just answer.` : empathy === 'low' ? `Skip empathy preambles. Get straight to the answer.` : `Brief acknowledgment only when warranted, then the answer.`;
 
-//   const qualityBlock = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nREPLY QUALITY (admin-set, non-negotiable):\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nLENGTH:  ${lengthRule}\nTONE:    ${toneRule}\nEMPATHY: ${empathyRule}`;
+//   const qualityBlock = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nREPLY QUALITY (admin-set, non-negotiable):\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nLENGTH:  ${lengthText}\nTONE:    ${toneRule}\nEMPATHY: ${empathyRule}`;
 
 //   const nonNegotiablesBlock = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nNON-NEGOTIABLES (override the voice — correctness wins over brevity):\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n- NO fake time promises. State a shipping, handling, or delivery timeframe ONLY if it appears in the BRAIN DATA for this reply, and quote the brain's numbers exactly. If the brain gave you no timeframe, do NOT state one, commit to the action, not the clock. Never invent a date or deadline of any kind.\n- Never say "same day", "next day", "overnight", "by tomorrow", or any specific speed unless the brain explicitly states it. And never infer delivery speed from where the customer is or from them saying you're "close", "local", or "nearby", proximity is not a service you offer unless the brain says so.\n- Stay honest. Never invent tracking status, stock, pickup options, or order details. If you don't know, say you're checking, for real. But if the brain DOES know, you know, answer it.\n- Never attribute a statement, symptom, or concern to the customer that they did not make.\n- Confirm the SPECIFIC product before giving any dosing or reconstitution answer. If the product was named earlier in the conversation, that IS the product, don't ask again.\n- All facts come from the brain, never from you. Product details, dosing, protocols, prices, stock, shipping, handling, returns, refunds, guarantees, eligibility, and safety rules are only what the BRAIN DATA states. Never assert a fact, number, policy, or restriction the brain didn't give you. If it's not in the brain and you can't look it up, say you'll check, don't fill the gap.\n- Safety and eligibility: apply whatever health, age, or contraindication rules the brain provides, exactly, in your own voice. Never invent one, and never give dosing or medical guidance beyond what the brain states. If a customer raises a health condition, age, or safety concern, follow the brain's rule and point them to a healthcare provider.\n- Only ever give links or URLs that appear in the brain, exactly as written. Never guess, shorten, or invent a domain.`;
 
@@ -863,7 +1118,7 @@
 //       ? `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nDOSING EXCEPTION TO RULE 5 (applies to THIS reply only):\nThe brain holds this product's reconstitution/dose numbers, so BOTH suggestions must contain the actual numbers. Neither may be a stall ("let me check", "one moment", "confirming that"). Suggestion 1 = the full breakdown (water volume, resulting mg/mL, syringe units) plus the natural next question. Suggestion 2 = the same numbers, tighter. Vary the wording, NOT whether the answer is there.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
 //       : `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🚨 DOSING TURN WITH NO DATA FOR THIS PRODUCT (applies to THIS reply only):\nThe brain has NO reconstitution volume, concentration, or unit math for the product being asked about. It DOES have those for other products in the same block. You may not borrow, scale, or adapt them. NEITHER suggestion may contain a mL volume, an mg/mL concentration, or a syringe unit count. Both must honestly say you're confirming the exact protocol for that vial and coming right back. An invented number here is the single worst output this system can produce, worse than any stall.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
 
-//   return `${humanVoiceBlock}${ROBOT_VS_HUMAN_BLOCK}${trustBlock}${safetyBlock}${serviceFailureBlock}${voiceExamplesBlock}${brainBlock}${imageBlock}${styleSection}You ARE the support person at ${storeName || 'this store'}, texting a customer directly. Not ghostwriting, not relaying, you. The customer must feel like they're talking to the same knowledgeable person every time.\n\n${qualityBlock}\n\n${nonNegotiablesBlock}\n\n${contextGuidance}\n\n${customerContext}\n\n${analysisBlock}\n\n${policyBlock}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCORE RULES:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n1. Answer the ONE thing they asked. Reference something they actually said, the product, their stated goal, or the specific issue. Generic replies are not acceptable, but neither is covering things they didn't ask.\n2. NEVER say "let me check" / "let me find out" / "let me get back to you" / "still pulling" / "one moment" / "hang tight" when the brain already contains the answer.\n3. "Let me check" is ONLY for real-time lookups (order status, tracking, account balance). Never for product/dosing/knowledge questions.\n4. Never ask for info already provided. Never repeat what the agent already said.\n5. The 2 suggestions are two DIFFERENT moves, not two phrasings:\n   - Suggestion 1 (BEST): the reply you'd actually send. Complete, in Sam's voice.\n   - Suggestion 2 (SHORT): the 1-2 sentence version. Just the core fact/action.\n   If they share more than half their words, rewrite one. (SERVICE FAILURE and DOSING MATH are the exceptions, see the notes below the rules.)\n6. Match the customer's emotional state, once, fused in. Don't perform a failure that didn't happen.\n7. No promises on timeframes or amounts unless confirmed. Shipping windows above are the only exception.\n8. CRITICAL, JSON LIMIT: each suggestion string must fit inside a JSON value and stay within the LENGTH word limit above. If tempted to write more, cut it, a truncated JSON response is a total failure.\n9. NEVER use em dashes, en dashes, or double hyphens (--). Use a comma, a period, or a new sentence. Write like a person typing in a chat.\n10. Avoid AI tells: no three-adjective stacks, no "furthermore/moreover/additionally", no throat-clearing warm-up ("Thanks so much for reaching out about your order"). Short, plain, like someone who already knows the answer.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${serviceFailureCoreNote}${dosingCoreNote}\nRespond ONLY with valid JSON: {"suggestions": ["reply 1", "reply 2"]}`;
+//   return `${voiceText}${examplesText}${trustBlock}${safetyBlock}${serviceFailureBlock}${voiceExamplesBlock}${brainBlock}${imageBlock}${styleSection}You ARE the support person at ${storeName || 'this store'}, texting a customer directly. Not ghostwriting, not relaying, you. The customer must feel like they're talking to the same knowledgeable person every time.\n\n${qualityBlock}\n\n${nonNegotiablesBlock}\n\n${contextGuidance}\n\n${customerContext}\n\n${analysisBlock}\n\n${policyBlock}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCORE RULES:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n1. Answer the ONE thing they asked. Reference something they actually said, the product, their stated goal, or the specific issue. Generic replies are not acceptable, but neither is covering things they didn't ask.\n2. NEVER say "let me check" / "let me find out" / "let me get back to you" / "still pulling" / "one moment" / "hang tight" when the brain already contains the answer.\n3. "Let me check" is ONLY for real-time lookups (order status, tracking, account balance). Never for product/dosing/knowledge questions.\n4. Never ask for info already provided. Never repeat what the agent already said.\n5. The 2 suggestions are two DIFFERENT moves, not two phrasings:\n   - Suggestion 1 (BEST): the reply you'd actually send. Complete, in the voice defined above.\n   - Suggestion 2 (SHORT): the 1-2 sentence version. Just the core fact/action.\n   If they share more than half their words, rewrite one. (SERVICE FAILURE and DOSING MATH are the exceptions, see the notes below the rules.)\n6. Match the customer's emotional state, once, fused in. Don't perform a failure that didn't happen.\n7. No promises on timeframes or amounts unless confirmed. Shipping windows above are the only exception.\n8. CRITICAL, JSON LIMIT: each suggestion string must fit inside a JSON value and stay within the LENGTH word limit above. If tempted to write more, cut it, a truncated JSON response is a total failure.\n9. NEVER use em dashes, en dashes, or double hyphens (--). Use a comma, a period, or a new sentence. Write like a person typing in a chat.\n10. Avoid AI tells: no three-adjective stacks, no "furthermore/moreover/additionally", no throat-clearing warm-up ("Thanks so much for reaching out about your order"). Short, plain, like someone who already knows the answer.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${serviceFailureCoreNote}${dosingCoreNote}\nRespond ONLY with valid JSON: {"suggestions": ["reply 1", "reply 2"]}`;
 // }
 
 // function buildUserPrompt(chatHistory, clientMessage, messageEdited, adminNote, conversationState, recentContext, brainContext = '', imageAnalysis = '', brainHasProductAnswer = false) {
@@ -905,7 +1160,7 @@
 //   if (conversationState?.isRepeat) signals.push(`REPEAT/FOLLOW-UP: already asked about this`);
 //   if (conversationState?.isWrongItem) signals.push(`WRONG ITEM SENT — do not ask for photo, acknowledge and arrange correct shipment`);
 //   if (conversationState?.customerConfirmedAddress) signals.push(`Customer confirmed address is same as on order — do NOT ask for address again`);
-//   if (conversationState?.customerAskingForEmail) signals.push(`Customer is asking for an email to send documents to — provide support email`);
+//   if (conversationState?.customerAskingForEmail) signals.push(`Customer is asking for an email to send documents to — provide the store's support email if you have it, otherwise tell them to reply right here`);
 //   const alreadyDone = [];
 //   if (conversationState?.agentAskedForOrder) alreadyDone.push('asked for order number');
 //   if (conversationState?.agentAskedForEmail) alreadyDone.push('asked for email');
@@ -928,7 +1183,11 @@
 //   const historyBlock = chatHistory ? `\nCONVERSATION HISTORY:\n${chatHistory}` : '';
 //   const noteBlock = adminNote ? `\nADMIN NOTE: ${adminNote}` : '';
 
-//   const asksAboutTiming = /ship|deliver|arrive|arrival|how long|when.*(get|receive|come|arrive|ship|here)|pick.?up|walk.?in|business day|days? to|get here|reach me|takes? to/i.test(msgLower);
+//   // Widened after a live miss: "tracking said I would receive my package on
+//   // Wednesday" is a timing complaint, but it contains no "when", no "how long"
+//   // and no "arrive", so the timeframe guard never fired and the model invented
+//   // "within 24 hours" and "within one hour".
+//   const asksAboutTiming = /ship|deliver|arrive|arrival|how long|when.*(get|receive|come|arrive|ship|here)|pick.?up|walk.?in|business day|days? to|get here|reach me|takes? to|would receive|supposed to|was due|has passed|tracking (number|said|says)|still (haven|hasn|not|waiting)|never (arrived|came|showed)|by (monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tomorrow)/i.test(msgLower);
 //   const timeframeGuard = asksAboutTiming
 //     ? `\n\n⚠️ TIMEFRAME RULE (overrides all voice/length guidance):\n- State a delivery/shipping timeframe ONLY if it is written in the BRAIN data above. Never invent one.\n- The brain gives DIFFERENT figures for Canada vs the US. Do NOT mix them. Give a US customer the US range and a Canada customer the Canada range.\n- If you cannot tell which country the customer is in, do NOT guess a number — ask where they're located or point to tracking instead.\n- Quote the FULL range exactly as the brain states it. Do NOT collapse a range to its fastest end (never say "2-3 days" when the brain's range is "2-5"; never drop the upper bound).\n- Present carrier transit as a maximum ("up to X business days"), never as a guaranteed delivery date. Weekends don't count as business days.\n- This applies to both replies.`
 //     : '';
@@ -1094,7 +1353,14 @@
 
 // // ============ SMART FALLBACK SUGGESTIONS ============
 
-// function generateSmartFallbackSuggestionsRaw(customerMsg, chatHistory, analysis, adminNote) {
+// /**
+//  * @param {{ supportEmail?: string|null }} opts
+//  *   NEVER hardcode a support address in this function. It runs for every store in
+//  *   the fleet, so a wrong address is worse than no address. When no email is
+//  *   supplied the wrong-item branch tells the customer to reply in-chat instead.
+//  */
+// function generateSmartFallbackSuggestionsRaw(customerMsg, chatHistory, analysis, adminNote, opts = {}) {
+//   const supportEmail = opts.supportEmail || null;
 //   const lower = (customerMsg || '').toLowerCase();
 //   const topics = analysis?.detectedTopics || [];
 //   const sentiment = analysis?.sentiment || 'neutral';
@@ -1147,10 +1413,14 @@
 //   // — product issue —
 //   if (topics.includes('product_issue')) {
 //     if (isWrongItem) {
-//       if (customerAskingForEmail) return [
-//         `${lead}Send your order list to support@pepscustomercare.com and I'll get the right items out to you.`,
-//         `That's our mistake. Email your order list to support@pepscustomercare.com and I'll match it and ship the correct one.`,
-//         `${lead}Shoot your order details to support@pepscustomercare.com and I'll sort the correct products.`,
+//       if (customerAskingForEmail) return supportEmail ? [
+//         `${lead}Send your order list to ${supportEmail} and I'll get the right items out to you.`,
+//         `That's our mistake. Email your order list to ${supportEmail} and I'll match it and ship the correct one.`,
+//         `${lead}Shoot your order details to ${supportEmail} and I'll sort the correct products.`,
+//       ] : [
+//         `${lead}Just reply here with your order list and I'll get the right items out to you.`,
+//         `That's our mistake. Reply right here with your order list and I'll match it and ship the correct one.`,
+//         `${lead}Send your order details here and I'll sort the correct products.`,
 //       ];
 //       return [
 //         `${lead}I'll get the correct item sent out, no need to return anything.`,
@@ -1281,8 +1551,8 @@
 //   ];
 // }
 
-// function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis, adminNote) {
-//   return generateSmartFallbackSuggestionsRaw(customerMsg, chatHistory, analysis, adminNote).map(humanizeText);
+// function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis, adminNote, opts = {}) {
+//   return generateSmartFallbackSuggestionsRaw(customerMsg, chatHistory, analysis, adminNote, opts).map(humanizeText);
 // }
 
 // module.exports = {
@@ -1303,6 +1573,9 @@
 //   detectSafetyDosingQuestion,
 //   detectServiceFailure,
 //   detectStall,
+//   detectInventedTimeframe,
+//   detectUnauthorisedUpgrade,
+//   detectUngroundedDate,
 //   STALL_RETRY_INSTRUCTION,
 //   buildEnhancedAnalysisBlock,
 //   buildCustomerContext,
@@ -1314,25 +1587,6 @@
 //   generateSmartFallbackSuggestionsRaw,
 //   generateSmartFallbackSuggestions,
 // };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -1736,6 +1990,21 @@ numbers. Neither may stall.
 const _NEGATION_RE = /\b(?:no|not|never|cannot|can'?t|don'?t|doesn'?t|won'?t|unable|unavailable|except|excluding|without|instead of|rather than|no longer|discontinued|unsupported|prohibited)\b/i;
 const _OFFER_RE = /\b(?:offer(?:s|ed)?|available|approv(?:e|ed|al)|permit(?:s|ted)?|allow(?:s|ed)?|includ(?:e|es|ed)|option|upgrade to|we ship|ships? (?:via|with)|service|eligible|authoris(?:e|ed)|authoriz(?:e|ed)|may|can)\b/i;
 
+// A store's shipping tiers are described as CONDITIONAL/AUTOMATIC rules, not as
+// discretionary offers, so _OFFER_RE never matched them: "Express applies
+// automatically over $150" contains none of offer/available/approve/etc. The guard
+// then read a real, retrieved policy line as unauthorised and blocked a correct
+// reply. This recognises threshold/automatic/tier phrasing as authorisation too, in
+// the requireOffer branch only — timeframe checks (which call _brainAuthorises
+// without requireOffer) are untouched. Negation is still checked first, so
+// "express does not apply over $150" is still rejected.
+const _AUTO_POLICY_RE = /\bappl(?:y|ies|ied)\b|\bautomatic(?:ally)?\b|\bqualif(?:y|ies|ied)\b|\bthreshold\b|\bincluded?\b|\bfree\s+(?:over|above|on)\b|\bover\s*\$?\s*\d|\babove\s*\$?\s*\d|\bon\s+orders?\b|\borders?\s+(?:over|above|of)\b|\b(?:if|when)\s+you\s+(?:spend|order|hit|reach)\b|\bstandard\b|\bflat\s+(?:rate|fee)\b|\bkicks?\s+in\b|\bunlock(?:s|ed)?\b|\bfor\s*\$?\s*\d|\bcosts?\s*\$?\s*\d/i;
+
+// Split a suggestion into sentences so the upgrade guard can judge each one on its
+// own speech act. Same splitter the timeframe guard uses (a voice-style reply often
+// "just stops" with no terminal punctuation, so paragraph breaks count too).
+const _sentences = (t) => String(t || '').split(/(?<=[.!?])\s+|\n\s*\n/).filter(Boolean);
+
 const _brainLinesWith = (brainContext, phrase) => {
   const needle = String(phrase).toLowerCase();
   return String(brainContext || '')
@@ -1752,7 +2021,7 @@ const _brainLinesWith = (brainContext, phrase) => {
 function _brainAuthorises(brainContext, phrase, { requireOffer = false } = {}) {
   for (const line of _brainLinesWith(brainContext, phrase)) {
     if (_NEGATION_RE.test(line)) continue;
-    if (requireOffer && !_OFFER_RE.test(line)) continue;
+    if (requireOffer && !(_OFFER_RE.test(line) || _AUTO_POLICY_RE.test(line))) continue;
     return { authorised: true, line };
   }
   return { authorised: false, line: null };
@@ -1867,45 +2136,78 @@ function detectUngroundedDate(suggestions, context = '') {
 
 // COMPENSATION_BLOCK: "Never offer a discount, a shipping-cost refund, an
 // expedited upgrade, or a cancellation on your own authority." Nothing enforced it.
-// This does, and it BLOCKS rather than flags: an expedited reship the warehouse
-// never agreed to is a real cost the store did not sign off on, and the customer
-// has now been told it is happening.
-// "on us" and "on the house" were here and had to come out. In this house they
+// This does. It distinguishes TWO speech acts on the same keyword:
+//
+//   GRANT       — the AI comping/expediting on its own authority ("I'll ship you
+//                 express", "rushing it out overnight", "at no charge"). If the
+//                 brain doesn't authorise it, BLOCK: it's a real cost the store
+//                 never agreed to and the customer has now been told it's happening.
+//   DESCRIPTION — the AI stating an existing conditional/automatic store rule
+//                 ("express applies automatically over $150", "free over $X"). The
+//                 customer only gets it by meeting the store's own threshold; the
+//                 AI isn't comping anything. If the brain doesn't back it, that's a
+//                 factual policy claim to VERIFY, not a cost — FLAG, don't drop, so
+//                 a correct-but-truncated policy line isn't silently deleted (which
+//                 is exactly what happened to "Express applies automatically over
+//                 $150" — a real tier the guard mistook for a discretionary grant).
+//
+// "on us" and "on the house" were removed earlier and stay out. In this house they
 // mean OUR FAULT, not a comped cost — generateSmartFallbackSuggestionsRaw ships
 // "That's on us. Same shipping address as the order, or a new one?" as approved
-// copy. The guard blocked a correct, on-voice suggestion for saying "which is on
-// us", and the agent lost the better of the two replies with no way to see why.
-//
-// Only unambiguous cost-comping stays. Every phrase below can ONLY mean money the
-// store is giving up; none of them can mean an apology.
+// copy. Only unambiguous cost-comping stays in UPGRADE_RE.
 const UPGRADE_RE = /\bexpress\b|\bexpedit(?:e|ed|ing)\b|\brush(?:ed|ing)? (?:it|this|your|the|ship|deliver)|\bovernight\b|\bpriority (?:ship|mail|post|deliver)|\bupgrad(?:e|ed|ing) (?:your|the) (?:ship|deliver|order)|\bfree (?:ship|upgrade|expedit|of charge)|\bnext[- ]day (?:ship|deliver|air)|\bno charge\b|\bat no (?:cost|charge)\b|\bwaiv(?:e|ed|ing)\s+(?:the\s+)?(?:ship|fee|cost|charge|deliver)|\bwon'?t charge you\b|\bnot charging you\b/gi;
 
 /**
- * @returns {{ clean: string[], blocked: {index:number, hits:string[]}[] }}
- *   `clean` excludes any suggestion offering something the brain does not
- *   affirmatively authorise. Caller falls back to templates if nothing survives,
- *   same as the dosing and free-product guards.
+ * @returns {{ clean: string[], blocked: {index:number, hits:string[]}[], review: {index:number, reasons:string[]}[] }}
+ *   `clean` keeps every suggestion that is not a GRANT of something the brain does
+ *   not authorise. A GRANT with no brain backing is dropped (and reported in
+ *   `blocked`); a DESCRIPTION with no brain backing is kept but reported in
+ *   `review` for the agent to verify. Caller falls back to templates only if
+ *   nothing survives the block pass, same as the dosing and free-product guards.
  */
 function detectUnauthorisedUpgrade(suggestions, brainContext = '') {
-  const clean = [], blocked = [];
-  if (!Array.isArray(suggestions)) return { clean, blocked };
+  const clean = [], blocked = [], review = [];
+  if (!Array.isArray(suggestions)) return { clean, blocked, review };
 
   suggestions.forEach((sug, index) => {
     if (typeof sug !== 'string') { clean.push(sug); return; }
-    const hits = [];
-    for (const raw of new Set((sug.match(UPGRADE_RE) || []).map(h => h.trim().toLowerCase()))) {
-      const { authorised, line } = _brainAuthorises(brainContext, raw, { requireOffer: true });
-      if (authorised) console.log(`   [UpgradeGuard] "${raw}" authorised by brain line: "${line.slice(0, 90)}"`);
-      else hits.push(raw);
+
+    const grantHits = new Set();     // AI comping on its own authority → block if unauthorised
+    const describeHits = new Set();  // AI stating a conditional store rule → flag if unauthorised
+
+    // Scope per sentence: "standard is 2-5 days, express is automatic over $150" is a
+    // policy DESCRIPTION, not the same speech act as "I'm shipping you express".
+    for (const sentence of _sentences(sug)) {
+      const upWords = [...new Set((sentence.match(UPGRADE_RE) || []).map(h => h.trim().toLowerCase()))];
+      if (!upWords.length) continue;
+      const describing = _AUTO_POLICY_RE.test(sentence);
+      for (const raw of upWords) {
+        const { authorised, line } = _brainAuthorises(brainContext, raw, { requireOffer: true });
+        if (authorised) { console.log(`   [UpgradeGuard] "${raw}" authorised by brain line: "${line.slice(0, 90)}"`); continue; }
+        (describing ? describeHits : grantHits).add(raw);
+      }
     }
-    if (hits.length) {
+
+    // A single unauthorised GRANT anywhere in the reply drops the whole reply — the
+    // customer would otherwise be told a favour is happening that the store never
+    // approved.
+    if (grantHits.size) {
+      const hits = [...grantHits];
       blocked.push({ index, hits });
-      console.error(`🚫 [UpgradeGuard] #${index + 1} offers ${hits.map(h => `"${h}"`).join(', ')} — no affirmative brain line authorises it. Blocked.`);
-    } else {
-      clean.push(sug);
+      console.error(`🚫 [UpgradeGuard] #${index + 1} GRANTS ${hits.map(h => `"${h}"`).join(', ')} on its own authority — no affirmative brain line. Blocked.`);
+      return; // dropped, not pushed to clean
     }
+    // A DESCRIPTION the brain doesn't confirm is a factual claim to check, not a
+    // cost. Keep it, flag it. It may be a real tier that was truncated out of the
+    // retrieved brain, in which case dropping it leaves the agent with templates.
+    if (describeHits.size) {
+      const hits = [...describeHits];
+      review.push({ index, reasons: hits.map(h => `states "${h}" as an automatic/conditional shipping rule — no brain line confirms it, verify before sending`) });
+      console.warn(`⚠️  [UpgradeGuard] #${index + 1} describes ${hits.map(h => `"${h}"`).join(', ')} as store policy, not found in the retrieved brain — flagged for review, NOT blocked (may be a real tier that was truncated)`);
+    }
+    clean.push(sug);
   });
-  return { clean, blocked };
+  return { clean, blocked, review };
 }
 
 // ============ BRAIN RETRIEVAL QUERY ============
