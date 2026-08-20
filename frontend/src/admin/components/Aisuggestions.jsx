@@ -932,10 +932,48 @@ function flagsByIndex(voiceFlags) {
   return map;
 }
 
+// Human-readable text for the fallback codes the suggestions route can return.
+// The route is the source of truth for WHICH code fires; this map only decides
+// how it reads to an agent. An unrecognised code is shown verbatim rather than
+// swallowed, so a new backend code surfaces on day one instead of silently
+// collapsing back to the generic line.
+const FALLBACK_REASONS = {
+  // Configuration
+  no_api_key:             'No AI provider key is configured on the server.',
+
+  // The model answered, but not usably
+  parse_failed:           'The model reply could not be read as JSON.',
+  shape_mismatch:         'The model returned JSON in the wrong shape.',
+
+  // A safety guard did its job — these are working as intended, not outages
+  number_contamination:   'Every reply carried a dose figure the brain does not authorise.',
+  unauthorised_dose_leak: 'The brain has no dosing entry for this product, but every reply stated one.',
+  unauthorised_commitment:'Every reply promised something the brain does not authorise.',
+  unauthorised_upgrade:   'Every reply offered a shipping upgrade nobody approved.',
+  all_filtered:           'Validation removed every reply the model produced.',
+
+  // The route itself threw
+  endpoint_error:         'The suggestions route failed before it could return a reply.',
+};
+
+// Server shape: { fallback: true, fallbackReason: 'deepseek_timeout', fallbackDetail?: '...' }
+// Older backends send `reason`. Backends predating the whole field send nothing —
+// in that case there is no reason line and the notice reads as it always did.
+function describeFallback(data) {
+  const code = data?.fallbackReason || data?.reason || data?.fallback_reason || null;
+  const detail = data?.fallbackDetail || data?.fallback_detail || null;
+  if (!code && !detail) return { code: null, message: null };
+  const base = code ? (FALLBACK_REASONS[code] || String(code)) : null;
+  const message = [base, detail].filter(Boolean).join(' ');
+  return { code: code || null, message: message || null };
+}
+
 function AISuggestions({ conversation, messages, onSelectSuggestion }) {
   const [suggestions, setSuggestions]           = useState([]);
   const [needsReview, setNeedsReview]           = useState([]);
   const [isFallback, setIsFallback]             = useState(false);
+  const [fallbackInfo, setFallbackInfo]         = useState({ code: null, message: null });
+  const [fallbackAttempts, setFallbackAttempts] = useState(0);
   const [loading, setLoading]                   = useState(false);
   const [error, setError]                       = useState(null);
   const [collapsed, setCollapsed]               = useState(false);
@@ -987,6 +1025,8 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
     setSuggestions([]);
     setNeedsReview([]);
     setIsFallback(false);
+    setFallbackInfo({ code: null, message: null });
+    setFallbackAttempts(0);
     setServerVoiceFlags({});
     setError(null);
     setContextLevel('none');
@@ -1243,7 +1283,7 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
   // ── Core fetch — every suggestion path goes through here ───────────────────
   const runSuggestions = async (messageText, opts = {}) => {
     if (!messageText?.trim()) return;
-    const { note, image = null, analysisText = null, includeImage = true } = opts;
+    const { note, image = null, analysisText = null, includeImage = true, isRetry = false } = opts;
     const reqConv = conversation?.id;
     setReadyToGenerate(false);
     setLoading(true);
@@ -1251,6 +1291,8 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
     setSuggestions([]);
     setNeedsReview([]);
     setIsFallback(false);
+    setFallbackInfo({ code: null, message: null });
+    if (!isRetry) setFallbackAttempts(0);
     setServerVoiceFlags({});
     try {
       const payload = buildPayload(
@@ -1260,9 +1302,11 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
       );
       const data = await postToAI(payload);
       if (reqConv !== activeConvRef.current) return;   // switched mid-request — bail
+      const fellBack = isFallbackResponse(data);
       setSuggestions(data.suggestions || []);
       setNeedsReview(data.needsReview || []);
-      setIsFallback(isFallbackResponse(data));
+      setIsFallback(fellBack);
+      setFallbackInfo(fellBack ? describeFallback(data) : { code: null, message: null });
       setServerVoiceFlags(flagsByIndex(data.voiceFlags));
     } catch (err) {
       if (reqConv !== activeConvRef.current) return;
@@ -1369,7 +1413,15 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
   // flip this panel to "ready" or seed suggestions from a foreign message.
   useEffect(() => {
     const lastCustomerMsg = getLastCustomerMessage();
-    if (!lastCustomerMsg) { setSuggestions([]); setIsFallback(false); setContextLevel('none'); setReadyToGenerate(false); return; }
+    if (!lastCustomerMsg) {
+      setSuggestions([]);
+      setIsFallback(false);
+      setFallbackInfo({ code: null, message: null });
+      setFallbackAttempts(0);
+      setContextLevel('none');
+      setReadyToGenerate(false);
+      return;
+    }
 
     // Guard: only react to messages belonging to the conversation on screen.
     const msgConvId = lastCustomerMsg.conversationId ?? lastCustomerMsg.conversation_id;
@@ -1380,7 +1432,14 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
 
     const quality = assessContextQuality();
     setContextLevel(quality);
-    if (quality === 'none') { setSuggestions([]); setIsFallback(false); setReadyToGenerate(false); return; }
+    if (quality === 'none') {
+      setSuggestions([]);
+      setIsFallback(false);
+      setFallbackInfo({ code: null, message: null });
+      setFallbackAttempts(0);
+      setReadyToGenerate(false);
+      return;
+    }
 
     lastProcessedMsgId.current = msgId;
     isEditedRef.current   = false;
@@ -1392,6 +1451,8 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
     setIsEditing(false);
     setSuggestions([]);
     setIsFallback(false);
+    setFallbackInfo({ code: null, message: null });
+    setFallbackAttempts(0);
     setServerVoiceFlags({});
     setError(null);
     setReadyToGenerate(true);
@@ -1415,26 +1476,42 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
     runSuggestions(text, { note: adminNoteRef.current, includeImage: false });
   };
 
+  // Retry straight from the fallback notice. Same request as Refresh, but keeps
+  // the attempt counter so the agent can see a second failure is a real pattern
+  // and not a mis-click.
+  const handleRetryFallback = () => {
+    const text = isEditedRef.current ? editedTextRef.current : getLastCustomerMessage()?.content;
+    if (!text) return;
+    setFallbackAttempts(n => n + 1);
+    runSuggestions(text, {
+      note: adminNoteRef.current,
+      includeImage: !imageDismissed && !!uploadedImage,
+      isRetry: true,
+    });
+  };
+
   const handleOpenDetailed = async () => {
     if (!suggestions.length) return;
     const reqConv = conversation?.id;
-    setDetailedModal({ loading: true, error: null, answers: [], fallback: false, voiceFlags: {} });
+    setDetailedModal({ loading: true, error: null, answers: [], fallback: false, fallbackInfo: { code: null, message: null }, voiceFlags: {} });
     setActiveTab(0);
     const lastCustomerMsg = getLastCustomerMessage();
     const clientMessage = isEditedRef.current ? editedTextRef.current : (lastCustomerMsg?.content || '');
     try {
       const data = await postToAI(buildPayload(clientMessage, { detailedAnswerMode: true, baseSuggestions: suggestions }));
       if (reqConv !== activeConvRef.current) return;   // switched mid-request — bail
+      const fellBack = isFallbackResponse(data);
       setDetailedModal({
         loading: false,
         error: null,
         answers: data.detailedAnswers || [],
-        fallback: isFallbackResponse(data),
+        fallback: fellBack,
+        fallbackInfo: fellBack ? describeFallback(data) : { code: null, message: null },
         voiceFlags: flagsByIndex(data.voiceFlags),
       });
     } catch (err) {
       if (reqConv !== activeConvRef.current) return;
-      setDetailedModal({ loading: false, error: `Failed to generate: ${err.message}`, answers: [], fallback: false, voiceFlags: {} });
+      setDetailedModal({ loading: false, error: `Failed to generate: ${err.message}`, answers: [], fallback: false, fallbackInfo: { code: null, message: null }, voiceFlags: {} });
     }
   };
 
@@ -1501,6 +1578,50 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
         ))}
         {flags.length > 3 && <span className="ai-voice-flag">+{flags.length - 3}</span>}
       </span>
+    );
+  };
+
+  // ── Fallback notice ────────────────────────────────────────────────────────
+  // One renderer for both the panel and the modal. `info.message` is only
+  // present when the backend sent a reason — older backends still get the
+  // single-line notice they always showed.
+  const renderFallbackNotice = ({ info, onRetry, retrying, modal = false, attempts = 0 }) => {
+    const reason = info?.message || null;
+    return (
+      <div
+        className={`ai-fallback-notice${modal ? ' ai-fallback-notice--modal' : ''}`}
+        role="alert"
+        title={reason ? `AI unavailable — ${reason}` : 'AI was unavailable — these are canned templates. Review before sending.'}
+      >
+        <span className="ai-fallback-notice-icon">⚠</span>
+        <div className="ai-fallback-notice-content">
+          <span className="ai-fallback-notice-text">
+            AI unavailable — these are templates. Review before sending.
+          </span>
+          {reason && (
+            <span className="ai-fallback-notice-reason">
+              {reason}
+              {info?.code && <code className="ai-fallback-notice-code">{info.code}</code>}
+            </span>
+          )}
+          {attempts > 1 && (
+            <span className="ai-fallback-notice-attempts">
+              Retried {attempts} times — still falling back.
+            </span>
+          )}
+        </div>
+        {onRetry && (
+          <button
+            className="ai-fallback-retry-btn"
+            onClick={onRetry}
+            disabled={retrying}
+            type="button"
+            title="Send the request to the AI again"
+          >
+            {retrying ? 'Retrying…' : '↻ Retry AI'}
+          </button>
+        )}
+      </div>
     );
   };
 
@@ -1707,12 +1828,12 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
             )}
 
             {/* ── Fallback notice — AI unavailable, canned templates shown ── */}
-            {isFallback && suggestions.length > 0 && !loading && (
-              <div className="ai-fallback-notice" role="alert" title="AI was unavailable — these are canned templates. Review before sending.">
-                <span className="ai-fallback-notice-icon">⚠</span>
-                <span className="ai-fallback-notice-text">Template replies (AI unavailable) — review before sending</span>
-              </div>
-            )}
+            {isFallback && suggestions.length > 0 && !loading && renderFallbackNotice({
+              info: fallbackInfo,
+              onRetry: handleRetryFallback,
+              retrying: loading || imageAnalyzing,
+              attempts: fallbackAttempts,
+            })}
 
             {/* ── Suggestions ───────────────────────────────────────────── */}
             <div className="ai-suggestions-list">
@@ -1783,12 +1904,12 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
               </div>
             ) : (
               <>
-                {detailedModal.fallback && (
-                  <div className="ai-fallback-notice ai-fallback-notice--modal" role="alert" title="AI was unavailable — these are canned templates. Review before sending.">
-                    <span className="ai-fallback-notice-icon">⚠</span>
-                    <span className="ai-fallback-notice-text">Template replies (AI unavailable) — review before sending</span>
-                  </div>
-                )}
+                {detailedModal.fallback && renderFallbackNotice({
+                  info: detailedModal.fallbackInfo,
+                  onRetry: handleOpenDetailed,
+                  retrying: detailedModal.loading,
+                  modal: true,
+                })}
                 <div className="ai-modal-tabs">
                   {[0, 1, 2].map(i => (
                     <button
