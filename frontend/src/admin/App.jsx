@@ -1,3 +1,4 @@
+
 // import React, { useState, useEffect, useRef, useCallback, Suspense, lazy } from 'react';
 // import api from './services/api';
 // import { useConversations } from './hooks/useConversations';
@@ -22,6 +23,50 @@
 
 // const DEFAULT_GROUP_COLOR = '#25d366';
 
+// // ── Store-group access helpers ───────────────────────────────────────────────
+// // An employee with canViewAllStores === false is limited to the groups in
+// // assignedGroups. Anything else (including a missing flag) is treated as full
+// // access, so an older cached employee object can't accidentally lock someone out.
+
+// function assignedGroupsOf(employee) {
+//   return Array.isArray(employee?.assignedGroups) ? employee.assignedGroups.filter(Boolean) : [];
+// }
+
+// function hasFullStoreAccess(employee) {
+//   return employee?.canViewAllStores !== false;
+// }
+
+// /**
+//  * The group a restricted agent should land on without being asked.
+//  *
+//  * Returns null when there's a genuine choice to make (full access, or more than
+//  * one assigned group) — those still get the picker. Only the "exactly one
+//  * option" case is auto-selected, because presenting a chooser with a single
+//  * button is just an extra click between the agent and their inbox.
+//  *
+//  * Name and colour come from /api/stores/groups so the header badge matches what
+//  * the picker would have shown; if that call fails the slug is used and the
+//  * dashboard still opens.
+//  */
+// async function resolveAutoGroup(employee) {
+//   if (hasFullStoreAccess(employee)) return null;
+//   const assigned = assignedGroupsOf(employee);
+//   if (assigned.length !== 1) return null;
+
+//   const key = assigned[0];
+//   try {
+//     const groups = (await api.getStoreGroups()) || [];
+//     const match = groups.find(g => (g.storeGroup ?? g.store_group) === key);
+//     return {
+//       group: key,
+//       name: match?.storeGroupName || match?.store_group_name || key,
+//       color: match?.color || null,
+//     };
+//   } catch {
+//     return { group: key, name: key, color: null };
+//   }
+// }
+
 // function App() {
 //   const [employee, setEmployee] = useState(null);
 //   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -30,8 +75,31 @@
 //   const [selectedGroupName, setSelectedGroupName]   = useState(null);
 //   const [selectedGroupColor, setSelectedGroupColor] = useState(null);
 //   const [groupChosen, setGroupChosen]               = useState(false); // has a group been picked THIS session?
+//   // Held true while resolveAutoGroup() is in flight so the GroupSelector doesn't
+//   // flash on screen for a split second before being auto-dismissed.
+//   const [resolvingGroup, setResolvingGroup]         = useState(false);
 
 //   useEffect(() => { checkAuth(); }, []);
+
+//   const applyGroup = (group, groupName, color) => {
+//     localStorage.setItem('selectedGroup', group === null ? '__all__' : group);
+//     localStorage.setItem('selectedGroupName', groupName || '');
+//     localStorage.setItem('selectedGroupColor', color || '');
+//     setSelectedGroup(group);
+//     setSelectedGroupName(groupName);
+//     setSelectedGroupColor(color || null);
+//     setGroupChosen(true);
+//   };
+
+//   const clearGroup = () => {
+//     localStorage.removeItem('selectedGroup');
+//     localStorage.removeItem('selectedGroupName');
+//     localStorage.removeItem('selectedGroupColor');
+//     setSelectedGroup(null);
+//     setSelectedGroupName(null);
+//     setSelectedGroupColor(null);
+//     setGroupChosen(false);
+//   };
 
 //   const checkAuth = async () => {
 //     const storedEmployee = localStorage.getItem('employee');
@@ -42,16 +110,34 @@
 //         setEmployee(verified);
 //         setIsAuthenticated(true);
 
+//         const assigned = assignedGroupsOf(verified);
+//         const fullAccess = hasFullStoreAccess(verified);
 //         const storedGroup = localStorage.getItem('selectedGroup');
-//         if (storedGroup !== null && storedGroup !== '__all__') {
+
+//         // A stored group can go stale when an admin edits the agent's
+//         // assignment. Left in place it produces an empty dashboard that reads
+//         // as a bug rather than a permissions change, so drop it and re-resolve.
+//         const storedIsStale = !fullAccess && storedGroup && storedGroup !== '__all__'
+//           && !assigned.includes(storedGroup);
+
+//         // "All Stores" isn't a valid resting state for a restricted agent.
+//         const storedIsAllForRestricted = !fullAccess && storedGroup === '__all__';
+
+//         if (storedGroup !== null && storedGroup !== '__all__' && !storedIsStale) {
 //           setSelectedGroup(storedGroup);
 //           setSelectedGroupName(localStorage.getItem('selectedGroupName'));
 //           setSelectedGroupColor(localStorage.getItem('selectedGroupColor') || null);
 //           setGroupChosen(true);
-//         } else if (storedGroup === '__all__') {
+//         } else if (storedGroup === '__all__' && !storedIsAllForRestricted) {
 //           localStorage.removeItem('selectedGroup');
 //           localStorage.removeItem('selectedGroupName');
 //           localStorage.removeItem('selectedGroupColor');
+//         } else {
+//           localStorage.removeItem('selectedGroup');
+//           localStorage.removeItem('selectedGroupName');
+//           localStorage.removeItem('selectedGroupColor');
+//           const auto = await resolveAutoGroup(verified);
+//           if (auto) applyGroup(auto.group, auto.name, auto.color);
 //         }
 //       } catch {
 //         localStorage.removeItem('employee');
@@ -61,49 +147,42 @@
 //     setLoading(false);
 //   };
 
-//   const handleLogin = (data) => {
+//   const handleLogin = async (data) => {
 //     setEmployee(data);
 //     setIsAuthenticated(true);
-//     // Every fresh login re-asks which group to open
-//     setGroupChosen(false);
-//     setSelectedGroup(null);
-//     setSelectedGroupName(null);
-//     setSelectedGroupColor(null);
-//     localStorage.removeItem('selectedGroup');
-//     localStorage.removeItem('selectedGroupName');
-//     localStorage.removeItem('selectedGroupColor');
+//     clearGroup();
+
+//     // An agent locked to a single group has nothing to choose, so skip straight
+//     // to the dashboard. Everyone else (admins, and agents holding more than one
+//     // group) still gets asked, because for them it's a real decision.
+//     const assigned = assignedGroupsOf(data);
+//     if (!hasFullStoreAccess(data) && assigned.length === 1) {
+//       setResolvingGroup(true);
+//       try {
+//         const auto = await resolveAutoGroup(data);
+//         if (auto) applyGroup(auto.group, auto.name, auto.color);
+//       } finally {
+//         setResolvingGroup(false);
+//       }
+//     }
 //   };
 
 //   const handleLogout = async () => {
 //     try { await api.logout(); } catch { /* ignore */ }
 //     localStorage.removeItem('employee');
 //     localStorage.removeItem('token');
-//     localStorage.removeItem('selectedGroup');
-//     localStorage.removeItem('selectedGroupName');
-//     localStorage.removeItem('selectedGroupColor');
+//     clearGroup();
 //     setEmployee(null);
 //     setIsAuthenticated(false);
-//     setSelectedGroup(null);
-//     setSelectedGroupName(null);
-//     setSelectedGroupColor(null);
-//     setGroupChosen(false);
 //   };
 
-//   const handleSelectGroup = (group, groupName, color) => {
-//     localStorage.setItem('selectedGroup', group === null ? '__all__' : group);
-//     localStorage.setItem('selectedGroupName', groupName || '');
-//     localStorage.setItem('selectedGroupColor', color || '');
-//     setSelectedGroup(group);
-//     setSelectedGroupName(groupName);
-//     setSelectedGroupColor(color || null);
-//     setGroupChosen(true);
-//   };
+//   const handleSelectGroup = (group, groupName, color) => applyGroup(group, groupName, color);
 
 //   const handleSwitchGroup = () => setGroupChosen(false);
 
-//   if (loading)          return <div className="loading-container"><div className="spinner" /></div>;
-//   if (!isAuthenticated) return <Login onLogin={handleLogin} />;
-//   if (!groupChosen)     return <GroupSelector employee={employee} onSelectGroup={handleSelectGroup} onLogout={handleLogout} />;
+//   if (loading || resolvingGroup) return <div className="loading-container"><div className="spinner" /></div>;
+//   if (!isAuthenticated)          return <Login onLogin={handleLogin} />;
+//   if (!groupChosen)              return <GroupSelector employee={employee} onSelectGroup={handleSelectGroup} onLogout={handleLogout} />;
 
 //   return (
 //     <DashboardContent
@@ -154,7 +233,15 @@
 //   const wsAuthedOnceRef             = useRef(false);
 //   const audioCtxRef                 = useRef(null); // WebAudio ctx — foreground enhancement only
 //   const beepAudioRef                = useRef(null); // reused, pre-unlocked <audio> — PRIMARY beep (survives bg tab)
+//   // Which conversation this socket is currently joined to, server-side. Kept in
+//   // a ref so the 'connected' handler can re-issue the join after a reconnect —
+//   // a reconnect gives us a NEW server-side connection record with no
+//   // conversationId, and sendToConversation matches on exactly that field.
+//   const joinedConversationIdRef     = useRef(null);
 
+//   // Nothing to switch to when the agent holds exactly one group, so the menu
+//   // item would open a picker containing only the group they're already in.
+//   const canSwitchGroup = hasFullStoreAccess(employee) || assignedGroupsOf(employee).length > 1;
 
 //   const groupAccent    = selectedGroupColor || DEFAULT_GROUP_COLOR;
 //   const groupAccentRgb = hexToRgbTriple(groupAccent) || '37, 211, 102'; // fallback matches DEFAULT_GROUP_COLOR
@@ -262,6 +349,11 @@
 
 //   const isConversationInGroup = React.useCallback((c) => {
 //     if (!selectedGroup) return true; // All Stores → no scoping
+//     // Without a loaded store list there is nothing to match against, and
+//     // filtering here would empty the entire list. The server already scopes the
+//     // query by storeGroup, so skipping this client-side pass is safe — it's a
+//     // second line of defence, not the only one.
+//     if (groupStoreKeys.size === 0) return true;
 //     const ident = c.storeIdentifier || c.store_identifier;
 //     if (ident && groupStoreKeys.has('ident:' + String(ident))) return true;
 //     const shopId = c.shopId ?? c.shop_id ?? c.storeId;
@@ -372,8 +464,10 @@
 //     window.addEventListener('pointerdown', onGesture);
 //     window.addEventListener('keydown', onGesture);
 //     document.addEventListener('visibilitychange', onVisibility);
-//     // Try immediately too — the click that picked the store group may already
-//     // count as the unlocking gesture on this document.
+//     // Try immediately too — the click that submitted the login form may already
+//     // count as the unlocking gesture on this document. This matters more now
+//     // that a single-group agent never passes through the group picker, which
+//     // used to supply that click.
 //     unlock();
 //     return () => {
 //       window.removeEventListener('pointerdown', onGesture);
@@ -579,6 +673,14 @@
 
 //     const u2  = ws.on('connected', () => {
 //       setError(null); setWsStatus('live'); setWsReconnectAttempt(0);
+
+//       // A reconnect produces a NEW server-side connection record with no
+//       // conversationId on it. sendToConversation matches on exactly that field,
+//       // so without re-joining, this socket silently drops out of the open
+//       // conversation's fan-out while still reporting as Live.
+//       const rejoinId = joinedConversationIdRef.current;
+//       if (rejoinId != null) ws.joinConversation(rejoinId);
+
 //       if (wsAuthedOnceRef.current) handlersRef.current.refreshConversations();
 //       else wsAuthedOnceRef.current = true;
 //     });
@@ -670,13 +772,28 @@
 
 //   }, [ws]);
 
+//   // ── Conversation join / leave ─────────────────────────────────────────────
+//   // Keyed on the conversation ID, NOT the conversation object. The effect above
+//   // that syncs `activeConversation` with the latest row from `conversations`
+//   // hands back a NEW object on every list refresh, poll, and updateConversation
+//   // patch — with the object in the dependency array that tore down and rebuilt
+//   // the join several times a minute (visible in the server log as an endless
+//   // Leave/Join pair per GET /api/conversations). Server-side, `leave` deletes
+//   // conn.conversationId, so every one of those gaps was a window in which
+//   // sendToConversation could not reach this socket at all. The ID only changes
+//   // when the agent actually opens a different conversation.
+//   const activeConversationId = activeConversation?.id ?? null;
+
 //   useEffect(() => {
-//     if (activeConversation && ws) {
-//       ws.joinConversation(activeConversation.id);
-//       clearNotificationsForConversation(activeConversation.id);
-//       return () => { ws.leaveConversation(); };
-//     }
-//   }, [activeConversation, ws]);
+//     if (activeConversationId == null || !ws) return;
+//     ws.joinConversation(activeConversationId);
+//     joinedConversationIdRef.current = activeConversationId;
+//     clearNotificationsForConversation(activeConversationId);
+//     return () => {
+//       ws.leaveConversation();
+//       joinedConversationIdRef.current = null;
+//     };
+//   }, [activeConversationId, ws]);
 
 //   // ── Notification helpers ──────────────────────────────────────────────────
 
@@ -763,7 +880,15 @@
 //       const filters = selectedGroup ? { storeGroup: selectedGroup } : {};
 //       setStores((await api.getStores(filters)) || []);
 //     }
-//     catch { setStores([]); } finally { setLoadingStores(false); }
+//     catch (err) {
+//       // Previously swallowed. An empty store list is not a neutral state — it
+//       // feeds the group filter, so a failure here used to hide every
+//       // conversation with no explanation on screen.
+//       console.error('[Stores] Failed to load:', err);
+//       setStores([]);
+//       setError('Could not load stores for this group. Conversation details may be incomplete — try refreshing.');
+//     }
+//     finally { setLoadingStores(false); }
 //   };
 
 //   const loadStats = async () => {
@@ -855,13 +980,15 @@
 //                 </div>
 //                 <div className="dropdown-divider" />
 
-//                 <button className="dropdown-item" onClick={() => { setProfileDropdownOpen(false); onSwitchGroup(); }} type="button" role="menuitem">
-//                   <span className="dropdown-item-icon">🔀</span>
-//                   <span className="dropdown-item-label">
-//                     Switch Group{selectedGroupName ? ` (${selectedGroupName})` : ''}
-//                   </span>
-//                   {selectedGroupColor && <span className="group-color-dot" style={{ background: groupAccent, marginLeft: 'auto' }} />}
-//                 </button>
+//                 {canSwitchGroup && (
+//                   <button className="dropdown-item" onClick={() => { setProfileDropdownOpen(false); onSwitchGroup(); }} type="button" role="menuitem">
+//                     <span className="dropdown-item-icon">🔀</span>
+//                     <span className="dropdown-item-label">
+//                       Switch Group{selectedGroupName ? ` (${selectedGroupName})` : ''}
+//                     </span>
+//                     {selectedGroupColor && <span className="group-color-dot" style={{ background: groupAccent, marginLeft: 'auto' }} />}
+//                   </button>
+//                 )}
 
 //                 <button className={`dropdown-item ${activePage === 'archived' ? 'dropdown-item--active' : ''}`} onClick={() => navigateTo('archived')} type="button" role="menuitem">
 //                   <span className="dropdown-item-icon">📦</span>
@@ -1168,40 +1295,6 @@
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 import React, { useState, useEffect, useRef, useCallback, Suspense, lazy } from 'react';
 import api from './services/api';
 import { useConversations } from './hooks/useConversations';
@@ -1436,6 +1529,10 @@ function DashboardContent({ employee, onLogout, selectedGroup, selectedGroupName
   const wsAuthedOnceRef             = useRef(false);
   const audioCtxRef                 = useRef(null); // WebAudio ctx — foreground enhancement only
   const beepAudioRef                = useRef(null); // reused, pre-unlocked <audio> — PRIMARY beep (survives bg tab)
+  // Conversations currently waiting on a deferred in-group decision (see
+  // notifyIfInGroup). Guards against a burst of frames for the same unknown
+  // conversation firing a refresh storm.
+  const deferredNotifyRef           = useRef(new Set());
   // Which conversation this socket is currently joined to, server-side. Kept in
   // a ref so the 'connected' handler can re-issue the join after a reconnect —
   // a reconnect gives us a NEW server-side connection record with no
@@ -1857,8 +1954,15 @@ const handleTyping = (isTyping) => {
       if (Object.keys(patch).length > 0) h.updateConversation(convId, patch);
 
       // ── Notification ownership: App is the SINGLE source of truth. ──────────
-      // Notify the instant the WS event lands — before any list filtering, group
-      // scoping, search mode, or state round-trip.
+      // The WS fan-out is NOT group-aware — broadcastToAgents sends every store's
+      // traffic to every connected agent — so notifying straight off the raw
+      // event meant an agent sitting in one group heard beeps and got popups for
+      // all the others. Everything now goes through notifyIfInGroup, which is the
+      // one door: it decides whether the conversation belongs to the group this
+      // dashboard is currently scoped to, and stays silent when it doesn't. With
+      // "All Stores" selected there's no scoping and every message notifies, as
+      // before. showNotification/playBeep are deliberately NOT exposed on
+      // handlersRef any more so a future WS handler can't bypass the gate.
       if (sender === 'agent') { h.clearNotificationsForConversation(convId); return; }
 
       if (sender === 'customer') {
@@ -1868,8 +1972,7 @@ const handleTyping = (isTyping) => {
           const existing = curList.find(c => String(c.id) === String(convId));
           const name = existing?.customerName || existing?.customer_name
                      || msg.senderName || msg.sender_name || 'Guest';
-          h.showNotification(convId, name, msg.content || 'New message'); // OS notification
-          h.playBeep();                                                    // audible cue
+          h.notifyIfInGroup(convId, name, msg.content || 'New message', data, msg);
         }
       }
     });
@@ -1909,8 +2012,15 @@ const handleTyping = (isTyping) => {
       const emoji = a.severity === 'critical' ? '🚨' : a.severity === 'high' ? '⚠️' : '🔔';
       h.updateConversation(a.conversationId, { priority: 'urgent', legalFlag: true, legalFlagSeverity: a.severity, legalFlagTerm: a.matchedTerm });
       if (String(activeConversationRef.current?.id) !== String(a.conversationId)) {
-        h.showNotification(a.conversationId, `${emoji} Legal Threat — ${a.severity?.toUpperCase()}`, `"${a.matchedTerm}" from ${a.senderName || 'Customer'}`);
-        h.playBeep(); // legal threats should beep too
+        // Same group gate as new_message — a legal threat raised against another
+        // group's store is that group's alert, not this agent's.
+        h.notifyIfInGroup(
+          a.conversationId,
+          `${emoji} Legal Threat — ${a.severity?.toUpperCase()}`,
+          `"${a.matchedTerm}" from ${a.senderName || 'Customer'}`,
+          data,
+          a
+        );
       }
     });
 
@@ -2073,6 +2183,72 @@ const handleTyping = (isTyping) => {
     }
   };
 
+  // ── Notification group scoping ────────────────────────────────────────────
+  // Does this conversation belong to the group the dashboard is scoped to?
+  //   'in'      → notify
+  //   'out'     → stay silent, it's another group's traffic
+  //   'unknown' → we've never seen this conversation AND the frame carried no
+  //               store identity (typical of a brand-new customer's first
+  //               message). Resolved asynchronously in notifyIfInGroup rather
+  //               than guessed, because guessing "in" reintroduces cross-group
+  //               noise and guessing "out" drops a real first contact.
+  // "All Stores" (selectedGroup === null) is never scoped. Neither is the window
+  // before `stores` has loaded — same permissive stance as isConversationInGroup,
+  // since with no store list there is nothing to match against.
+  const conversationGroupState = useCallback((convId, data = null, msg = null) => {
+    if (!selectedGroup) return 'in';
+    if (groupStoreKeys.size === 0) return 'in';
+
+    const known = conversationsRef.current.find(c => String(c.id) === String(convId));
+    if (known) return isConversationInGroup(known) ? 'in' : 'out';
+
+    // Fall back to whatever store identity the WS frame itself carried.
+    const storeIdentifier =
+      data?.storeIdentifier ?? data?.store_identifier ??
+      msg?.storeIdentifier  ?? msg?.store_identifier  ?? null;
+    const shopId =
+      data?.shopId ?? data?.shop_id ?? data?.storeId ??
+      msg?.shopId  ?? msg?.shop_id  ?? msg?.storeId  ?? null;
+
+    if (storeIdentifier != null || shopId != null) {
+      return isConversationInGroup({ storeIdentifier, shopId }) ? 'in' : 'out';
+    }
+    return 'unknown';
+  }, [selectedGroup, groupStoreKeys, isConversationInGroup]);
+
+  // The ONE door for every WS-driven notification. Beep + OS popup only fire for
+  // conversations in the currently selected group.
+  const notifyIfInGroup = useCallback(async (convId, title, preview, data = null, msg = null) => {
+    const state = conversationGroupState(convId, data, msg);
+
+    if (state === 'out') return;
+
+    if (state === 'in') {
+      showNotification(convId, title, preview);
+      playBeep();
+      return;
+    }
+
+    // 'unknown' — pull the conversation list (the server already scopes it to
+    // this group) and re-decide once the row lands. If it still isn't there, it
+    // isn't ours, so stay silent. Costs the beep a beat on first contact only.
+    const key = String(convId);
+    if (deferredNotifyRef.current.has(key)) return; // a burst shouldn't trigger a refresh storm
+    deferredNotifyRef.current.add(key);
+    try {
+      await refreshConversations();
+      // Let the conversationsRef sync effect flush after the state commit.
+      await new Promise(resolve => setTimeout(resolve, 250));
+      if (conversationGroupState(convId) === 'in') {
+        showNotification(convId, title, preview);
+        playBeep();
+      }
+    } catch { /* ignore — a failed refresh just means no notification */ }
+    finally {
+      deferredNotifyRef.current.delete(key);
+    }
+  }, [conversationGroupState, refreshConversations, playBeep]);
+
   const requestNotificationPermission = () => {
     if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
   };
@@ -2113,11 +2289,13 @@ const handleTyping = (isTyping) => {
   // Runs every render; placed after all referenced functions are defined so
   // there's no temporal-dead-zone issue. The WS effect reads handlersRef.current
   // at event time, so it never needs these in its dependency array.
+  //
+  // showNotification and playBeep are intentionally absent: every notification
+  // path must go through notifyIfInGroup so the group scoping can't be skipped.
   handlersRef.current = {
     updateConversation, handleMarkAsRead, setActiveConversationId,
     removeFromExcluded, removeEmailFromExcluded, refreshConversations,
-    showNotification, clearNotificationsForConversation,
-    playBeep,
+    notifyIfInGroup, clearNotificationsForConversation,
   };
 
   return (
