@@ -1722,8 +1722,6 @@ module.exports = {
   closeAll,
   flushPresence,
 };
-<<<<<<< HEAD
-=======
 
 
 
@@ -1739,9 +1737,3 @@ module.exports = {
 
 
 
-
-
-
-
-
->>>>>>> a41df106f08d2052a046b5f9bcd9aceae53e6496
