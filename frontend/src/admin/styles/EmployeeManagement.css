@@ -1,4 +1,3 @@
-
 .employee-management {
   padding: var(--spacing-xl);
   background: var(--bg-primary);
@@ -183,7 +182,8 @@
 
 .em-table {
   width: 100%;
-  min-width: 900px;
+  /* Raised from 900px to make room for the Store Access column */
+  min-width: 1020px;
   border-collapse: collapse;
 }
 
@@ -297,6 +297,34 @@
   color: var(--text-tertiary);
 }
 
+/* Store Access badge — table column showing assigned-store scope.
+   Hover reveals the full store list via the title attribute. */
+.store-access-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.store-access-all {
+  background: var(--info-light);
+  color: var(--info);
+}
+
+.store-access-some {
+  background: var(--success-light);
+  color: var(--success);
+}
+
+/* Restricted agent with zero stores — reads as broken, so flag it red */
+.store-access-none {
+  background: var(--danger-light);
+  color: var(--danger);
+}
+
 .text-center {
   text-align: center;
 }
@@ -388,6 +416,32 @@
   cursor: not-allowed;
 }
 
+/* Inline text button — used for the picker's bulk select/clear actions */
+.btn-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--primary-color);
+  cursor: pointer;
+  text-decoration: underline;
+  transition: opacity var(--transition-fast);
+  white-space: nowrap;
+}
+
+.btn-link:hover:not(:disabled) {
+  opacity: 0.7;
+}
+
+.btn-link:disabled {
+  color: var(--text-tertiary);
+  cursor: not-allowed;
+  text-decoration: none;
+  opacity: 0.5;
+}
+
 /* Modal */
 .modal-overlay {
   position: fixed;
@@ -414,7 +468,8 @@
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-xl);
   width: 100%;
-  max-width: 500px;
+  /* Widened from 500px — the store picker needs the extra room */
+  max-width: 560px;
   max-height: 90vh;
   overflow-y: auto;
   animation: slideUp 0.3s ease;
@@ -523,6 +578,226 @@
   width: 18px;
   height: 18px;
   cursor: pointer;
+}
+
+/* ──────────────────────────────────────────────────────────
+   STORE ASSIGNMENT PICKER
+   Shown in the employee modal only when "Can view all stores"
+   is off. Grouped by store_group, searchable, with per-group
+   bulk select — a flat list of 600+ stores is unusable.
+   ────────────────────────────────────────────────────────── */
+
+.store-picker-group {
+  margin-top: var(--spacing-xs);
+}
+
+.store-picker {
+  border: 2px solid var(--border-light);
+  border-radius: var(--radius-md);
+  background: var(--bg-primary);
+  overflow: hidden;
+}
+
+/* ── Toolbar: search + bulk actions ─────────────────────── */
+
+.store-picker-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+  border-bottom: 1px solid var(--border-light);
+  background: var(--bg-secondary);
+  flex-wrap: wrap;
+}
+
+/* Scoped override — .form-group input would otherwise force 100% width
+   and break the flex row */
+.store-picker-group .store-picker-search {
+  flex: 1 1 200px;
+  width: auto;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 2px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+
+.store-picker-bulk {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  white-space: nowrap;
+}
+
+.store-picker-divider {
+  color: var(--text-tertiary);
+}
+
+/* ── Scrollable group list ──────────────────────────────── */
+
+.store-picker-list {
+  /* Only a handful of groups exist, so this rarely scrolls — the cap is here
+     to stop the modal growing past the viewport if many groups are added. */
+  max-height: 280px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 2px 0;
+}
+
+.store-group {
+  border-bottom: 1px solid var(--border-light);
+}
+
+.store-group:last-child {
+  border-bottom: none;
+}
+
+.store-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--bg-tertiary);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.store-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text-primary);
+  min-width: 0;
+}
+
+.store-group-caret {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  width: 10px;
+  flex-shrink: 0;
+}
+
+.store-group-name {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.store-group-count {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-full);
+  padding: 1px 8px;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.store-group-items {
+  padding: var(--spacing-xs) 0;
+}
+
+/* ── Individual store rows ──────────────────────────────── */
+
+.store-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-sm);
+  padding: 7px var(--spacing-md) 7px 30px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background var(--transition-fast);
+}
+
+.store-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.store-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.store-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.store-item-name {
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.store-item-domain {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Colour chip carried over from the store-group record, so the picker reads
+   the same way as the group colouring elsewhere in the dashboard. */
+.store-group-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  margin-right: 7px;
+  vertical-align: baseline;
+  flex-shrink: 0;
+}
+
+/* ── Footer + loading/error/empty states ────────────────── */
+
+.store-picker-footer {
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-top: 1px solid var(--border-light);
+  background: var(--bg-secondary);
+  font-size: 12px;
+}
+
+.store-picker-selected {
+  color: var(--success);
+  font-weight: 700;
+}
+
+.store-picker-warning {
+  color: var(--warning, #c05621);
+  font-weight: 600;
+}
+
+.store-picker-state {
+  padding: var(--spacing-lg) var(--spacing-md);
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+}
+
+.store-picker-error {
+  color: var(--danger);
 }
 
 .modal-footer {
@@ -777,6 +1052,38 @@
     padding: 14px;
   }
 
+  /* Store picker — stack the toolbar, shorten the list so the
+     sticky modal footer stays reachable on a phone */
+  .store-picker-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm);
+  }
+
+  .store-picker-group .store-picker-search {
+    flex: 1 1 auto;
+    width: 100%;
+  }
+
+  .store-picker-bulk {
+    justify-content: flex-end;
+  }
+
+  .store-picker-list {
+    max-height: 200px;
+  }
+
+  .store-item {
+    padding: 9px var(--spacing-sm) 9px 26px;
+  }
+
+  /* Larger tap target for checkboxes on touch */
+  .store-item input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+  }
+
   /* Alerts */
   .alert {
     padding: var(--spacing-sm) var(--spacing-md);
@@ -804,9 +1111,14 @@
   }
 
   .role-badge,
-  .status-badge {
+  .status-badge,
+  .store-access-badge {
     font-size: 11px;
     padding: 3px 10px;
+  }
+
+  .store-picker-list {
+    max-height: 180px;
   }
 }
 
@@ -820,6 +1132,12 @@
   .modal-content {
     border-radius: var(--radius-xl);
     margin: var(--spacing-lg) 0;
+  }
+
+  /* Very little vertical room in landscape — keep the picker compact
+     so the Create/Update buttons don't fall off screen */
+  .store-picker-list {
+    max-height: 140px;
   }
 }
 

@@ -1,5 +1,6 @@
 
 
+
 // const API_URL = import.meta.env.PROD 
 //   ? import.meta.env.VITE_API_URL || 'https://chat-support-pro.onrender.com'
 //   : '';
@@ -22,10 +23,21 @@
 //   }
 
 //   async fetch(endpoint, options = {}) {
-//     const url = `${this.baseUrl}${endpoint}`;
+//     const method = (options.method || 'GET').toUpperCase();
+//     let url = `${this.baseUrl}${endpoint}`;
+
+//     // Reads only: bust the cache. On the deployed build the browser was serving
+//     // stale GET responses (e.g. store-group counts) even after the data changed,
+//     // because requests hit Render directly with no cache headers. A unique URL
+//     // can't be served from any browser/proxy/CDN cache.
+//     if (method === 'GET') {
+//       url += (url.includes('?') ? '&' : '?') + `_=${Date.now()}`;
+//     }
+
 //     const token = this.getToken();
-    
+
 //     const defaultOptions = {
+//       cache: 'no-store', // never read or write the HTTP cache for this request
 //       headers: {
 //         'Content-Type': 'application/json',
 //         ...(token && { 'Authorization': `Bearer ${token}` }),
@@ -280,15 +292,21 @@
 //     });
 //   }
 
-//   async updateStoreGroup(id, { groupKey, groupName, color }) {
-//     return this.fetch(`/api/stores/groups/${id}`, {
+//   // Groups are identified by their key (slug) everywhere in the UI — there is no
+//   // numeric group id in StoreManagement.jsx. These signatures match the call
+//   // sites: api.updateStoreGroup({ groupKey, ... }) and api.deleteStoreGroup(key).
+//   async updateStoreGroup({ groupKey, groupName, color }) {
+//     return this.fetch(`/api/stores/groups/${encodeURIComponent(groupKey)}`, {
 //       method: 'PUT',
 //       body: JSON.stringify({ groupKey, groupName, color }),
 //     });
 //   }
 
-//   async deleteStoreGroup(id, { force = false } = {}) {
-//     return this.fetch(`/api/stores/groups/${id}${force ? '?force=true' : ''}`, { method: 'DELETE' });
+//   async deleteStoreGroup(groupKey, { force = false } = {}) {
+//     return this.fetch(
+//       `/api/stores/groups/${encodeURIComponent(groupKey)}${force ? '?force=true' : ''}`,
+//       { method: 'DELETE' }
+//     );
 //   }
 //   // ============ Customer Context ============
 
@@ -487,29 +505,6 @@
 // }
 
 // export default new ApiService();
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -869,17 +864,6 @@ async searchConversations({ q, storeGroup, storeId } = {}) {
     return this.fetch('/api/stats/discord-daily-report/trigger', { method: 'POST' });
   }
   
-  // // ============ Analytics ============
-
-  // async getCommonQuestions(params = {}) {
-  //   const queryParams = new URLSearchParams(params).toString();
-  //   return this.fetch(`/api/analytics/common-questions${queryParams ? '?' + queryParams : ''}`);
-  // }
-
-  // async clearAnalyticsCache() {
-  //   return this.fetch('/api/analytics/clear-cache', { method: 'POST' });
-  // }
-
   // ============ Employees ============
 
   async getEmployees() {

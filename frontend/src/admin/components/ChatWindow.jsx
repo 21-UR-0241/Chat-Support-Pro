@@ -1,5 +1,4 @@
 
-
 // import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 // import { formatDistanceToNow } from 'date-fns';
 // import heic2any from 'heic2any';
@@ -720,38 +719,52 @@
 // const dedupeMessages = (list) => {
 //   const seenIds = new Set();
 //   const out = [];
+//   // PERF: the content-fuzzy scan below is O(n) per message → O(n²) for the list.
+//   // It only ever reconciles an optimistic row with its real echo, so it's pure
+//   // waste in steady state (no pending sends). Track how many optimistic rows are
+//   // actually present and skip the scan entirely when none are — that turns the
+//   // common case (a settled thread receiving one new committed message) into O(n)
+//   // and is the main relief for "freezes under churn" on long threads.
+//   let optimisticCount = 0;
 //   for (const m of list) {
 //     const id = m.id != null ? String(m.id) : null;
 //     if (id && seenIds.has(id)) continue;
-//     const ts = msgTime(m);
-//     const dupIdx = out.findIndex(o => {
-//       if (o.senderType !== m.senderType) return false;
-//       if ((o.content || '') !== (m.content || '')) return false;
-//       if ((o.fileUrl || '') !== (m.fileUrl || '')) return false;
-//       // Content-fuzzy matching is ONLY for reconciling an optimistic row with
-//       // its real server echo. If BOTH rows are committed (real ids), they are
-//       // distinct messages — two rapid identical customer sends, for example —
-//       // and must never be merged. Restricting the branch here is what stops
-//       // real messages disappearing under a burst.
-//       const oId  = o.id != null ? String(o.id) : '';
-//       const oOpt = isOptimisticId(oId);
-//       const mOpt = isOptimisticId(id || '');
-//       if (!oOpt && !mOpt) return false;
-//       // No reliable timestamp on one side → don't guess-merge (the old
-//       // `ts === 0 → dup` shortcut silently collapsed distinct messages).
-//       const ots = msgTime(o);
-//       if (ots === 0 || ts === 0) return false;
-//       return Math.abs(ots - ts) < 5000;
-//     });
+//     const mOpt = isOptimisticId(id || '');
+
+//     let dupIdx = -1;
+//     if (mOpt || optimisticCount > 0) {           // reconciliation only possible then
+//       const ts = msgTime(m);
+//       dupIdx = out.findIndex(o => {
+//         if (o.senderType !== m.senderType) return false;
+//         if ((o.content || '') !== (m.content || '')) return false;
+//         if ((o.fileUrl || '') !== (m.fileUrl || '')) return false;
+//         // Content-fuzzy matching is ONLY for reconciling an optimistic row with
+//         // its real server echo. If BOTH rows are committed (real ids), they are
+//         // distinct messages — two rapid identical customer sends, for example —
+//         // and must never be merged.
+//         const oOpt = isOptimisticId(o.id != null ? String(o.id) : '');
+//         if (!oOpt && !mOpt) return false;
+//         // No reliable timestamp on one side → don't guess-merge.
+//         const ots = msgTime(o);
+//         if (ots === 0 || ts === 0) return false;
+//         return Math.abs(ots - ts) < 5000;
+//       });
+//     }
+
 //     if (dupIdx !== -1) {
 //       const existing = out[dupIdx];
-//       const existingReal = existing.id != null && !String(existing.id).startsWith('temp-') && !String(existing.id).startsWith('c-');
-//       const incomingReal = id && !id.startsWith('temp-') && !id.startsWith('c-');
-//       if (!existingReal && incomingReal) out[dupIdx] = m;
+//       const existingOpt  = existing.id != null && isOptimisticId(String(existing.id));
+//       const existingReal = existing.id != null && !existingOpt;
+//       const incomingReal = id && !mOpt;
+//       if (!existingReal && incomingReal) {
+//         if (existingOpt) optimisticCount--;       // optimistic row replaced by real
+//         out[dupIdx] = m;
+//       }
 //       if (id) seenIds.add(id);
 //       continue;
 //     }
 //     if (id) seenIds.add(id);
+//     if (mOpt) optimisticCount++;
 //     out.push(m);
 //   }
 //   return out;
@@ -902,6 +915,14 @@
 //   const [deleting,          setDeleting]          = useState(false);
 //   const [showAISuggestions, setShowAISuggestions] = useState(true);
 
+//   // PERF: cap how many message bubbles are actually rendered to the DOM. All
+//   // messages stay in `messages` state (counts, dedup, notifications unaffected);
+//   // we only grid the most recent `visibleCount`. Rendering a whole long thread
+//   // as live DOM every state change is the freeze; this bounds it. "Show earlier"
+//   // bumps the count. Reset to the base window on every conversation switch.
+//   const RENDER_WINDOW = 150;
+//   const [visibleCount, setVisibleCount] = useState(RENDER_WINDOW);
+
 //   const [unreadToast,       setUnreadToast]       = useState(false);
 //   const unreadToastTimerRef                       = useRef(null);
 
@@ -934,6 +955,10 @@
 //   const activeNotificationsRef = useRef(new Map());
 //   const pollIntervalRef      = useRef(null);
 //   const prevMsgCountRef      = useRef(0);
+//   // PERF: per-conversation message cache. On switch we paint cached messages
+//   // instantly (no blank pane, no spinner) and revalidate in the background,
+//   // instead of cold-fetching every time. This is the switch-lag fix.
+//   const messageCacheRef      = useRef(new Map());
 
 //   const conversationRef    = useRef(conversation);
 //   const employeeNameRef    = useRef(employeeName);
@@ -1416,8 +1441,25 @@
 //   }, [conversation?.id]);
 
 // useEffect(() => {
-//     if (conversation) { setMessages([]); displayedMessageIds.current.clear(); loadMessages(); }
-//     else { setMessages([]); setLoading(false); }
+//     setVisibleCount(RENDER_WINDOW); // reset render window on every switch
+//     if (conversation) {
+//       const cached = messageCacheRef.current.get(String(conversation.id));
+//       if (cached && cached.length) {
+//         // Instant paint from cache — no blank pane, no spinner. Seed the seen-set
+//         // from the cache so incoming echoes dedup correctly, then revalidate.
+//         displayedMessageIds.current = new Set(cached.map(m => String(m.id)).filter(Boolean));
+//         setMessages(cached);
+//         setLoading(false);
+//         loadMessages(conversation.id, { silent: true }); // background refresh
+//       } else {
+//         // Cold path: nothing cached, show spinner while we fetch.
+//         setMessages([]);
+//         displayedMessageIds.current.clear();
+//         loadMessages(conversation.id);
+//       }
+//     } else {
+//       setMessages([]); setLoading(false);
+//     }
 //     dismissLegalAlert();
 //     setTypingUsers(new Set());
 //     setShowEmailModal(false);
@@ -1487,21 +1529,23 @@
 //     return () => window.removeEventListener('paste', handleGlobalPaste);
 //   }, [selectedFile]);
 
-//   const loadMessages = useCallback(async (convId = conversationRef.current?.id) => {
+//   const loadMessages = useCallback(async (convId = conversationRef.current?.id, opts = {}) => {
 //     if (!convId) return;
+//     const { silent = false } = opts; // silent = background revalidate, don't blank the pane
 //     try {
-//       setLoading(true);
+//       if (!silent) setLoading(true);
 //       const data = await api.getMessages(convId);
 //       if (String(conversationRef.current?.id) !== String(convId)) return; // switched away — discard
 //       const messageArray = (Array.isArray(data) ? data : []).map(normalizeMessage);
 //       messageArray.forEach(msg => { if (msg.id) displayedMessageIds.current.add(String(msg.id)); });
+//       messageCacheRef.current.set(String(convId), messageArray); // refresh cache
 //       setMessages(messageArray);
 //     } catch (error) {
 //       if (String(conversationRef.current?.id) !== String(convId)) return;
 //       console.error('Failed to load messages:', error);
-//       setMessages([]);
+//       if (!silent) setMessages([]); // a failed background revalidate keeps the cached view
 //     } finally {
-//       if (String(conversationRef.current?.id) === String(convId)) setLoading(false);
+//       if (!silent && String(conversationRef.current?.id) === String(convId)) setLoading(false);
 //     }
 //   }, []);
 
@@ -1615,16 +1659,25 @@
 //       if (ta !== tb) return ta - tb;
 //       return idRank(a) - idRank(b);
 //     });
-//     return sorted.map((message, index) => {
-//       const prevMessage = index > 0 ? sorted[index - 1] : null;
-//       const nextMessage = index < sorted.length - 1 ? sorted[index + 1] : null;
+//     // Only the last `visibleCount` are turned into DOM. Grouping is computed on
+//     // the window, so first/last-in-group flags are correct within what's shown.
+//     const windowed = sorted.length > visibleCount ? sorted.slice(-visibleCount) : sorted;
+//     return windowed.map((message, index) => {
+//       const prevMessage = index > 0 ? windowed[index - 1] : null;
+//       const nextMessage = index < windowed.length - 1 ? windowed[index + 1] : null;
 //       return {
 //         ...message,
 //         isFirstInGroup: !prevMessage || prevMessage.senderType !== message.senderType,
 //         isLastInGroup:  !nextMessage || nextMessage.senderType !== message.senderType,
 //       };
 //     });
-//   }, [messages]);
+//   }, [messages, visibleCount]);
+
+//   // How many messages exist beyond the rendered window (for the "Show earlier" control).
+//   const hiddenOlderCount = useMemo(() => {
+//     const total = dedupeMessages(messages || []).length;
+//     return Math.max(0, total - visibleCount);
+//   }, [messages, visibleCount]);
 
 //   const storeDetails = useMemo(() => {
 //     if (!stores || !conversation) return null;
@@ -1849,6 +1902,21 @@
 //               </div>
 //             ) : (
 //               <>
+//                 {hiddenOlderCount > 0 && (
+//                   <div style={{ textAlign: 'center', padding: '8px 0 4px' }}>
+//                     <button
+//                       type="button"
+//                       onClick={() => setVisibleCount(c => c + RENDER_WINDOW)}
+//                       style={{
+//                         background: '#fff', border: '1px solid #e9edef', borderRadius: '16px',
+//                         padding: '6px 16px', fontSize: '12.5px', fontWeight: 600, color: '#54656f',
+//                         cursor: 'pointer', boxShadow: '0 1px 2px rgba(11,20,26,0.06)',
+//                       }}
+//                     >
+//                       Show earlier messages ({hiddenOlderCount})
+//                     </button>
+//                   </div>
+//                 )}
 //                 {groupedMessages.map((message, index) => {
 //                   const msgKey       = message.id || `msg-${index}`;
 //                   const showRepliedBy = message.senderType === 'agent'
@@ -2125,6 +2193,24 @@
 // }
 
 // export default ChatWindow;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
@@ -2908,6 +2994,17 @@ const INPUT_STYLE = {
   overflowWrap: 'break-word',
 };
 
+// ============ SYNC TUNING ============
+// The poll below is the safety net under the WebSocket. It used to be gated on
+// `ws.isConnected()` alone, which assumes a connected socket is a DELIVERING
+// socket. That assumption is exactly what fails when the server accepts the
+// connection but never fans a message out to it: the socket reads as healthy,
+// the poll never runs, and the thread looks completely dead rather than merely
+// laggy. These three constants replace that binary with a liveness check.
+const POLL_INTERVAL_MS     = 5000;   // tick rate; also the poll rate when WS is untrusted
+const WS_VERIFY_EVERY_MS   = 30000;  // reconciliation fetch cadence while WS looks healthy
+const OPTIMISTIC_STALE_MS  = 10000;  // an unconfirmed send older than this means WS is lying
+
 function ActionsDropdown({
   conversation, onSendEmail, onMarkAsUnread,
   onArchive, onBlacklist, onCustomerInfo, onDelete,
@@ -3043,6 +3140,11 @@ function ChatWindow({
   const [deleting,          setDeleting]          = useState(false);
   const [showAISuggestions, setShowAISuggestions] = useState(true);
 
+  // The socket is up but not delivering — the poll is carrying the thread.
+  // Surfaced in the header dot so a silent delivery failure is visible instead
+  // of looking like an idle conversation.
+  const [wsDegraded,        setWsDegraded]        = useState(false);
+
   // PERF: cap how many message bubbles are actually rendered to the DOM. All
   // messages stay in `messages` state (counts, dedup, notifications unaffected);
   // we only grid the most recent `visibleCount`. Rendering a whole long thread
@@ -3091,16 +3193,49 @@ function ChatWindow({
   const conversationRef    = useRef(conversation);
   const employeeNameRef    = useRef(employeeName);
 
+  // ── WS trust tracking ─────────────────────────────────────────────────────
+  // `wsTrustedRef` is the answer to "is this socket actually delivering?", as
+  // opposed to `wsConnected`, which only answers "is it open?". It starts
+  // optimistic, is revoked on hard evidence of non-delivery, and is restored
+  // the moment a real message frame arrives. Kept in a ref, not state, because
+  // the poll interval closes over it and must read the live value.
+  const wsTrustedRef       = useRef(true);
+  const lastVerifyAtRef    = useRef(0);
+  // Mirror of `messages` for the interval callback, which would otherwise close
+  // over the array as it was when the effect last ran.
+  const messagesRef        = useRef([]);
+
 
   useEffect(() => { loadTemplates(); }, []);
   useEffect(() => { conversationRef.current = conversation; }, [conversation]);
   useEffect(() => { employeeNameRef.current = employeeName; }, [employeeName]);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
 
   useEffect(() => {
     return () => {
       if (legalDismissTimerRef.current) clearTimeout(legalDismissTimerRef.current);
       if (unreadToastTimerRef.current)  clearTimeout(unreadToastTimerRef.current);
     };
+  }, []);
+
+  // A real message frame arrived — whatever we thought about the socket, it is
+  // demonstrably delivering right now.
+  const markWsAlive = useCallback(() => {
+    if (!wsTrustedRef.current) {
+      console.info('[ChatWindow] WebSocket delivering again — resuming socket-first sync');
+      wsTrustedRef.current = true;
+      setWsDegraded(false);
+    }
+  }, []);
+
+  // Evidence of non-delivery. Drops the poll back to full rate until a frame
+  // proves otherwise.
+  const markWsDegraded = useCallback((reason) => {
+    if (wsTrustedRef.current) {
+      console.warn(`[ChatWindow] WebSocket is connected but not delivering (${reason}) — falling back to polling`);
+      wsTrustedRef.current = false;
+      setWsDegraded(true);
+    }
   }, []);
 
   // ============ WYSIWYG HELPERS ============
@@ -3374,6 +3509,10 @@ const handleIncomingMessage = (raw, currentConv) => {
     const msgId  = message.id;
     const convId = message.conversationId || message.conversation_id;
     if (!convId || String(convId) !== String(currentConv?.id)) return;
+
+    // A message frame for the open conversation is proof of delivery.
+    markWsAlive();
+
     if (msgId && displayedMessageIds.current.has(String(msgId))) return;
 
     const cmid = message.clientMsgId || null;
@@ -3490,6 +3629,9 @@ useEffect(() => {
         ?? data.conversationId ?? data.conversation_id ?? null;
       if (!isForOpenConversation(convId)) return;
 
+      // A confirm for the open conversation is proof of delivery.
+      markWsAlive();
+
       const confirmedMsg = normalizeMessage(data.message);
       const cmid = data.clientMsgId || data.message.clientMsgId || null;
       if (data.message.id) displayedMessageIds.current.add(String(data.message.id));
@@ -3521,6 +3663,7 @@ useEffect(() => {
       if (!data.messageId) return;
       const convId = data.conversationId ?? data.conversation_id ?? null;
       if (!isForOpenConversation(convId)) return;
+      markWsAlive();
       displayedMessageIds.current.delete(String(data.messageId));
       setMessages(prev => {
         if (!prev.some(m => String(m.id) === String(data.messageId))) return prev;
@@ -3544,6 +3687,11 @@ useEffect(() => {
     });
 
     const offReconnect = ws.on('connected', () => {
+      // A fresh socket has not yet failed to deliver anything — give it the
+      // benefit of the doubt and let the verify cadence re-test it.
+      wsTrustedRef.current = true;
+      setWsDegraded(false);
+      lastVerifyAtRef.current = Date.now();
       if (conversationRef.current?.id) loadMessages();
     });
 
@@ -3570,6 +3718,10 @@ useEffect(() => {
 
 useEffect(() => {
     setVisibleCount(RENDER_WINDOW); // reset render window on every switch
+    // Trust is per-thread evidence, not a permanent verdict on the socket.
+    wsTrustedRef.current = true;
+    setWsDegraded(false);
+    lastVerifyAtRef.current = Date.now();
     if (conversation) {
       const cached = messageCacheRef.current.get(String(conversation.id));
       if (cached && cached.length) {
@@ -3608,12 +3760,45 @@ useEffect(() => {
       return;
     }
     pollIntervalRef.current = setInterval(async () => {
-      if (ws && ws.isConnected && ws.isConnected()) return; // WS live → skip fetch
+      const convId = conversation.id;
+      const wsLive = !!(ws && ws.isConnected && ws.isConnected());
+
+      // ── Liveness check ────────────────────────────────────────────────────
+      // A send that never received its server confirm is the clearest signal
+      // that the socket is open but not carrying traffic. Catching it here is
+      // what stops a silent delivery failure from looking like an idle thread.
+      if (wsLive && wsTrustedRef.current) {
+        const now = Date.now();
+        const stuck = messagesRef.current.some(m =>
+          (m._optimistic || m.sending) && msgTime(m) > 0 && (now - msgTime(m)) > OPTIMISTIC_STALE_MS);
+        if (stuck) markWsDegraded('a sent message was never confirmed');
+      }
+
+      // A socket we still trust earns a slower cadence, not a free pass: we
+      // reconcile every WS_VERIFY_EVERY_MS so a silent failure surfaces within
+      // half a minute instead of never. An untrusted or closed socket polls at
+      // the full tick rate.
+      const wsUsable = wsLive && wsTrustedRef.current;
+      if (wsUsable && Date.now() - lastVerifyAtRef.current < WS_VERIFY_EVERY_MS) return;
+      lastVerifyAtRef.current = Date.now();
+
       try {
-        const convId = conversation.id;
         const data   = await api.getMessages(convId);
         if (String(conversationRef.current?.id) !== String(convId)) return; // switched away — discard
         const serverMessages = (Array.isArray(data) ? data : []).map(normalizeMessage);
+
+        // Anything the server has that we never received over the socket is
+        // proof of non-delivery — computed against the ref BEFORE setMessages so
+        // the verdict doesn't depend on updater timing.
+        if (wsUsable) {
+          const known  = new Set(messagesRef.current.map(m => String(m.id)));
+          const missed = serverMessages.filter(m =>
+            m.id && !known.has(String(m.id)) && !displayedMessageIds.current.has(String(m.id)));
+          if (missed.length) {
+            markWsDegraded(`${missed.length} message(s) arrived by poll, not by socket`);
+          }
+        }
+
         setMessages(prev => {
           const existingIds  = new Set(prev.map(m => String(m.id)));
           const newMessages  = serverMessages.filter(m =>
@@ -3637,9 +3822,9 @@ useEffect(() => {
           return [...updated, ...newMessages.map(m => ({ ...m, sending: false, _optimistic: false }))];
         });
       } catch (error) {}
-    }, 5000);
+    }, POLL_INTERVAL_MS);
     return () => { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current); };
-  }, [conversation?.id, ws]);
+  }, [conversation?.id, ws, markWsDegraded]);
 
 
 
@@ -3667,7 +3852,35 @@ useEffect(() => {
       const messageArray = (Array.isArray(data) ? data : []).map(normalizeMessage);
       messageArray.forEach(msg => { if (msg.id) displayedMessageIds.current.add(String(msg.id)); });
       messageCacheRef.current.set(String(convId), messageArray); // refresh cache
-      setMessages(messageArray);
+      // MERGE, never replace. A plain setMessages(messageArray) discards
+      // anything the server snapshot predates — most visibly the optimistic
+      // bubble of a message the agent sent while this fetch was in flight, which
+      // is why sending immediately after opening a conversation looked like the
+      // message vanished. Three callers make that window common: the cold load
+      // on switch, the silent revalidate after a cache paint, and the reconnect
+      // handler.
+      setMessages(prev => {
+        if (!prev.length) return messageArray;
+        const serverIds = new Set(messageArray.map(m => String(m.id)));
+        const newestServerTs = messageArray.reduce((max, m) => Math.max(max, msgTime(m)), 0);
+
+        // Optimistic rows still waiting for their server echo. Dropped once the
+        // snapshot contains their clientMsgId — that IS the echo.
+        const stillPending = prev.filter(m =>
+          (m._optimistic || m.sending) &&
+          !(m.clientMsgId && messageArray.some(s => s.clientMsgId === m.clientMsgId))
+        );
+
+        // Committed rows that arrived (by socket) after the server built this
+        // snapshot. Bounded by timestamp so an older message deleted server-side
+        // can't be resurrected by a later load.
+        const arrivedSinceSnapshot = prev.filter(m =>
+          m.id != null && !m._optimistic && !m.sending &&
+          !serverIds.has(String(m.id)) && msgTime(m) >= newestServerTs
+        );
+
+        return [...messageArray, ...arrivedSinceSnapshot, ...stillPending];
+      });
     } catch (error) {
       if (String(conversationRef.current?.id) !== String(convId)) return;
       console.error('Failed to load messages:', error);
@@ -3838,6 +4051,15 @@ const groupedMessages = useMemo(() => {
   const legalBannerBg    = legalAlert?.severity === 'critical' ? '#dc2626' : legalAlert?.severity === 'high' ? '#d97706' : '#2563eb';
   const legalBannerEmoji = legalAlert?.severity === 'critical' ? '🚨'      : legalAlert?.severity === 'high' ? '⚠️'      : '🔔';
 
+  // Three states, not two: closed (red), open but not delivering (amber, poll is
+  // carrying the thread), delivering (green).
+  const connectionColor = !wsConnected ? '#fc8181' : wsDegraded ? '#f6ad55' : '#48bb78';
+  const connectionTitle = !wsConnected
+    ? 'Disconnected — messages are syncing every few seconds'
+    : wsDegraded
+      ? 'Live connection is not delivering — messages are syncing every few seconds'
+      : 'Connected';
+
   return (
     <div className="chat-window" style={{ position: 'relative' }}>
 
@@ -3946,8 +4168,8 @@ const groupedMessages = useMemo(() => {
               )}
               <span className="customer-email-desktop">{storeName && ' • '}{conversation.customerEmail || 'No email'}</span>
               <span
-                style={{ color: wsConnected ? '#48bb78' : '#fc8181', marginLeft: '8px' }}
-                title={wsConnected ? 'Connected' : 'Disconnected'}
+                style={{ color: connectionColor, marginLeft: '8px' }}
+                title={connectionTitle}
               >●</span>
             </div>
           </div>
