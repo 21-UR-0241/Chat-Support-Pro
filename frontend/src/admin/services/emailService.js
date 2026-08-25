@@ -1,3 +1,4 @@
+
 const { Resend } = require('resend');
 
 // ──────────────────────────────────────────────
@@ -256,10 +257,13 @@ async function auditEmailConfig(pool) {
       const fromLabel = from
         ? from
         : `${FALLBACK_FROM_ADDRESS} (shared fallback)`;
+      // Surface which template a group will render, so a rebrand-in-progress
+      // group that silently kept the default look is visible at boot.
+      const templateLabel = getEmailTemplateName(store_group);
 
       const mismatch = source !== 'RESEND_API_KEY' && !from;
       console.log(
-        `[Email Config]   ${store_group}: key=${keyLabel} | from=${fromLabel}` +
+        `[Email Config]   ${store_group}: key=${keyLabel} | from=${fromLabel} | template=${templateLabel}` +
         (mismatch ? '  ⚠ group has its OWN key but no group from-address — verify that domain in this account' : '')
       );
     }
@@ -526,7 +530,10 @@ async function sendOfflineEmail(pool, conversation_id, triggerMessageId) {
     const lastMessageId = unreadMessages[unreadMessages.length - 1].id;
 
     // 6. Build and send email
-    const emailHtml = buildEmailHtml({
+    //    Pick the template for this store group. Lexar/Pynk gets its own look;
+    //    every other group keeps the default card template.
+    const buildHtml = getEmailBuilder(storeGroup);
+    const emailHtml = buildHtml({
       brandName: emailFromName,
       customerName: conv.customer_name,
       agentName: latestAgentName,
@@ -721,7 +728,106 @@ function cancelPendingEmail(conversation_id) {
 }
 
 // ──────────────────────────────────────────────
-// HTML EMAIL TEMPLATE
+// PER-GROUP EMAIL TEMPLATE SELECTION
+// ──────────────────────────────────────────────
+// Groups can render their own layout:
+//   - Pynk  → buildEmailHtmlPynk  (editorial / hairline)
+//   - Lexar → buildEmailHtmlLexar (banner + chat bubbles)
+//   - everyone else → buildEmailHtml (default card)
+//
+// Matching is by substring on the (lowercased) store_group. Lexar and Pynk are
+// now SEPARATE looks: during the in-progress Lexar → Pynk rebrand, a "lexar-*"
+// slug keeps the Lexar template and a "pynk-*" slug gets the Pynk template — so
+// the email restyles at the moment the store_group flips to the new brand.
+// Pynk is checked first so a slug carrying both tokens resolves to Pynk. If you
+// spin up an unrelated group whose name happens to contain one of these tokens,
+// tighten the guard or switch to an exact-match Set here.
+
+const PYNK_GROUP_TOKENS = ['pynk'];
+const LEXAR_GROUP_TOKENS = ['lexar'];
+
+function slugHasToken(storeGroup, tokens) {
+  const slug = String(storeGroup || '').toLowerCase();
+  return tokens.some(token => slug.includes(token));
+}
+
+function isPynkGroup(storeGroup) {
+  return slugHasToken(storeGroup, PYNK_GROUP_TOKENS);
+}
+
+function isLexarGroup(storeGroup) {
+  return slugHasToken(storeGroup, LEXAR_GROUP_TOKENS);
+}
+
+/**
+ * Returns the HTML builder for a store group. Add more branches here as other
+ * groups get bespoke templates; the default is the shared card layout.
+ */
+function getEmailBuilder(storeGroup) {
+  if (isPynkGroup(storeGroup)) return buildEmailHtmlPynk;
+  if (isLexarGroup(storeGroup)) return buildEmailHtmlLexar;
+  return buildEmailHtml;
+}
+
+/** Human-readable template name for the boot-time config audit log. */
+function getEmailTemplateName(storeGroup) {
+  if (isPynkGroup(storeGroup)) return 'pynk';
+  if (isLexarGroup(storeGroup)) return 'lexar';
+  return 'default';
+}
+
+// ──────────────────────────────────────────────
+// COLOUR HELPERS (used by the Lexar and Pynk templates)
+// ──────────────────────────────────────────────
+// The default template assumes a dark brand colour and always puts white text
+// on it. The Lexar and Pynk brand colours can be light (pink), so those
+// templates derive text/tint colours from the brand colour instead of
+// hard-coding white.
+
+/** Pick black or white text for legibility on a solid brand-colour background. */
+function readableTextOn(hexColor) {
+  const hex = String(hexColor || '').replace('#', '');
+  const full = hex.length === 3 ? hex.split('').map(c => c + c).join('') : hex;
+  if (full.length !== 6) return '#ffffff';
+  const r = parseInt(full.slice(0, 2), 16);
+  const g = parseInt(full.slice(2, 4), 16);
+  const b = parseInt(full.slice(4, 6), 16);
+  if ([r, g, b].some(n => Number.isNaN(n))) return '#ffffff';
+  // Perceived luminance (ITU-R BT.601). >0.62 → dark text reads better.
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.62 ? '#1a202c' : '#ffffff';
+}
+
+/** Mix a brand colour toward white by `amount` (0–1) for a soft tint. */
+function mixWithWhite(hexColor, amount) {
+  const hex = String(hexColor || '').replace('#', '');
+  const full = hex.length === 3 ? hex.split('').map(c => c + c).join('') : hex;
+  if (full.length !== 6) return '#f7f4f6';
+  let r = parseInt(full.slice(0, 2), 16);
+  let g = parseInt(full.slice(2, 4), 16);
+  let b = parseInt(full.slice(4, 6), 16);
+  if ([r, g, b].some(n => Number.isNaN(n))) return '#f7f4f6';
+  const mix = c => Math.round(c + (255 - c) * amount);
+  const to = c => c.toString(16).padStart(2, '0');
+  return '#' + to(mix(r)) + to(mix(g)) + to(mix(b));
+}
+
+/** Mix a brand colour toward black by `amount` (0–1) — for coloured text on light. */
+function mixWithBlack(hexColor, amount) {
+  const hex = String(hexColor || '').replace('#', '');
+  const full = hex.length === 3 ? hex.split('').map(c => c + c).join('') : hex;
+  if (full.length !== 6) return '#1a202c';
+  let r = parseInt(full.slice(0, 2), 16);
+  let g = parseInt(full.slice(2, 4), 16);
+  let b = parseInt(full.slice(4, 6), 16);
+  if ([r, g, b].some(n => Number.isNaN(n))) return '#1a202c';
+  const mix = c => Math.round(c * (1 - amount));
+  const to = c => c.toString(16).padStart(2, '0');
+  return '#' + to(mix(r)) + to(mix(g)) + to(mix(b));
+}
+
+// ──────────────────────────────────────────────
+// HTML EMAIL TEMPLATE — DEFAULT (card layout)
 // ──────────────────────────────────────────────
 
 function buildEmailHtml({ brandName, customerName, agentName, messages, conversationId, storeDomain, brandColor }) {
@@ -849,6 +955,237 @@ function buildEmailHtml({ brandName, customerName, agentName, messages, conversa
 </html>`;
 }
 
+// ──────────────────────────────────────────────
+// HTML EMAIL TEMPLATE — LEXAR (banner + chat bubbles)
+// ──────────────────────────────────────────────
+// A visually distinct layout for the Lexar group: a full-width branded
+// banner carrying the brand NAME (not an initials badge), agent messages
+// rendered as chat bubbles with avatar circles, and a pill CTA. Same call
+// signature as buildEmailHtml, so it's a drop-in via getEmailBuilder().
+//
+// Unlike the default template, this one does NOT assume the brand colour is
+// dark — text/tints are derived from it so a light pink brand still reads.
+
+function buildEmailHtmlLexar({ brandName, customerName, agentName, messages, conversationId, storeDomain, brandColor }) {
+  const safeBrand = String(brandName || FALLBACK_BRAND_NAME).trim() || FALLBACK_BRAND_NAME;
+  const greeting = customerName ? `Hi ${esc(customerName)},` : 'Hi there,';
+  const replyUrl = `https://${storeDomain}`;
+  const color = brandColor || FALLBACK_BRAND_COLOR;
+  const onColor = readableTextOn(color);      // legible text on the brand colour
+  const bubbleBg = mixWithWhite(color, 0.9);  // soft same-hue tint for message bubbles
+
+  const messageCount = messages.length;
+  const subheading = messageCount === 1
+    ? `<strong>${esc(agentName || 'Our team')}</strong> just replied to your conversation.`
+    : `You have <strong>${messageCount} new replies</strong> waiting in your conversation.`;
+
+  // Initials for a per-message avatar; guarded against null/short names.
+  const initialsOf = (name) => {
+    const src = String(name || safeBrand).trim();
+    const parts = src.split(/\s+/).filter(Boolean);
+    const ini = parts.map(w => w[0].toUpperCase()).slice(0, 2).join('');
+    return ini || src.slice(0, 2).toUpperCase() || '?';
+  };
+
+  const messagesHtml = messages.map(msg => {
+    const time = new Date(msg.timestamp).toLocaleString('en-US', {
+      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    });
+    const who = msg.sender_name || 'Support';
+
+    return `
+      <tr>
+        <td valign="top" width="48" style="padding: 0 12px 18px 0;">
+          <div style="width: 38px; height: 38px; line-height: 38px; text-align: center; border-radius: 50%; background: ${color}; color: ${onColor}; font-size: 13px; font-weight: 700;">${esc(initialsOf(who))}</div>
+        </td>
+        <td valign="top" style="padding: 0 0 18px 0;">
+          <div style="font-weight: 600; font-size: 13px; color: #2d3748;">
+            ${esc(who)}
+            <span style="font-weight: 400; color: #a0aec0; margin-left: 8px;">${time}</span>
+          </div>
+          <div style="margin-top: 6px; background: ${bubbleBg}; border-radius: 4px 16px 16px 16px; padding: 12px 16px; font-size: 14px; color: #1a202c; line-height: 1.6; white-space: pre-wrap;">${esc(msg.content)}</div>
+        </td>
+      </tr>`;
+  }).join('');
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; margin: 0; padding: 0; background-color: #f6f3f5; -webkit-font-smoothing: antialiased;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f6f3f5;">
+    <tr>
+      <td align="center" style="padding: 32px 16px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 600px;">
+
+          <!-- Branded banner -->
+          <tr>
+            <td style="background: ${color}; border-radius: 16px 16px 0 0; padding: 30px 32px;">
+              <div style="font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: ${onColor}; opacity: 0.75;">New message</div>
+              <div style="margin-top: 6px; font-size: 24px; font-weight: 700; color: ${onColor}; letter-spacing: -0.4px;">${esc(safeBrand)}</div>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="background: #ffffff; border-radius: 0 0 16px 16px; padding: 32px; box-shadow: 0 6px 24px rgba(0,0,0,0.06);">
+              <p style="margin: 0 0 4px 0; font-size: 16px; font-weight: 600; color: #1a202c;">${greeting}</p>
+              <p style="margin: 0 0 28px 0; font-size: 14px; color: #718096; line-height: 1.6;">${subheading}</p>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                ${messagesHtml}
+              </table>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top: 8px;">
+                <tr>
+                  <td align="center" style="border-radius: 999px; background: ${color};">
+                    <a href="${replyUrl}" style="display: block; padding: 15px 24px; color: ${onColor}; text-decoration: none; font-weight: 700; font-size: 15px; border-radius: 999px;">
+                      Reply to ${esc(agentName || safeBrand)} &rarr;
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td align="center" style="padding: 24px 16px 0 16px;">
+              <p style="margin: 0 0 4px 0; font-size: 12px; color: #a0aec0; line-height: 1.5;">
+                Sent because you have an active chat with ${esc(safeBrand)}.
+                You won't receive another for at least ${COOLDOWN_HOURS} hour${COOLDOWN_HOURS > 1 ? 's' : ''}.
+              </p>
+              <p style="margin: 8px 0 0 0; font-size: 11px; color: #cbd5e0;">
+                &copy; ${new Date().getFullYear()} ${esc(safeBrand)} &middot;
+                <a href="https://${esc(storeDomain)}" style="color: #a0aec0; text-decoration: underline;">${esc(storeDomain)}</a>
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+// ──────────────────────────────────────────────
+// HTML EMAIL TEMPLATE — PYNK (editorial / hairline layout)
+// ──────────────────────────────────────────────
+// A deliberately different feel from both the default card and the Lexar
+// banner: a centred serif wordmark, a short accent rule, and agent messages
+// stacked as clean hairline-separated entries (no bubbles, no left-border
+// cards). Same call signature as buildEmailHtml, so it's a drop-in via
+// getEmailBuilder().
+//
+// Like the Lexar template, colours are derived from the brand colour rather
+// than hard-coded, so a light pink Pynk brand still reads: `ink` is a darkened
+// brand colour for coloured text on light, `pageBg`/`hairline` are soft tints,
+// and `onColor` keeps the CTA label legible on the solid button.
+
+function buildEmailHtmlPynk({ brandName, customerName, agentName, messages, conversationId, storeDomain, brandColor }) {
+  const safeBrand = String(brandName || FALLBACK_BRAND_NAME).trim() || FALLBACK_BRAND_NAME;
+  const greeting = customerName ? `Hi ${esc(customerName)},` : 'Hi there,';
+  const replyUrl = `https://${storeDomain}`;
+  const color = brandColor || FALLBACK_BRAND_COLOR;
+  const onColor = readableTextOn(color);     // text on the solid CTA button
+  const ink = mixWithBlack(color, 0.42);     // darkened brand colour for text on light
+  const pageBg = mixWithWhite(color, 0.94);  // very soft same-hue page background
+  const hairline = mixWithWhite(color, 0.8); // tinted divider / card border
+
+  const messageCount = messages.length;
+  const subheading = messageCount === 1
+    ? `${esc(agentName || 'Our team')} replied to your conversation.`
+    : `${messageCount} new replies from ${esc(agentName || 'our team')}.`;
+
+  const lastIndex = messages.length - 1;
+  const messagesHtml = messages.map((msg, i) => {
+    const time = new Date(msg.timestamp).toLocaleString('en-US', {
+      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    });
+    const who = msg.sender_name || 'Support';
+    const divider = i < lastIndex
+      ? `<div style="height: 1px; line-height: 1px; font-size: 0; background: ${hairline}; margin: 20px 0;">&nbsp;</div>`
+      : '';
+
+    return `
+      <div style="font-family: Helvetica, Arial, sans-serif; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; font-weight: 700; color: ${ink};">
+        ${esc(who)}<span style="color: #b8b0b4; font-weight: 400; letter-spacing: 0; text-transform: none; margin-left: 8px;">${time}</span>
+      </div>
+      <div style="margin-top: 8px; font-size: 15px; color: #1a202c; line-height: 1.65; white-space: pre-wrap;">${esc(msg.content)}</div>
+      ${divider}`;
+  }).join('');
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: Georgia, 'Times New Roman', serif; margin: 0; padding: 0; background-color: ${pageBg}; -webkit-font-smoothing: antialiased;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: ${pageBg};">
+    <tr>
+      <td align="center" style="padding: 48px 16px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 540px;">
+
+          <!-- Wordmark -->
+          <tr>
+            <td align="center" style="padding-bottom: 4px;">
+              <div style="font-family: Helvetica, Arial, sans-serif; font-size: 12px; letter-spacing: 3px; text-transform: uppercase; color: ${ink};">New reply</div>
+              <div style="margin-top: 12px; font-size: 30px; font-weight: 700; color: ${ink}; letter-spacing: -0.5px;">${esc(safeBrand)}</div>
+            </td>
+          </tr>
+
+          <!-- Accent rule -->
+          <tr>
+            <td align="center" style="padding: 18px 0 28px 0;">
+              <div style="width: 40px; height: 3px; line-height: 3px; font-size: 0; background: ${color}; border-radius: 2px;">&nbsp;</div>
+            </td>
+          </tr>
+
+          <!-- Card -->
+          <tr>
+            <td style="background: #ffffff; border-radius: 14px; padding: 36px 36px 32px 36px; border: 1px solid ${hairline};">
+              <p style="margin: 0 0 4px 0; font-family: Helvetica, Arial, sans-serif; font-size: 15px; font-weight: 600; color: #1a202c;">${greeting}</p>
+              <p style="margin: 0 0 28px 0; font-family: Helvetica, Arial, sans-serif; font-size: 13px; color: #8a8288; line-height: 1.6;">${subheading}</p>
+              ${messagesHtml}
+            </td>
+          </tr>
+
+          <!-- CTA -->
+          <tr>
+            <td align="center" style="padding: 28px 0 0 0;">
+              <a href="${replyUrl}" style="display: inline-block; background: ${color}; color: ${onColor}; font-family: Helvetica, Arial, sans-serif; padding: 15px 40px; border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 13px; letter-spacing: 1.5px; text-transform: uppercase;">
+                Read &amp; reply
+              </a>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td align="center" style="padding: 32px 16px 0 16px; font-family: Helvetica, Arial, sans-serif;">
+              <p style="margin: 0 0 4px 0; font-size: 12px; color: #a89ea4; line-height: 1.5;">
+                Sent because you have an active chat with ${esc(safeBrand)}.
+                You won't receive another for at least ${COOLDOWN_HOURS} hour${COOLDOWN_HOURS > 1 ? 's' : ''}.
+              </p>
+              <p style="margin: 8px 0 0 0; font-size: 11px; color: #c9bfc5;">
+                &copy; ${new Date().getFullYear()} ${esc(safeBrand)} &middot;
+                <a href="https://${esc(storeDomain)}" style="color: #a89ea4; text-decoration: underline;">${esc(storeDomain)}</a>
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
 function buildPlainText({ brandName, customerName, agentName, messages, replyUrl }) {
   const safeBrand = String(brandName || FALLBACK_BRAND_NAME).trim() || FALLBACK_BRAND_NAME;
   const greeting = customerName ? `Hi ${customerName},` : 'Hi there,';
@@ -891,6 +1228,9 @@ module.exports = {
   resolveFromAddress,
   resolveReplyTo,
   auditEmailConfig,
+  getEmailBuilder,
+  isLexarGroup,
+  isPynkGroup,
 };
 
 
@@ -929,32 +1269,248 @@ module.exports = {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // const { Resend } = require('resend');
+// function toInt(raw, fallback) {
+//   const n = parseInt(raw, 10);
+//   if (!Number.isFinite(n) || n <= 0) {
+//     if (raw !== undefined && raw !== null && raw !== '') {
+//       console.warn(`[Email] Ignoring invalid numeric env value "${raw}", using ${fallback}`);
+//     }
+//     return fallback;
+//   }
+//   return n;
+// }
 
-// const resend = new Resend(process.env.RESEND_API_KEY);
+// const COOLDOWN_HOURS = toInt(process.env.EMAIL_COOLDOWN_HOURS, 1);
+// const COOLDOWN_MS = COOLDOWN_HOURS * 60 * 60 * 1000; // 1 hour default
+// const DEBOUNCE_MS = toInt(process.env.EMAIL_DEBOUNCE_MS, 30000); // 30s debounce to batch messages
+// const SWEEP_INTERVAL_MS = toInt(process.env.EMAIL_SWEEP_INTERVAL_MS, 300000); // 5 min safety net
+// const HEARTBEAT_STALE_MS = 90000; // 90 seconds — customer considered offline if heartbeat older than this
 
-// const COOLDOWN_HOURS      = parseInt(process.env.EMAIL_COOLDOWN_HOURS   || '1',      10);
-// const COOLDOWN_MS         = COOLDOWN_HOURS * 60 * 60 * 1000;
-// const DEBOUNCE_MS         = parseInt(process.env.EMAIL_DEBOUNCE_MS      || '30000',  10);
-// const SWEEP_INTERVAL_MS   = parseInt(process.env.EMAIL_SWEEP_INTERVAL_MS || '300000', 10);
-// const HEARTBEAT_STALE_MS  = 90000;
-
+// // Fallbacks if database has no values
 // const FALLBACK_FROM_ADDRESS = 'support@pepscustomercare.com';
-// const FALLBACK_BRAND_COLOR  = '#1a5632';
+// const FALLBACK_BRAND_COLOR = '#1a5632';
+// const FALLBACK_BRAND_NAME = 'Support';
 
+// // In-memory lock to prevent overlapping debounced sends for the same conversation
 // const pendingSends = new Map();
 // let sweepTimer = null;
+
+// function parseJsonMapEnv(varName) {
+//   const raw = process.env[varName];
+//   if (!raw) return {};
+//   try {
+//     const parsed = JSON.parse(raw);
+//     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+//       console.error(`[Email] ${varName} did not parse to an object, ignoring`);
+//       return {};
+//     }
+//     return parsed;
+//   } catch (err) {
+//     console.error(`[Email] ${varName} is not valid JSON, ignoring:`, err.message);
+//     return {};
+//   }
+// }
+
+
+// const resendClients = new Map();   // apiKey → Resend instance
+// const missingKeyWarned = new Set(); // group slugs already warned about (log once, not per email)
+
+// const RESEND_KEYS_BY_GROUP = parseJsonMapEnv('RESEND_KEYS_BY_GROUP');
+
+// // 'peptides-group' → 'RESEND_API_KEY_PEPTIDES_GROUP'
+// function groupEnvVarName(storeGroup) {
+//   return 'RESEND_API_KEY_' + String(storeGroup).toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+// }
+
+// function resolveApiKey(storeGroup) {
+//   if (storeGroup) {
+//     const fromEnv = process.env[groupEnvVarName(storeGroup)];
+//     if (fromEnv) return { apiKey: fromEnv, source: groupEnvVarName(storeGroup) };
+
+//     const fromMap = RESEND_KEYS_BY_GROUP[storeGroup];
+//     if (fromMap) return { apiKey: fromMap, source: `RESEND_KEYS_BY_GROUP[${storeGroup}]` };
+
+//     if (!missingKeyWarned.has(storeGroup)) {
+//       missingKeyWarned.add(storeGroup);
+//       console.warn(`[Email] No Resend key for group "${storeGroup}" (looked for ${groupEnvVarName(storeGroup)}), using default RESEND_API_KEY`);
+//     }
+//   }
+//   return { apiKey: process.env.RESEND_API_KEY, source: 'RESEND_API_KEY' };
+// }
+
+// function getResendForGroup(storeGroup) {
+//   const { apiKey, source } = resolveApiKey(storeGroup);
+//   if (!apiKey) {
+//     console.error(`[Email] No Resend API key available (group: ${storeGroup || 'none'}) — skipping send`);
+//     return null;
+//   }
+//   if (!resendClients.has(apiKey)) {
+//     resendClients.set(apiKey, new Resend(apiKey));
+//     console.log(`[Email] Resend client initialised for group "${storeGroup || 'default'}" via ${source}`);
+//   }
+//   return resendClients.get(apiKey);
+// }
+
+
+// const FALLBACK_FROM_BY_GROUP = parseJsonMapEnv('RESEND_FROM_BY_GROUP');
+// const REPLY_TO_BY_GROUP = parseJsonMapEnv('RESEND_REPLY_TO_BY_GROUP');
+
+// const missingFromWarned = new Set(); // group slugs already warned about (log once)
+
+// function resolveFromAddress(storeGroup, storeAddress) {
+//   if (storeAddress) return storeAddress;
+
+//   if (storeGroup) {
+//     const groupAddress = FALLBACK_FROM_BY_GROUP[storeGroup];
+//     if (groupAddress) return groupAddress;
+
+//     if (!missingFromWarned.has(storeGroup)) {
+//       missingFromWarned.add(storeGroup);
+//       console.warn(`[Email] No sender address for group "${storeGroup}" (store has none, RESEND_FROM_BY_GROUP has no entry) — falling back to ${FALLBACK_FROM_ADDRESS}; verify that domain in this group's Resend account or sends will bounce`);
+//     }
+//   }
+//   return FALLBACK_FROM_ADDRESS;
+// }
+
+// function resolveReplyTo(storeGroup, fromAddress) {
+//   if (storeGroup && REPLY_TO_BY_GROUP[storeGroup]) return REPLY_TO_BY_GROUP[storeGroup];
+//   return process.env.RESEND_REPLY_TO || fromAddress;
+// }
+
+
+// const TYPO_DOMAINS = {
+//   'gmial.com': 'gmail.com',
+//   'gmai.com': 'gmail.com',
+//   'gmil.com': 'gmail.com',
+//   'gmail.con': 'gmail.com',
+//   'gmail.co': 'gmail.com',
+//   'gnail.com': 'gmail.com',
+//   'yahooo.com': 'yahoo.com',
+//   'yaho.com': 'yahoo.com',
+//   'hotmial.com': 'hotmail.com',
+//   'hotmai.com': 'hotmail.com',
+//   'outlok.com': 'outlook.com',
+//   'iclod.com': 'icloud.com',
+// };
+
+// const badRecipientWarned = new Set(); // conversation ids already warned about
+
+// function recipientProblem(email) {
+//   const value = String(email || '').trim();
+//   if (!value) return 'empty address';
+//   if (!/^[^\s@]+@[^\s@.]+\.[^\s@]+$/.test(value)) return 'malformed address';
+
+//   const domain = value.split('@')[1].toLowerCase();
+//   if (TYPO_DOMAINS[domain]) {
+//     return `domain "${domain}" looks like a typo for "${TYPO_DOMAINS[domain]}"`;
+//   }
+//   return null;
+// }
+
+// function formatAddressHeader(name, address) {
+//   const clean = String(name || '').replace(/[\r\n]+/g, ' ').trim();
+//   if (!clean) return address;
+//   if (/[",;:<>@\[\]\\]/.test(clean)) {
+//     const escaped = clean.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+//     return `"${escaped}" <${address}>`;
+//   }
+//   return `${clean} <${address}>`;
+// }
+
+// async function auditEmailConfig(pool) {
+//   try {
+//     const { rows } = await pool.query(
+//       `SELECT DISTINCT store_group FROM stores WHERE store_group IS NOT NULL ORDER BY store_group`
+//     );
+
+//     if (!rows.length) {
+//       console.log('[Email Config] No store groups found');
+//       return;
+//     }
+
+//     console.log('[Email Config] ── Resolution per store group ──');
+//     for (const { store_group } of rows) {
+//       const { apiKey, source } = resolveApiKey(store_group);
+//       const from = FALLBACK_FROM_BY_GROUP[store_group] || null;
+//       const keyLabel = apiKey ? source : 'NONE — sends will be skipped';
+//       const fromLabel = from
+//         ? from
+//         : `${FALLBACK_FROM_ADDRESS} (shared fallback)`;
+
+//       const mismatch = source !== 'RESEND_API_KEY' && !from;
+//       console.log(
+//         `[Email Config]   ${store_group}: key=${keyLabel} | from=${fromLabel}` +
+//         (mismatch ? '  ⚠ group has its OWN key but no group from-address — verify that domain in this account' : '')
+//       );
+//     }
+//     console.log('[Email Config] ────────────────────────────────');
+//   } catch (err) {
+//     console.error('[Email Config] audit failed:', err.message);
+//   }
+// }
 
 // // ──────────────────────────────────────────────
 // // REAL-TIME: Called after every agent message
 // // ──────────────────────────────────────────────
 
+// /**
+//  * Called after every agent message is saved.
+//  * Checks if customer is offline, then queues email notification via Resend.
+//  *
+//  * @param {object} pool - pg Pool instance
+//  * @param {object} message - saved message row from saveMessage()
+//  *
+//  * Integration (server.js):
+//  *   const { handleOfflineEmailNotification, startEmailSweep } = require('./services/emailService');
+//  *
+//  *   // On server start:
+//  *   startEmailSweep(pool);
+//  *
+//  *   // After saveMessage():
+//  *   if (savedMessage.sender_type === 'agent') {
+//  *     handleOfflineEmailNotification(pool, savedMessage).catch(err =>
+//  *       console.error('[Offline Email] Failed:', err)
+//  *     );
+//  *   }
+//  */
 // async function handleOfflineEmailNotification(pool, message) {
-//   const { conversation_id, sender_name, sender_type, id: messageId } = message;
+//   const { conversation_id, sender_type, id: messageId } = message;
 
 //   if (sender_type !== 'agent') return;
 
 //   try {
+//     // 1. Check customer presence
+//     //    If no presence row exists, treat customer as OFFLINE (not skip!)
 //     const presence = await pool.query(
 //       `SELECT status, last_activity_at, last_heartbeat_at, ws_connected, customer_email
 //        FROM customer_presence
@@ -964,15 +1520,18 @@ module.exports = {
 
 //     const customer = presence.rows.length ? presence.rows[0] : null;
 
+//     // 2. Is customer actively online?
 //     if (customer && isCustomerOnline(customer)) {
 //       console.log(`[Email] Customer online for conv ${conversation_id}, skipping`);
 //       return;
 //     }
 
+//     // If no presence row, log it but continue (customer is assumed offline)
 //     if (!customer) {
 //       console.log(`[Email] No presence row for conv ${conversation_id}, treating as offline`);
 //     }
 
+//     // 3. Check cooldown (max 1 email per hour per conversation)
 //     const lastEmail = await pool.query(
 //       `SELECT sent_at FROM offline_email_log
 //        WHERE conversation_id = $1
@@ -988,11 +1547,14 @@ module.exports = {
 //       }
 //     }
 
+//     // 4. Debounce: if a send is already pending for this conversation, skip.
+//     //    The pending send will pick up all messages when it fires.
 //     if (pendingSends.has(conversation_id)) {
 //       console.log(`[Email] Debounce active for conv ${conversation_id}, message will be included in pending send`);
 //       return;
 //     }
 
+//     // Mark this conversation as having a pending send
 //     const timeout = setTimeout(async () => {
 //       pendingSends.delete(conversation_id);
 //       try {
@@ -1010,12 +1572,9 @@ module.exports = {
 //   }
 // }
 
-// // ──────────────────────────────────────────────
-// // CORE SEND LOGIC
-// // ──────────────────────────────────────────────
-
 // async function sendOfflineEmail(pool, conversation_id, triggerMessageId) {
 //   try {
+//     // 1. Re-check customer presence (they may have come back during debounce)
 //     const presence = await pool.query(
 //       `SELECT status, last_activity_at, last_heartbeat_at, ws_connected, customer_email
 //        FROM customer_presence
@@ -1030,6 +1589,7 @@ module.exports = {
 //       return;
 //     }
 
+//     // 2. Re-check cooldown
 //     const lastEmail = await pool.query(
 //       `SELECT sent_at FROM offline_email_log
 //        WHERE conversation_id = $1
@@ -1046,7 +1606,7 @@ module.exports = {
 //     }
 
 //     const convResult = await pool.query(
-//       `SELECT
+//       `SELECT 
 //          c.id,
 //          c.customer_email,
 //          c.customer_name,
@@ -1054,26 +1614,48 @@ module.exports = {
 //          s.shop_domain,
 //          s.primary_color,
 //          s.email_from_address,
-//          s.email_brand_color
+//          s.email_brand_color,
+//          s.store_group
 //        FROM conversations c
 //        JOIN stores s ON c.shop_id = s.id
 //        WHERE c.id = $1`,
 //       [conversation_id]
 //     );
 
-//     if (!convResult.rows.length) return;
+//     if (!convResult.rows.length) {
+//       console.log(`[Email] Conversation ${conversation_id} not found, skipping`);
+//       return;
+//     }
 //     const conv = convResult.rows[0];
 
+//     // Use email from conversations table, fallback to presence table
 //     const customerEmail = conv.customer_email || (customer && customer.customer_email);
 //     if (!customerEmail) {
 //       console.log(`[Email] No customer email for conv ${conversation_id}, skipping`);
 //       return;
 //     }
 
-//     const emailFromName    = conv.brand_name;
-//     const emailFromAddress = conv.email_from_address || FALLBACK_FROM_ADDRESS;
+//     const addressProblem = recipientProblem(customerEmail);
+//     if (addressProblem) {
+//       if (!badRecipientWarned.has(conversation_id)) {
+//         badRecipientWarned.add(conversation_id);
+//         console.warn(`[Email] Undeliverable recipient "${customerEmail}" for conv ${conversation_id} (${addressProblem}) — skipping send; correct conversations.customer_email to retry`);
+//       }
+//       return;
+//     }
+//     const storeGroup = conv.store_group || null;
+//     const emailFromName    = (conv.brand_name || '').trim() || FALLBACK_BRAND_NAME;
+//     const emailFromAddress = resolveFromAddress(storeGroup, conv.email_from_address);
+//     const replyToAddress   = resolveReplyTo(storeGroup, emailFromAddress);
 //     const brandColor       = conv.email_brand_color  || conv.primary_color || FALLBACK_BRAND_COLOR;
 //     const storeDomain      = (conv.shop_domain || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+
+//     if (!conv.brand_name || conv.brand_name.trim().length < 2) {
+//       console.warn(`[Email] stores.brand_name is missing or too short ("${conv.brand_name}") for conv ${conversation_id} — sending as "${emailFromName}"; fix the store record`);
+//     }
+
+//     const client = getResendForGroup(storeGroup);
+//     if (!client) return;
 
 //     const lastEmailedMsg = await pool.query(
 //       `SELECT m.timestamp AS last_msg_timestamp
@@ -1090,6 +1672,7 @@ module.exports = {
 //       sinceTimestamp = lastEmailedMsg.rows[0].last_msg_timestamp;
 //     }
 
+//     // Also consider last_activity_at if it's more recent (customer was active after last email)
 //     if (customer && customer.last_activity_at) {
 //       const lastActivity = new Date(customer.last_activity_at);
 //       if (lastActivity > new Date(sinceTimestamp)) {
@@ -1097,6 +1680,7 @@ module.exports = {
 //       }
 //     }
 
+//     // 5. Get ALL unread agent messages since the cutoff
 //     const unreadResult = await pool.query(
 //       `SELECT id, content, sender_name, timestamp
 //        FROM messages
@@ -1108,61 +1692,78 @@ module.exports = {
 //     );
 
 //     const unreadMessages = unreadResult.rows;
-//     if (!unreadMessages.length) return;
+//     if (!unreadMessages.length) {
+//       console.log(`[Email] No unread agent messages for conv ${conversation_id} after cutoff ${new Date(sinceTimestamp).toISOString()}, skipping`);
+//       return;
+//     }
 
+//     // Use the latest agent name for the subject line
 //     const latestAgentName = unreadMessages[unreadMessages.length - 1].sender_name || 'Support';
-//     const lastMessageId   = unreadMessages[unreadMessages.length - 1].id;
+//     const lastMessageId = unreadMessages[unreadMessages.length - 1].id;
 
+//     // 6. Build and send email
 //     const emailHtml = buildEmailHtml({
-//       brandName:    emailFromName,
+//       brandName: emailFromName,
 //       customerName: conv.customer_name,
-//       agentName:    latestAgentName,
-//       messages:     unreadMessages,
+//       agentName: latestAgentName,
+//       messages: unreadMessages,
 //       conversationId: conversation_id,
 //       storeDomain,
 //       brandColor,
 //     });
 
 //     const plainText = buildPlainText({
-//       brandName:    emailFromName,
+//       brandName: emailFromName,
 //       customerName: conv.customer_name,
-//       agentName:    latestAgentName,
-//       messages:     unreadMessages,
-//       replyUrl:     `https://${storeDomain}`,
+//       agentName: latestAgentName,
+//       messages: unreadMessages,
+//       replyUrl: `https://${storeDomain}`,
 //     });
 
-//     const { data, error } = await resend.emails.send({
-//       from:    `${emailFromName} <${emailFromAddress}>`,
-//       to:      [customerEmail],
+//     const { data, error } = await client.emails.send({
+//       from: formatAddressHeader(emailFromName, emailFromAddress),
+//       to: [customerEmail],
+//       reply_to: replyToAddress,
 //       subject: `${latestAgentName} replied to your message – ${emailFromName}`,
-//       html:    emailHtml,
-//       text:    plainText,
+//       html: emailHtml,
+//       text: plainText,
+//       headers: {
+//         // Mailbox providers treat a missing List-Unsubscribe on
+//         // machine-generated mail as a spam signal, even for transactional sends.
+//         'List-Unsubscribe': `<mailto:${replyToAddress}?subject=unsubscribe>`,
+//         'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+//         // Stops Gmail from collapsing repeat notifications into one thread and
+//         // hiding the newest message behind a "show trimmed content" link.
+//         'X-Entity-Ref-ID': `conv-${conversation_id}-${lastMessageId}`,
+//       },
 //     });
 
 //     if (error) {
-//       console.error('[Email] Resend error:', error);
+//       console.error(`[Email] Resend error (group: ${storeGroup || 'default'}, from: ${emailFromAddress}):`, error);
 //       return;
 //     }
 
+//     // 7. Log using the LAST message in the batch as the reference
 //     await pool.query(
 //       `INSERT INTO offline_email_log (conversation_id, message_id, customer_email, resend_id)
 //        VALUES ($1, $2, $3, $4)`,
 //       [conversation_id, lastMessageId, customerEmail, data?.id || null]
 //     );
 
-//     console.log(`[Email] ✅ Sent ${unreadMessages.length} message(s) to ${customerEmail} for conv ${conversation_id} (Resend: ${data?.id})`);
+//     console.log(`[Email] ✅ Sent ${unreadMessages.length} message(s) to ${customerEmail} for conv ${conversation_id} via group "${storeGroup || 'default'}" from ${emailFromAddress} (Resend: ${data?.id})`);
 
 //   } catch (err) {
 //     console.error('[Email] sendOfflineEmail error:', err);
 //   }
 // }
 
-// // ──────────────────────────────────────────────
-// // SWEEP: Safety net every 5 minutes
-// // ──────────────────────────────────────────────
-
 // function startEmailSweep(pool) {
 //   console.log(`[Email Sweep] Started — checking every ${SWEEP_INTERVAL_MS / 1000}s`);
+
+//   // Print the resolved per-group config once, before any send happens.
+//   auditEmailConfig(pool);
+
+//   // First sweep after a short delay (let server finish starting)
 //   setTimeout(() => runSweep(pool), 10000);
 //   sweepTimer = setInterval(() => runSweep(pool), SWEEP_INTERVAL_MS);
 // }
@@ -1179,46 +1780,52 @@ module.exports = {
 //   try {
 //     const result = await pool.query(`
 //       WITH last_emailed AS (
-//         SELECT
+//         SELECT 
 //           oel.conversation_id,
-//           MAX(m.timestamp)  AS last_emailed_timestamp,
-//           MAX(oel.sent_at)  AS last_email_sent_at
+//           MAX(m.timestamp) AS last_emailed_timestamp,
+//           MAX(oel.sent_at) AS last_email_sent_at
 //         FROM offline_email_log oel
 //         JOIN messages m ON m.id = oel.message_id
 //         GROUP BY oel.conversation_id
 //       )
 //       SELECT DISTINCT c.id AS conversation_id
 //       FROM conversations c
-//       LEFT JOIN last_emailed le  ON le.conversation_id  = c.id
+//       LEFT JOIN last_emailed le ON le.conversation_id = c.id
 //       LEFT JOIN customer_presence cp ON cp.conversation_id = c.id
 //       JOIN messages m ON m.conversation_id = c.id
 //         AND m.sender_type = 'agent'
 //         AND (le.last_emailed_timestamp IS NULL OR m.timestamp > le.last_emailed_timestamp)
 //       WHERE c.customer_email IS NOT NULL
+//         -- Customer is NOT online (no presence row, or offline, or stale heartbeat)
 //         AND (
 //           cp.conversation_id IS NULL
 //           OR cp.status != 'online'
 //           OR cp.ws_connected = false
 //           OR cp.last_heartbeat_at < NOW() - INTERVAL '90 seconds'
 //         )
+//         -- Respect cooldown: no email sent in the last cooldown period
 //         AND (
 //           le.last_email_sent_at IS NULL
-//           OR le.last_email_sent_at < NOW() - INTERVAL '${COOLDOWN_HOURS} hours'
+//           OR le.last_email_sent_at < NOW() - ($1 * INTERVAL '1 hour')
 //         )
 //       ORDER BY c.id
-//     `);
+//     `, [COOLDOWN_HOURS]);
 
 //     if (!result.rows.length) return;
 
 //     console.log(`[Email Sweep] Found ${result.rows.length} conversation(s) with unsent messages`);
 
 //     for (const row of result.rows) {
+//       // Skip if there's already a pending debounced send
 //       if (pendingSends.has(row.conversation_id)) continue;
+
 //       try {
 //         await sendOfflineEmail(pool, row.conversation_id, null);
 //       } catch (err) {
 //         console.error(`[Email Sweep] Error for conv ${row.conversation_id}:`, err);
 //       }
+
+//       // Rate limit between sends
 //       await new Promise(resolve => setTimeout(resolve, 500));
 //     }
 
@@ -1231,10 +1838,14 @@ module.exports = {
 // // HELPERS
 // // ──────────────────────────────────────────────
 
+// /**
+//  * Check if customer is currently online based on presence data.
+//  */
 // function isCustomerOnline(customer) {
 //   if (!customer) return false;
-//   const now           = Date.now();
+//   const now = Date.now();
 //   const lastHeartbeat = new Date(customer.last_heartbeat_at).getTime();
+//   if (!Number.isFinite(lastHeartbeat)) return false;
 //   return (
 //     customer.status === 'online' &&
 //     customer.ws_connected &&
@@ -1255,26 +1866,30 @@ module.exports = {
 // // ──────────────────────────────────────────────
 
 // function buildEmailHtml({ brandName, customerName, agentName, messages, conversationId, storeDomain, brandColor }) {
+//   const safeBrand = String(brandName || FALLBACK_BRAND_NAME).trim() || FALLBACK_BRAND_NAME;
 //   const greeting = customerName ? `Hi ${esc(customerName)},` : 'Hi there,';
-//   const replyUrl = storeDomain ? `https://${storeDomain}` : '#';
-//   const color    = brandColor || FALLBACK_BRAND_COLOR;
+//   const replyUrl = `https://${storeDomain}`;
+//   const color = brandColor || FALLBACK_BRAND_COLOR;
 
-//   const initials = (brandName || 'S')
-//     .split(' ')
+//   // Guarded: a null brand_name used to throw here, and a one-character brand
+//   // rendered a single-letter badge.
+//   const initials = safeBrand
+//     .split(/\s+/)
 //     .filter(w => w.length > 0)
 //     .map(w => w[0].toUpperCase())
 //     .slice(0, 2)
-//     .join('');
+//     .join('') || safeBrand.slice(0, 2).toUpperCase();
 
 //   const messageCount = messages.length;
-//   const subheading   = messageCount === 1
-//     ? `You have a new message in your conversation with <strong>${esc(brandName)}</strong>.`
-//     : `You have <strong>${messageCount} new messages</strong> in your conversation with <strong>${esc(brandName)}</strong>.`;
+//   const subheading = messageCount === 1
+//     ? `You have a new message in your conversation with <strong>${esc(safeBrand)}</strong>.`
+//     : `You have <strong>${messageCount} new messages</strong> in your conversation with <strong>${esc(safeBrand)}</strong>.`;
 
 //   const messagesHtml = messages.map(msg => {
 //     const time = new Date(msg.timestamp).toLocaleString('en-US', {
 //       month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
 //     });
+
 //     return `
 //       <tr>
 //         <td style="padding: 0 0 12px 0;">
@@ -1300,12 +1915,12 @@ module.exports = {
 //     <tr>
 //       <td align="center" style="padding: 40px 16px;">
 //         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 560px;">
-
+          
 //           <!-- Brand Icon -->
 //           <tr>
 //             <td align="center" style="padding-bottom: 24px;">
 //               <div style="display: inline-block; background: ${color}; color: white; width: 44px; height: 44px; line-height: 44px; text-align: center; border-radius: 10px; font-size: 20px; font-weight: 700;">
-//                 ${initials}
+//                 ${esc(initials)}
 //               </div>
 //             </td>
 //           </tr>
@@ -1314,7 +1929,7 @@ module.exports = {
 //           <tr>
 //             <td style="background: #ffffff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06);">
 //               <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-
+                
 //                 <tr>
 //                   <td style="padding: 32px 32px 0 32px;">
 //                     <h1 style="margin: 0 0 6px 0; font-size: 20px; font-weight: 700; color: #1a202c;">
@@ -1350,7 +1965,7 @@ module.exports = {
 //           <tr>
 //             <td align="center" style="padding: 24px 16px 0 16px;">
 //               <p style="margin: 0 0 4px 0; font-size: 12px; color: #a0aec0; line-height: 1.5;">
-//                 Sent because you have an active chat with ${esc(brandName)}.
+//                 Sent because you have an active chat with ${esc(safeBrand)}.
 //               </p>
 //               <p style="margin: 0; font-size: 12px; color: #a0aec0;">
 //                 You won't receive another for at least ${COOLDOWN_HOURS} hour${COOLDOWN_HOURS > 1 ? 's' : ''}.
@@ -1361,7 +1976,8 @@ module.exports = {
 //           <tr>
 //             <td align="center" style="padding: 20px 16px 0 16px;">
 //               <p style="margin: 0; font-size: 11px; color: #cbd5e0;">
-//                 &copy; ${new Date().getFullYear()} ${esc(brandName)}${storeDomain ? ` &middot; <a href="https://${esc(storeDomain)}" style="color: #a0aec0; text-decoration: underline;">${esc(storeDomain)}</a>` : ''}
+//                 &copy; ${new Date().getFullYear()} ${esc(safeBrand)} &middot;
+//                 <a href="https://${esc(storeDomain)}" style="color: #a0aec0; text-decoration: underline;">${esc(storeDomain)}</a>
 //               </p>
 //             </td>
 //           </tr>
@@ -1375,8 +1991,9 @@ module.exports = {
 // }
 
 // function buildPlainText({ brandName, customerName, agentName, messages, replyUrl }) {
+//   const safeBrand = String(brandName || FALLBACK_BRAND_NAME).trim() || FALLBACK_BRAND_NAME;
 //   const greeting = customerName ? `Hi ${customerName},` : 'Hi there,';
-//   const msgText  = messages.map(msg => {
+//   const msgText = messages.map(msg => {
 //     const time = new Date(msg.timestamp).toLocaleString('en-US', {
 //       month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
 //     });
@@ -1385,14 +2002,14 @@ module.exports = {
 
 //   return `${greeting}
 
-// You have ${messages.length} new message${messages.length > 1 ? 's' : ''} from ${agentName || 'our team'} at ${brandName}:
+// You have ${messages.length} new message${messages.length > 1 ? 's' : ''} from ${agentName || 'our team'} at ${safeBrand}:
 
 // ${msgText}
 
 // Continue here: ${replyUrl}
 
 // ---
-// Sent because you have an active chat with ${brandName}.
+// Sent because you have an active chat with ${safeBrand}.
 // You won't receive another for at least ${COOLDOWN_HOURS} hour${COOLDOWN_HOURS > 1 ? 's' : ''}.`;
 // }
 
@@ -1411,21 +2028,9 @@ module.exports = {
 //   cancelPendingEmail,
 //   startEmailSweep,
 //   stopEmailSweep,
+//   getResendForGroup,
+//   resolveFromAddress,
+//   resolveReplyTo,
+//   auditEmailConfig,
 // };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
