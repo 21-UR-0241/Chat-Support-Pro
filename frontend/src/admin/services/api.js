@@ -1,6 +1,4 @@
 
-
-
 // const API_URL = import.meta.env.PROD 
 //   ? import.meta.env.VITE_API_URL || 'https://chat-support-pro.onrender.com'
 //   : '';
@@ -25,11 +23,6 @@
 //   async fetch(endpoint, options = {}) {
 //     const method = (options.method || 'GET').toUpperCase();
 //     let url = `${this.baseUrl}${endpoint}`;
-
-//     // Reads only: bust the cache. On the deployed build the browser was serving
-//     // stale GET responses (e.g. store-group counts) even after the data changed,
-//     // because requests hit Render directly with no cache headers. A unique URL
-//     // can't be served from any browser/proxy/CDN cache.
 //     if (method === 'GET') {
 //       url += (url.includes('?') ? '&' : '?') + `_=${Date.now()}`;
 //     }
@@ -345,17 +338,6 @@
 //     return this.fetch('/api/stats/discord-daily-report/trigger', { method: 'POST' });
 //   }
   
-//   // // ============ Analytics ============
-
-//   // async getCommonQuestions(params = {}) {
-//   //   const queryParams = new URLSearchParams(params).toString();
-//   //   return this.fetch(`/api/analytics/common-questions${queryParams ? '?' + queryParams : ''}`);
-//   // }
-
-//   // async clearAnalyticsCache() {
-//   //   return this.fetch('/api/analytics/clear-cache', { method: 'POST' });
-//   // }
-
 //   // ============ Employees ============
 
 //   async getEmployees() {
@@ -510,16 +492,6 @@
 
 
 
-
-
-
-
-
-
-
-
-
-
 const API_URL = import.meta.env.PROD 
   ? import.meta.env.VITE_API_URL || 'https://chat-support-pro.onrender.com'
   : '';
@@ -544,11 +516,6 @@ class ApiService {
   async fetch(endpoint, options = {}) {
     const method = (options.method || 'GET').toUpperCase();
     let url = `${this.baseUrl}${endpoint}`;
-
-    // Reads only: bust the cache. On the deployed build the browser was serving
-    // stale GET responses (e.g. store-group counts) even after the data changed,
-    // because requests hit Render directly with no cache headers. A unique URL
-    // can't be served from any browser/proxy/CDN cache.
     if (method === 'GET') {
       url += (url.includes('?') ? '&' : '?') + `_=${Date.now()}`;
     }
@@ -565,7 +532,16 @@ class ApiService {
     };
 
     try {
-      const response = await fetch(url, { ...defaultOptions, ...options });
+      // options is spread FIRST and headers is set explicitly from the merged
+      // object above. The old order ({ ...defaultOptions, ...options }) let a
+      // caller's `headers` replace the whole object, dropping Content-Type and
+      // the bearer token.
+      const response = await fetch(url, {
+        ...options,
+        ...defaultOptions,
+        method,
+        headers: defaultOptions.headers,
+      });
       
       if (response.status === 401) {
         this.handleUnauthorized();
@@ -583,7 +559,9 @@ class ApiService {
 
       return await response.json();
     } catch (error) {
-      console.error('API Error:', error);
+      // A cancelled request is not a failure. Callers that pass an AbortSignal
+      // would otherwise log on every superseded keystroke or filter change.
+      if (error?.name !== 'AbortError') console.error('API Error:', error);
       throw error;
     }
   }
@@ -1003,6 +981,81 @@ async getPromoSent() {
 
   async clearBrainCache() {
     return this.fetch('/api/ai/brain-cache/clear', { method: 'POST' });
+  }
+
+  // ============ QA Automation (admin only) ============
+  // Every route is admin-gated server-side; a non-admin gets a 403, which
+  // this.fetch turns into 'Access denied. You do not have permission.'
+  // `signal` is passed through so callers can cancel superseded requests.
+
+  async getQaHealth({ signal } = {}) {
+    return this.fetch('/api/qa/health', { signal });
+  }
+
+  async getQaRules({ signal } = {}) {
+    return this.fetch('/api/qa/rules', { signal });
+  }
+
+  async getQaOverview({ days = 14, dateFrom, dateTo, signal } = {}) {
+    const params = new URLSearchParams({ days });
+    if (dateFrom) params.set('dateFrom', dateFrom);
+    if (dateTo)   params.set('dateTo', dateTo);
+    return this.fetch(`/api/qa/overview?${params}`, { signal });
+  }
+
+  async getQaLeaderboard({ days = 14, signal } = {}) {
+    return this.fetch(`/api/qa/leaderboard?days=${days}`, { signal });
+  }
+
+  async getQaViolations({ days = 14, agentId, signal } = {}) {
+    const params = new URLSearchParams({ days });
+    if (agentId) params.set('agentId', agentId);
+    return this.fetch(`/api/qa/violations?${params}`, { signal });
+  }
+
+  async getQaReviews({
+    days = 14, page = 1, limit = 25, sort = 'recent',
+    agentId, grade, criticalOnly, q, ruleId, storeId, signal,
+  } = {}) {
+    const params = new URLSearchParams({ days, page, limit, sort });
+    if (agentId)      params.set('agentId', agentId);
+    if (grade)        params.set('grade', grade);
+    if (criticalOnly) params.set('criticalOnly', 'true');
+    if (q)            params.set('q', q);
+    if (ruleId)       params.set('ruleId', ruleId);
+    if (storeId)      params.set('storeId', storeId);
+    return this.fetch(`/api/qa/reviews?${params}`, { signal });
+  }
+
+  async getQaReview(id) {
+    return this.fetch(`/api/qa/reviews/${id}`);
+  }
+
+  async regradeQaReview(id, { useAi = true } = {}) {
+    return this.fetch(`/api/qa/reviews/${id}/regrade`, {
+      method: 'POST',
+      body: JSON.stringify({ useAi }),
+    });
+  }
+
+  async deleteQaReview(id) {
+    return this.fetch(`/api/qa/reviews/${id}`, { method: 'DELETE' });
+  }
+
+  async checkQaDraft({ text, customerMessage = null, useAi = false }) {
+    return this.fetch('/api/qa/check', {
+      method: 'POST',
+      body: JSON.stringify({ text, customerMessage, useAi }),
+    });
+  }
+
+  // Returns 409 when a scan is already running on another instance — that
+  // arrives here as a thrown Error carrying the server's message.
+  async runQaScan({ hours = 24, limit = 100, useAi = true, agentId, storeGroup } = {}) {
+    return this.fetch('/api/qa/scan', {
+      method: 'POST',
+      body: JSON.stringify({ hours, limit, useAi, agentId, storeGroup }),
+    });
   }
   
   // ============ Health Check ============

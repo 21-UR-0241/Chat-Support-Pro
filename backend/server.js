@@ -2694,6 +2694,7 @@ const { getBrainContext, refreshBrainCache, getBrainSettings } = require('./brai
 const { callAnthropicAPIWithRetry } = require('./lib/ai-suggestions');
 const createAiRoutes = require('./routes/ai-routes');
 const promoRoutes = require('./routes/promo-routes');
+const { createQaRoutes, startQaAutoScan, stopQaAutoScan } = require('./routes/qa-routes');
 
 const app = express();
 const server = http.createServer(app);
@@ -2772,10 +2773,6 @@ function camelToSnake(obj) {
   return snakeObj;
 }
 
-// ── Store credential stripping ──────────────────────────────────────────────
-// The stores row carries live Shopify credentials. Any endpoint that hands a
-// raw store row to the browser publishes them to devtools, the JS heap and
-// every proxy in between. Every store response goes through this.
 const STORE_SECRET_FIELDS = ['access_token', 'api_key', 'api_secret', 'scope'];
 
 function stripStoreSecrets(store) {
@@ -2797,11 +2794,6 @@ async function mapLimit(items, limit, fn) {
   }
   return out;
 }
-
-// ============ CACHE (write-invalidated + optional TTL) ============
-// Entries are cleared on write. A TTL can be attached per entry; expiry is
-// checked lazily on read instead of arming a setTimeout per request (the old
-// version leaked one timer per cache miss).
 
 class AppCache {
   constructor(maxEntries = 5000) { this.store = new Map(); this.max = maxEntries; }
@@ -2865,18 +2857,8 @@ function invalidateStoreCache(identifier) {
   appCache.invalidatePrefix('convs:');
 }
 
-// ============ EMPLOYEE STORE SCOPE ============
-// An agent with can_view_all_stores = false may only see conversations from the
-// store GROUPS in employees.assigned_groups. Groups rather than individual
-// stores: a store added to `lexar-peptides` tomorrow is automatically visible
-// to everyone assigned that group, with no per-agent re-editing. Resolved per
-// request and cached briefly, because it is consulted on every conversation
-// read.
 
 async function getRequestStoreScope(req) {
-  // Admins always have full visibility. Without this an admin whose
-  // can_view_all_stores got toggled off would lock themselves out of the very
-  // screen used to fix it.
   if (req.user?.role === 'admin') return { canViewAll: true, groups: null };
 
   const cacheKey = `scope:${req.user.id}`;
@@ -2888,16 +2870,10 @@ async function getRequestStoreScope(req) {
   return scope;
 }
 
-/**
- * Cache discriminator for scoped reads. Without this a restricted agent's
- * 12-row conversation list is served from cache to an admin (and vice versa) —
- * the cache key must encode WHO is asking, not just what was asked.
- */
 function scopeCacheKey(scope, req) {
   return scope.canViewAll ? 'all' : `emp${req.user.id}`;
 }
 
-/** True when the requester may read/act on this conversation. */
 async function canAccessConversation(req, conversationId) {
   const scope = await getRequestStoreScope(req);
   if (scope.canViewAll) return true;
@@ -2905,11 +2881,7 @@ async function canAccessConversation(req, conversationId) {
     `SELECT s.store_group FROM conversations c
        JOIN stores s ON c.shop_id = s.id
       WHERE c.id = $1`, [conversationId]);
-  // Unknown conversation: let the caller's own 404 path answer, don't mask it
-  // as a permissions error.
   if (!rows[0]) return true;
-  // An ungrouped store is reachable only by a full-access account, so it can't
-  // fall through to "everyone" by accident.
   if (!rows[0].store_group) return false;
   return scope.groups.includes(rows[0].store_group);
 }
@@ -3510,6 +3482,7 @@ app.use('/shopify', shopifyAppRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/ai/training', aiTrainingRoutes);
 app.use('/api/ai', createAiRoutes({ getCachedStore }));
+app.use('/api/qa', createQaRoutes({ appCache }));
 
 // ============ DISCORD REPORTS ============
 
@@ -5205,13 +5178,6 @@ function setupKeepAlive() {
   }, 'keep-alive');
 }
 
-// ============ BACKGROUND JOBS ============
-// Every job below:
-//   • holds a Postgres advisory lock, so only ONE instance runs it
-//   • uses ONE dedicated connection and runs its queries sequentially on it
-// This is the fix for the pool exhaustion that produced
-// "Connection terminated due to connection timeout" in the presence cleanup.
-
 const redisManager = require('./redis-manager');
 
 const jobRunning = new Set();
@@ -5228,13 +5194,9 @@ const JOB_LOCK_TTL = {
 async function acquireJobLock(name) {
   const ttl = JOB_LOCK_TTL[name] || 50;
   try {
-    // NX = only if absent, EX = always with a TTL. Never explicitly released:
-    // expiry IS the release, so a crashed instance cannot strand it.
     const ok = await redisManager.client.set(`joblock:${name}`, String(process.pid), 'EX', ttl, 'NX');
     return ok === 'OK';
   } catch (e) {
-    // Redis unreachable: fall back to the in-process guard. Duplicate work is
-    // better than jobs silently never running.
     console.warn(`[${name}] lock unavailable (${e.message}) — proceeding unlocked`);
     return true;
   }
@@ -5249,9 +5211,6 @@ async function runJob(name, _lockId, fn) {
   if (!(await acquireJobLock(name))) return;     // another instance owns this window
 
   jobRunning.add(name);
-  // Only check out a connection for jobs that take one. The Discord reporters
-  // are zero-arity and do their own pool.query + a 15s HTTP call — no reason to
-  // pin a connection across that.
   const needsClient = fn.length > 0;
   const client = needsClient ? await db.pool.connect().catch(() => null) : null;
   if (needsClient && !client) { jobRunning.delete(name); return; }
@@ -5303,10 +5262,6 @@ async function runAutoReply(client) {
 
   if (!rows.length) return;
 
-  // Sequential on the single lock connection. The previous version fanned all
-  // 20 rows out in parallel with 3 queries each — up to 60 concurrent pool
-  // checkouts per tick, which starved every other query including this job's
-  // siblings.
   for (const conv of rows) {
     try {
       const insertResult = await client.query(`
@@ -5408,6 +5363,8 @@ function scheduleNextDailyReport() {
   timers.push({ t, label: 'discord-daily', isTimeout: true });
 }
 
+startQaAutoScan({ appCache });
+
 function startBackgroundJobs() {
   // Presence cleanup — every 3 minutes (matches the 3-minute stale threshold).
   every(3 * 60 * 1000,
@@ -5487,8 +5444,8 @@ async function startServer() {
     db.checkSearchIndexes()
       .then(rows => {
         const valid = rows.filter(r => r.valid).map(r => r.index_name);
-        if (valid.length < 3) {
-          console.warn(`⚠️  Search indexes missing or invalid (${valid.length}/3 valid).`);
+      if (valid.length < 4) {
+          console.warn(`⚠️  Search indexes missing or invalid (${valid.length}/4 valid).`);
           console.warn('   Run once: node scripts/build-search-indexes.js');
         } else {
           console.log('✅ Search indexes present and valid');
@@ -5537,6 +5494,7 @@ async function shutdown(signal) {
   readBroadcastTimers.clear();
 
   try { stopEmailSweep?.(); } catch (e) { /* optional */ }
+  try { stopQaAutoScan?.(); } catch (e) { /* optional */ }
 
   // Backstop in case any step below hangs.
   const forceExit = setTimeout(() => {

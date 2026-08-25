@@ -1,4 +1,5 @@
 
+
 // import React, { useState, useEffect, useRef, useCallback, Suspense, lazy } from 'react';
 // import api from './services/api';
 // import { useConversations } from './hooks/useConversations';
@@ -233,6 +234,10 @@
 //   const wsAuthedOnceRef             = useRef(false);
 //   const audioCtxRef                 = useRef(null); // WebAudio ctx — foreground enhancement only
 //   const beepAudioRef                = useRef(null); // reused, pre-unlocked <audio> — PRIMARY beep (survives bg tab)
+//   // Conversations currently waiting on a deferred in-group decision (see
+//   // notifyIfInGroup). Guards against a burst of frames for the same unknown
+//   // conversation firing a refresh storm.
+//   const deferredNotifyRef           = useRef(new Set());
 //   // Which conversation this socket is currently joined to, server-side. Kept in
 //   // a ref so the 'connected' handler can re-issue the join after a reconnect —
 //   // a reconnect gives us a NEW server-side connection record with no
@@ -654,8 +659,15 @@
 //       if (Object.keys(patch).length > 0) h.updateConversation(convId, patch);
 
 //       // ── Notification ownership: App is the SINGLE source of truth. ──────────
-//       // Notify the instant the WS event lands — before any list filtering, group
-//       // scoping, search mode, or state round-trip.
+//       // The WS fan-out is NOT group-aware — broadcastToAgents sends every store's
+//       // traffic to every connected agent — so notifying straight off the raw
+//       // event meant an agent sitting in one group heard beeps and got popups for
+//       // all the others. Everything now goes through notifyIfInGroup, which is the
+//       // one door: it decides whether the conversation belongs to the group this
+//       // dashboard is currently scoped to, and stays silent when it doesn't. With
+//       // "All Stores" selected there's no scoping and every message notifies, as
+//       // before. showNotification/playBeep are deliberately NOT exposed on
+//       // handlersRef any more so a future WS handler can't bypass the gate.
 //       if (sender === 'agent') { h.clearNotificationsForConversation(convId); return; }
 
 //       if (sender === 'customer') {
@@ -665,8 +677,7 @@
 //           const existing = curList.find(c => String(c.id) === String(convId));
 //           const name = existing?.customerName || existing?.customer_name
 //                      || msg.senderName || msg.sender_name || 'Guest';
-//           h.showNotification(convId, name, msg.content || 'New message'); // OS notification
-//           h.playBeep();                                                    // audible cue
+//           h.notifyIfInGroup(convId, name, msg.content || 'New message', data, msg);
 //         }
 //       }
 //     });
@@ -706,8 +717,15 @@
 //       const emoji = a.severity === 'critical' ? '🚨' : a.severity === 'high' ? '⚠️' : '🔔';
 //       h.updateConversation(a.conversationId, { priority: 'urgent', legalFlag: true, legalFlagSeverity: a.severity, legalFlagTerm: a.matchedTerm });
 //       if (String(activeConversationRef.current?.id) !== String(a.conversationId)) {
-//         h.showNotification(a.conversationId, `${emoji} Legal Threat — ${a.severity?.toUpperCase()}`, `"${a.matchedTerm}" from ${a.senderName || 'Customer'}`);
-//         h.playBeep(); // legal threats should beep too
+//         // Same group gate as new_message — a legal threat raised against another
+//         // group's store is that group's alert, not this agent's.
+//         h.notifyIfInGroup(
+//           a.conversationId,
+//           `${emoji} Legal Threat — ${a.severity?.toUpperCase()}`,
+//           `"${a.matchedTerm}" from ${a.senderName || 'Customer'}`,
+//           data,
+//           a
+//         );
 //       }
 //     });
 
@@ -870,6 +888,72 @@
 //     }
 //   };
 
+//   // ── Notification group scoping ────────────────────────────────────────────
+//   // Does this conversation belong to the group the dashboard is scoped to?
+//   //   'in'      → notify
+//   //   'out'     → stay silent, it's another group's traffic
+//   //   'unknown' → we've never seen this conversation AND the frame carried no
+//   //               store identity (typical of a brand-new customer's first
+//   //               message). Resolved asynchronously in notifyIfInGroup rather
+//   //               than guessed, because guessing "in" reintroduces cross-group
+//   //               noise and guessing "out" drops a real first contact.
+//   // "All Stores" (selectedGroup === null) is never scoped. Neither is the window
+//   // before `stores` has loaded — same permissive stance as isConversationInGroup,
+//   // since with no store list there is nothing to match against.
+//   const conversationGroupState = useCallback((convId, data = null, msg = null) => {
+//     if (!selectedGroup) return 'in';
+//     if (groupStoreKeys.size === 0) return 'in';
+
+//     const known = conversationsRef.current.find(c => String(c.id) === String(convId));
+//     if (known) return isConversationInGroup(known) ? 'in' : 'out';
+
+//     // Fall back to whatever store identity the WS frame itself carried.
+//     const storeIdentifier =
+//       data?.storeIdentifier ?? data?.store_identifier ??
+//       msg?.storeIdentifier  ?? msg?.store_identifier  ?? null;
+//     const shopId =
+//       data?.shopId ?? data?.shop_id ?? data?.storeId ??
+//       msg?.shopId  ?? msg?.shop_id  ?? msg?.storeId  ?? null;
+
+//     if (storeIdentifier != null || shopId != null) {
+//       return isConversationInGroup({ storeIdentifier, shopId }) ? 'in' : 'out';
+//     }
+//     return 'unknown';
+//   }, [selectedGroup, groupStoreKeys, isConversationInGroup]);
+
+//   // The ONE door for every WS-driven notification. Beep + OS popup only fire for
+//   // conversations in the currently selected group.
+//   const notifyIfInGroup = useCallback(async (convId, title, preview, data = null, msg = null) => {
+//     const state = conversationGroupState(convId, data, msg);
+
+//     if (state === 'out') return;
+
+//     if (state === 'in') {
+//       showNotification(convId, title, preview);
+//       playBeep();
+//       return;
+//     }
+
+//     // 'unknown' — pull the conversation list (the server already scopes it to
+//     // this group) and re-decide once the row lands. If it still isn't there, it
+//     // isn't ours, so stay silent. Costs the beep a beat on first contact only.
+//     const key = String(convId);
+//     if (deferredNotifyRef.current.has(key)) return; // a burst shouldn't trigger a refresh storm
+//     deferredNotifyRef.current.add(key);
+//     try {
+//       await refreshConversations();
+//       // Let the conversationsRef sync effect flush after the state commit.
+//       await new Promise(resolve => setTimeout(resolve, 250));
+//       if (conversationGroupState(convId) === 'in') {
+//         showNotification(convId, title, preview);
+//         playBeep();
+//       }
+//     } catch { /* ignore — a failed refresh just means no notification */ }
+//     finally {
+//       deferredNotifyRef.current.delete(key);
+//     }
+//   }, [conversationGroupState, refreshConversations, playBeep]);
+
 //   const requestNotificationPermission = () => {
 //     if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
 //   };
@@ -910,11 +994,13 @@
 //   // Runs every render; placed after all referenced functions are defined so
 //   // there's no temporal-dead-zone issue. The WS effect reads handlersRef.current
 //   // at event time, so it never needs these in its dependency array.
+//   //
+//   // showNotification and playBeep are intentionally absent: every notification
+//   // path must go through notifyIfInGroup so the group scoping can't be skipped.
 //   handlersRef.current = {
 //     updateConversation, handleMarkAsRead, setActiveConversationId,
 //     removeFromExcluded, removeEmailFromExcluded, refreshConversations,
-//     showNotification, clearNotificationsForConversation,
-//     playBeep,
+//     notifyIfInGroup, clearNotificationsForConversation,
 //   };
 
 //   return (
@@ -1292,9 +1378,6 @@
 
 
 
-
-
-
 import React, { useState, useEffect, useRef, useCallback, Suspense, lazy } from 'react';
 import api from './services/api';
 import { useConversations } from './hooks/useConversations';
@@ -1316,6 +1399,7 @@ const StoreManagement       = lazy(() => import('./components/StoreManagement'))
 const ArchivedConversations = lazy(() => import('./components/Archivedconversations'));
 const BlacklistManager      = lazy(() => import('./components/Blacklistmanager'));
 const PromoEmailBlast       = lazy(() => import('./components/PromoEmailBlast'));
+const QAAutomation          = lazy(() => import('./components/QAAutomation'));
 
 const DEFAULT_GROUP_COLOR = '#25d366';
 
@@ -1786,7 +1870,7 @@ const getEmployeeName = (emp) => emp.employeeName || emp.name || 'Unknown';
   }, [profileDropdownOpen]);
 
   useEffect(() => {
-    if (['employees','stores','blacklist','training','promo'].includes(activePage) && employee.role !== 'admin')
+    if (['employees','stores','blacklist','training','promo','qa'].includes(activePage) && employee.role !== 'admin')
       setActivePage('dashboard');
   }, [activePage, employee.role]);
 
@@ -2399,6 +2483,12 @@ const handleTyping = (isTyping) => {
                     {activePage === 'training' && <span className="dropdown-item-check">✓</span>}
                   </button>
 
+                  <button className={`dropdown-item ${activePage === 'qa' ? 'dropdown-item--active' : ''}`} onClick={() => navigateTo('qa')} type="button" role="menuitem">
+                    <span className="dropdown-item-icon">🎯</span>
+                    <span className="dropdown-item-label">QA Automation</span>
+                    {activePage === 'qa' && <span className="dropdown-item-check">✓</span>}
+                  </button>
+
                   <button
                     className={`dropdown-item ${activePage === 'promo' ? 'dropdown-item--active' : ''}`}
                     onClick={() => navigateTo('promo')}
@@ -2576,6 +2666,19 @@ const handleTyping = (isTyping) => {
           </ErrorBoundary>
         </div>
       )}
+
+      {/* QA Automation renders its own dark panel and scrolls internally, so the
+          wrapper allows overflow rather than clipping it like the others. */}
+      {activePage === 'qa' && employee.role === 'admin' && (
+        <div className="app-content full-width" style={{ height: 'calc(100vh - 60px)', overflowY: 'auto', display: 'block' }}>
+          <ErrorBoundary>
+            <Suspense fallback={<div className="loading-container"><div className="spinner" /></div>}>
+              <QAAutomation user={employee} />
+            </Suspense>
+          </ErrorBoundary>
+        </div>
+      )}
+
       {activePage === 'promo' && employee.role === 'admin' && (
         <div className="app-content full-width" style={{ height: 'calc(100vh - 60px)', overflow: 'hidden' }}>
           <ErrorBoundary>

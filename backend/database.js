@@ -1,27 +1,4 @@
 
-// // ============================================================================
-// // database.js — Chat Support Pro
-// // ============================================================================
-// // KEY CHANGES vs previous version:
-// //  1. Two pools. `pool` (app traffic) keeps statement_timeout: 15s. DDL,
-// //     backfills and rollups run on a short-lived `maintenancePool()` with
-// //     statement_timeout: 0 — a 15s cap was killing migrations and index builds,
-// //     which threw, which made startServer() process.exit(1) → boot loop.
-// //  2. keepAlive: true. Without TCP keepalive, idle sockets get silently reaped
-// //     between the app and the DB and the next checkout throws
-// //     "Connection terminated unexpectedly".
-// //  3. schema_migrations ledger + advisory lock. Migrations run ONCE, ever, on
-// //     ONE instance. Previously migration_004 rewrote the whole conversations
-// //     table on every single boot.
-// //  4. refreshResponseStats: 21-day window, upsert instead of DELETE-all,
-// //     runs on the maintenance pool under an advisory lock.
-// //  5. testConnection() now throws instead of swallowing. The old version
-// //     returned false, which made /health's catch block dead code.
-// //  6. Trigram/GIN search indexes moved OUT of the boot path — see
-// //     scripts/build-search-indexes.js. They take minutes and can never
-// //     complete under a 15s statement_timeout.
-// // ============================================================================
-
 // const { Pool } = require('pg');
 // require('dotenv').config();
 
@@ -29,7 +6,6 @@
 // const IS_LOCAL_OR_INTERNAL = /\.internal|localhost|127\.0\.0\.1/.test(CONNECTION_STRING || '');
 // const SSL_CONFIG = IS_LOCAL_OR_INTERNAL ? false : { rejectUnauthorized: false };
 
-// // ── Advisory lock IDs (arbitrary but must be stable and unique per job) ──
 // const LOCKS = {
 //   MIGRATIONS:        915001,
 //   RESPONSE_STATS:    915002,
@@ -66,10 +42,6 @@
 //   console.error('[pg] idle client error:', err.message);
 // });
 
-// /**
-//  * Short-lived pool with NO statement timeout. For migrations, index builds and
-//  * heavy rollups. Always end() it when finished.
-//  */
 // function maintenancePool() {
 //   const cs = process.env.DIRECT_DATABASE_URL || CONNECTION_STRING;
 //   const internal = /\.internal|localhost|127\.0\.0\.1/.test(cs);
@@ -98,10 +70,6 @@
 //   }
 // }
 
-// /**
-//  * Run fn while holding a session-level advisory lock. Returns
-//  * { skipped: true } if another instance already holds it.
-//  */
 // async function withAdvisoryLock(db, lockId, fn) {
 //   const client = await db.connect();
 //   try {
@@ -137,6 +105,28 @@
 //     }
 //   }
 //   return message;
+// }
+
+// function normalizeStoreIds(value) {
+//   if (value == null) return [];
+//   const list = Array.isArray(value) ? value : [value];
+//   const seen = new Set();
+//   for (const item of list) {
+//     const n = parseInt(item, 10);
+//     if (Number.isInteger(n) && n > 0) seen.add(n);
+//   }
+//   return [...seen];
+// }
+
+// function normalizeGroupKeys(value) {
+//   if (value == null) return [];
+//   const list = Array.isArray(value) ? value : [value];
+//   const seen = new Set();
+//   for (const item of list) {
+//     const key = String(item || '').trim();
+//     if (key) seen.add(key);
+//   }
+//   return [...seen];
 // }
 
 // // ============================================================================
@@ -256,7 +246,7 @@
 //         api_token TEXT UNIQUE,
 //         last_login TIMESTAMP,
 //         can_view_all_stores BOOLEAN DEFAULT true,
-//         assigned_stores INTEGER[],
+//         assigned_stores INTEGER[] DEFAULT '{}',
 //         is_active BOOLEAN DEFAULT true,
 //         is_online BOOLEAN DEFAULT false,
 //         current_status VARCHAR(50) DEFAULT 'offline',
@@ -429,6 +419,8 @@
 //   ['022_group_color',            migration_022_add_group_color],
 //   ['023_brain_backups',          migration_023_add_brain_backups],
 //   ['024_last_message_at_index',  migration_024_last_message_at_index],
+//   ['025_assigned_stores_guard',  migration_025_assigned_stores_guard],
+//   ['026_assigned_groups',        migration_026_assigned_groups],
 // ];
 
 // async function runMigrations() {
@@ -513,8 +505,6 @@
 //   await db.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_read_at TIMESTAMP`);
 // }
 
-// // ⚠️ Contains a full-table backfill. This is the migration that was rewriting
-// // the entire conversations table on every boot. Now runs exactly once.
 // async function migration_004_add_last_message_fields(db) {
 //   await db.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_message TEXT`);
 //   await db.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_message_sender_type VARCHAR(50)`);
@@ -842,6 +832,40 @@
 //                     ON conversations (last_message_at DESC)`);
 // }
 
+// async function migration_025_assigned_stores_guard(db) {
+//   await db.query(`ALTER TABLE employees ADD COLUMN IF NOT EXISTS assigned_stores INTEGER[] DEFAULT '{}'`);
+//   await db.query(`ALTER TABLE employees ADD COLUMN IF NOT EXISTS can_view_all_stores BOOLEAN DEFAULT true`);
+//   await db.query(`UPDATE employees SET assigned_stores = '{}' WHERE assigned_stores IS NULL`);
+//   await db.query(`ALTER TABLE employees ALTER COLUMN assigned_stores SET DEFAULT '{}'`);
+// }
+
+// async function migration_026_assigned_groups(db) {
+//   await db.query(`ALTER TABLE employees ADD COLUMN IF NOT EXISTS assigned_groups TEXT[] DEFAULT '{}'`);
+//   await db.query(`UPDATE employees SET assigned_groups = '{}' WHERE assigned_groups IS NULL`);
+
+//   const backfill = await db.query(`
+//     UPDATE employees e
+//        SET assigned_groups = sub.groups
+//       FROM (
+//         SELECT e2.id,
+//                ARRAY(
+//                  SELECT DISTINCT s.store_group
+//                    FROM stores s
+//                   WHERE s.id = ANY(e2.assigned_stores)
+//                     AND s.store_group IS NOT NULL
+//                ) AS groups
+//           FROM employees e2
+//          WHERE e2.can_view_all_stores = false
+//            AND e2.assigned_stores IS NOT NULL
+//            AND array_length(e2.assigned_stores, 1) > 0
+//       ) sub
+//      WHERE e.id = sub.id
+//        AND array_length(sub.groups, 1) > 0
+//        AND (e.assigned_groups IS NULL OR array_length(e.assigned_groups, 1) IS NULL)
+//   `);
+//   console.log(`   [026] converted ${backfill.rowCount} employee(s) from per-store to per-group access`);
+// }
+
 // // ============================================================================
 // // SEARCH INDEXES — build out of band. See scripts/build-search-indexes.js
 // // ============================================================================
@@ -946,6 +970,17 @@
 //   return r.rows;
 // }
 
+// async function getStoresForAssignment() {
+//   const r = await pool.query(`
+//     SELECT id, store_identifier, shop_domain, brand_name,
+//            store_group, store_group_name, primary_color, is_active
+//       FROM stores
+//      WHERE is_active = true
+//      ORDER BY store_group NULLS LAST, brand_name ASC
+//   `);
+//   return r.rows;
+// }
+
 // async function getStoresByFilters(filters = {}) {
 //   let query = 'SELECT * FROM stores WHERE is_active = true';
 //   const params = [];
@@ -1008,40 +1043,6 @@
 //   return r.rows[0] || null;
 // }
 
-// // async function getConversations(filters = {}) {
-// //   let query = `
-// //     SELECT c.*, s.brand_name, s.logo_url, s.primary_color, s.store_identifier,
-// //            lcm.content AS last_customer_message
-// //       FROM conversations c
-// //       JOIN stores s ON c.shop_id = s.id
-// //       LEFT JOIN LATERAL (
-// //         SELECT content FROM messages
-// //          WHERE conversation_id = c.id AND sender_type = 'customer'
-// //          ORDER BY id DESC LIMIT 1
-// //       ) lcm ON true
-// //      WHERE 1=1
-// //   `;
-// //   const params = [];
-// //   let n = 1;
-// //   if (filters.storeId)         { query += ` AND c.shop_id = $${n++}`;        params.push(filters.storeId); }
-// //   if (filters.storeIdentifier) { query += ` AND c.shop_domain = $${n++}`;    params.push(filters.storeIdentifier); }
-// //   if (filters.storeGroup)      { query += ` AND s.store_group = $${n++}`;    params.push(filters.storeGroup); }
-// //   if (filters.customerEmail)   { query += ` AND c.customer_email = $${n++}`; params.push(filters.customerEmail); }
-// //   if (filters.status)          { query += ` AND c.status = $${n++}`;         params.push(filters.status); }
-// //   if (!filters.status && filters.excludeArchived) query += ` AND c.status != 'archived'`;
-// //   if (filters.priority)        { query += ` AND c.priority = $${n++}`;       params.push(filters.priority); }
-// //   if (filters.assignedTo)      { query += ` AND c.assigned_to = $${n++}`;    params.push(filters.assignedTo); }
-// //   if (filters.search) {
-// //     query += ` AND (c.customer_email ILIKE $${n} OR c.customer_name ILIKE $${n})`;
-// //     params.push(`%${filters.search}%`); n++;
-// //   }
-// //   const limit  = Math.min(parseInt(filters.limit, 10) || 50, 100);
-// //   const offset = Math.max(parseInt(filters.offset, 10) || 0, 0);
-// //   query += ` ORDER BY c.updated_at DESC LIMIT $${n} OFFSET $${n + 1}`;
-// //   params.push(limit, offset);
-// //   const r = await pool.query(query, params);
-// //   return r.rows;
-// // }
 
 // async function getConversations(filters = {}) {
 //   let query = `
@@ -1059,6 +1060,10 @@
 //   const params = [];
 //   let n = 1;
 //   if (filters.storeId)         { query += ` AND c.shop_id = $${n++}`;        params.push(filters.storeId); }
+//   if (Array.isArray(filters.storeGroups)) {
+//     query += ` AND s.store_group = ANY($${n++}::text[])`;
+//     params.push(normalizeGroupKeys(filters.storeGroups));
+//   }
 //   if (filters.storeIdentifier) { query += ` AND c.shop_domain = $${n++}`;    params.push(filters.storeIdentifier); }
 //   if (filters.storeGroup)      { query += ` AND s.store_group = $${n++}`;    params.push(filters.storeGroup); }
 //   if (filters.customerEmail)   { query += ` AND c.customer_email = $${n++}`; params.push(filters.customerEmail); }
@@ -1070,9 +1075,7 @@
 //     query += ` AND (c.customer_email ILIKE $${n} OR c.customer_name ILIKE $${n})`;
 //     params.push(`%${filters.search}%`); n++;
 //   }
-//   // ── date range: naive-UTC bounds matching the naive last_message_at column.
-//   //    Half-open (>= … <) so it stays index-usable. Filters on message activity,
-//   //    NOT updated_at (which bumps on read via markConversationRead). ──
+
 //   if (filters.dateFrom) { query += ` AND c.last_message_at >= $${n++}`; params.push(filters.dateFrom); }
 //   if (filters.dateTo)   { query += ` AND c.last_message_at <  $${n++}`; params.push(filters.dateTo); }
 //   const limit  = Math.min(parseInt(filters.limit, 10) || 50, 100);
@@ -1088,6 +1091,10 @@
 //   const params = [];
 //   let n = 1;
 //   if (filters.storeId) { query += ` AND shop_id = $${n++}`; params.push(filters.storeId); }
+//   if (Array.isArray(filters.storeGroups)) {
+//     query += ` AND shop_id IN (SELECT id FROM stores WHERE store_group = ANY($${n++}::text[]))`;
+//     params.push(normalizeGroupKeys(filters.storeGroups));
+//   }
 //   if (filters.status)  { query += ` AND status = $${n++}`;  params.push(filters.status); }
 //   const r = await pool.query(query, params);
 //   return parseInt(r.rows[0].count, 10);
@@ -1104,7 +1111,6 @@
 //   const values = [];
 //   let n = 1;
 //   for (const [key, value] of Object.entries(updates)) {
-//     // Whitelist: this is fed straight from req.body in PUT /api/conversations/:id
 //     if (!CONVERSATION_UPDATABLE.has(key)) continue;
 //     fields.push(`${key} = $${n++}`);
 //     values.push(value);
@@ -1360,15 +1366,21 @@
 // async function createEmployee(data) {
 //   const {
 //     email, name, employee_name = null, password_hash, role = 'agent',
-//     can_view_all_stores = true, assigned_stores = [],
+//     can_view_all_stores = true, assigned_groups = [], is_active = true,
 //   } = data;
 //   if (!email || !name) throw new Error('Email and name are required');
 //   if (!password_hash) throw new Error('password_hash is required');
+
+//   // Full-access accounts store an empty list. Keeping a stale assignment set on
+//   // a can_view_all_stores account means narrowing access later silently
+//   // restores whatever was picked months ago.
+//   const groups = can_view_all_stores ? [] : normalizeGroupKeys(assigned_groups);
+
 //   const r = await pool.query(`
 //     INSERT INTO employees (email, name, employee_name, password_hash, role,
-//                            can_view_all_stores, assigned_stores, created_at, updated_at)
-//     VALUES ($1,$2,$3,$4,$5,$6,$7,NOW(),NOW()) RETURNING *
-//   `, [email, name, employee_name, password_hash, role, can_view_all_stores, assigned_stores]);
+//                            can_view_all_stores, assigned_groups, is_active, created_at, updated_at)
+//     VALUES ($1,$2,$3,$4,$5,$6,$7::text[],$8,NOW(),NOW()) RETURNING *
+//   `, [email, name, employee_name, password_hash, role, can_view_all_stores, groups, is_active]);
 //   return r.rows[0];
 // }
 
@@ -1389,21 +1401,67 @@
 
 // async function updateEmployee(employeeId, updates) {
 //   const allowed = ['name','employee_name','email','role','password_hash','is_active',
-//                    'can_view_all_stores','assigned_stores','last_login','is_online','current_status'];
+//                    'can_view_all_stores','assigned_groups','last_login','is_online','current_status'];
 //   const fields = [];
 //   const values = [];
 //   let n = 1;
 //   for (const [key, value] of Object.entries(updates)) {
 //     if (!allowed.includes(key)) continue;
+//     if (key === 'assigned_groups') {
+//       // Cast explicitly rather than relying on node-postgres inference — an
+//       // empty JS array would otherwise arrive as an untyped array literal.
+//       fields.push(`assigned_groups = $${n++}::text[]`);
+//       values.push(normalizeGroupKeys(value));
+//       continue;
+//     }
 //     fields.push(`${key} = $${n++}`);
 //     values.push(value);
 //   }
 //   if (!fields.length) throw new Error('No valid fields to update');
+
+//   // Granting full access clears the assignment set even when the caller didn't
+//   // send assigned_groups, so the two columns can never disagree.
+//   if (updates.can_view_all_stores === true && !('assigned_groups' in updates)) {
+//     fields.push(`assigned_groups = '{}'::text[]`);
+//   }
+
 //   fields.push('updated_at = NOW()');
 //   values.push(employeeId);
 //   const r = await pool.query(
 //     `UPDATE employees SET ${fields.join(', ')} WHERE id = $${n} RETURNING *`, values);
 //   return r.rows[0];
+// }
+
+// /**
+//  * Resolve an employee's store permission scope.
+//  *
+//  * Returns { canViewAll: true, groups: null } for unrestricted accounts, or
+//  * { canViewAll: false, groups: [...] } for restricted ones. Pass groups
+//  * straight into getConversations({ storeGroups }) — and note that a restricted
+//  * agent with an empty array correctly sees nothing rather than everything.
+//  */
+// async function getEmployeeStoreScope(employeeId) {
+//   const r = await pool.query(
+//     'SELECT can_view_all_stores, assigned_groups FROM employees WHERE id = $1', [employeeId]);
+//   if (!r.rows[0]) return { canViewAll: false, groups: [] };
+//   const row = r.rows[0];
+//   if (row.can_view_all_stores) return { canViewAll: true, groups: null };
+//   return { canViewAll: false, groups: normalizeGroupKeys(row.assigned_groups) };
+// }
+
+// /** True when the employee may act on the given store id. */
+// async function employeeCanAccessStore(employeeId, storeId) {
+//   const scope = await getEmployeeStoreScope(employeeId);
+//   if (scope.canViewAll) return true;
+//   const id = parseInt(storeId, 10);
+//   if (!Number.isInteger(id)) return false;
+//   const { rows } = await pool.query(
+//     'SELECT store_group FROM stores WHERE id = $1', [id]);
+//   // A store with no group can only be reached by a full-access account —
+//   // otherwise an ungrouped store would be visible to everyone or no one by
+//   // accident rather than by decision.
+//   if (!rows[0] || !rows[0].store_group) return false;
+//   return scope.groups.includes(rows[0].store_group);
 // }
 
 // async function deleteEmployee(employeeId) {
@@ -1707,11 +1765,14 @@
 //   testConnection,
 //   waitForDatabase,
 //   closePool,
+//   normalizeStoreIds,
+//   normalizeGroupKeys,
 //   registerStore,
 //   getStoreByIdentifier,
 //   getStoreByDomain,
 //   getStoreById,
 //   getAllActiveStores,
+//   getStoresForAssignment,
 //   getStoresByFilters,
 //   updateStoreConnectionStatus,
 //   updateStoreSettings,
@@ -1736,6 +1797,8 @@
 //   deleteEmployee,
 //   updateEmployeeStatus,
 //   updateEmployeeNotesOrder,
+//   getEmployeeStoreScope,
+//   employeeCanAccessStore,
 //   logAgentActivity,
 //   logWebhook,
 //   getCannedResponses,
@@ -1763,12 +1826,6 @@
 
 
 
-
-
-
-
-
-
 const { Pool } = require('pg');
 require('dotenv').config();
 
@@ -1787,6 +1844,7 @@ const LOCKS = {
   BRAIN_PRUNE:       915007,
   PERF_INDEXES:      915008,
   SEARCH_INDEXES:    915009,
+  QA_SCAN:           915010,
 };
 
 // ============================================================================
@@ -2215,6 +2273,8 @@ const MIGRATIONS = [
   ['024_last_message_at_index',  migration_024_last_message_at_index],
   ['025_assigned_stores_guard',  migration_025_assigned_stores_guard],
   ['026_assigned_groups',        migration_026_assigned_groups],
+  ['027_qa_reviews',             migration_027_qa_reviews],
+  ['028_qa_review_backfill',     migration_028_qa_review_backfill],
 ];
 
 async function runMigrations() {
@@ -2670,6 +2730,192 @@ async function migration_026_assigned_groups(db) {
   console.log(`   [026] converted ${backfill.rowCount} employee(s) from per-store to per-group access`);
 }
 
+/**
+ * QA automation schema.
+ *
+ * This table used to create itself from routes/qa-routes.js on the first
+ * request, on the app pool, under a 15s statement timeout — which means index
+ * builds could be killed mid-flight and the DDL raced across instances. It
+ * belongs here with everything else.
+ *
+ * Existing installs already have the table from that path, with BIGINT ids and
+ * no foreign keys, so this narrows the columns to match messages.id and
+ * conversations.id (both SERIAL/INTEGER) and adds the keys. Deleting a
+ * conversation cascades to its messages, and now to its QA rows as well,
+ * instead of leaving orphans behind forever.
+ */
+async function migration_027_qa_reviews(db) {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS qa_reviews (
+      id                BIGSERIAL PRIMARY KEY,
+      message_id        INTEGER NOT NULL UNIQUE,
+      conversation_id   INTEGER,
+      store_id          INTEGER,
+      agent_id          TEXT,
+      agent_name        TEXT,
+      content           TEXT NOT NULL,
+      customer_prompt   TEXT,
+      rule_score        INTEGER NOT NULL,
+      voice_score       INTEGER,
+      score             INTEGER NOT NULL,
+      grade             TEXT NOT NULL,
+      critical_count    INTEGER NOT NULL DEFAULT 0,
+      major_count       INTEGER NOT NULL DEFAULT 0,
+      minor_count       INTEGER NOT NULL DEFAULT 0,
+      rule_report       JSONB,
+      ai_report         JSONB,
+      model             TEXT,
+      source            TEXT NOT NULL DEFAULT 'auto',
+      message_sent_at   TIMESTAMP,
+      reviewed_at       TIMESTAMP NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  // ── Narrow BIGINT ids left by the old self-creating DDL ──
+  const { rows: cols } = await db.query(`
+    SELECT column_name, data_type
+      FROM information_schema.columns
+     WHERE table_name = 'qa_reviews'
+       AND column_name IN ('message_id', 'conversation_id', 'store_id')
+  `);
+  for (const c of cols) {
+    if (c.data_type === 'bigint') {
+      console.log(`   [027] narrowing qa_reviews.${c.column_name} to INTEGER`);
+      await db.query(`ALTER TABLE qa_reviews ALTER COLUMN ${c.column_name} TYPE INTEGER`);
+    }
+  }
+
+  // ── Clear anything that would fail the new constraints ──
+  const orphanMessages = await db.query(`
+    DELETE FROM qa_reviews q
+     WHERE NOT EXISTS (SELECT 1 FROM messages m WHERE m.id = q.message_id)
+  `);
+  if (orphanMessages.rowCount) {
+    console.log(`   [027] removed ${orphanMessages.rowCount} review(s) whose message no longer exists`);
+  }
+  await db.query(`
+    UPDATE qa_reviews q SET conversation_id = NULL
+     WHERE conversation_id IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM conversations c WHERE c.id = q.conversation_id)
+  `);
+  await db.query(`
+    UPDATE qa_reviews q SET store_id = NULL
+     WHERE store_id IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM stores s WHERE s.id = q.store_id)
+  `);
+
+  // ── Foreign keys (guarded so the migration stays re-runnable by hand) ──
+  await db.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'qa_reviews_message_fk') THEN
+        ALTER TABLE qa_reviews ADD CONSTRAINT qa_reviews_message_fk
+          FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'qa_reviews_conversation_fk') THEN
+        ALTER TABLE qa_reviews ADD CONSTRAINT qa_reviews_conversation_fk
+          FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE SET NULL;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'qa_reviews_store_fk') THEN
+        ALTER TABLE qa_reviews ADD CONSTRAINT qa_reviews_store_fk
+          FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE SET NULL;
+      END IF;
+    END $$;
+  `);
+
+  const statements = [
+    `CREATE INDEX IF NOT EXISTS idx_qa_reviews_reviewed_at
+       ON qa_reviews (reviewed_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_qa_reviews_agent
+       ON qa_reviews (agent_id, message_sent_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_qa_reviews_score
+       ON qa_reviews (score)`,
+    `CREATE INDEX IF NOT EXISTS idx_qa_reviews_sent_at
+       ON qa_reviews (message_sent_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_qa_reviews_store
+       ON qa_reviews (store_id, message_sent_at DESC)`,
+    // The scanner's anti-join and the FK cascade both look up by message_id;
+    // the UNIQUE constraint already covers that.
+    `CREATE INDEX IF NOT EXISTS idx_qa_reviews_conversation
+       ON qa_reviews (conversation_id)`,
+    // Backs the ruleId containment filter on GET /api/qa/reviews and the
+    // LATERAL unnest behind GET /api/qa/violations.
+    `CREATE INDEX IF NOT EXISTS idx_qa_reviews_rule_report
+       ON qa_reviews USING gin (rule_report jsonb_path_ops)`,
+    `CREATE INDEX IF NOT EXISTS idx_qa_reviews_critical
+       ON qa_reviews (message_sent_at DESC) WHERE critical_count > 0`,
+  ];
+  for (const sql of statements) {
+    console.log(`   [027] ${sql.match(/idx_[a-z_]+/)[0]}`);
+    await db.query(sql);
+  }
+}
+
+/**
+ * One-time repair of QA rows graded before the scanner and rule-engine fixes.
+ *
+ *  1. store_id was always NULL: the scanner read shop_id off messages, where it
+ *     does not exist. It lives on conversations.
+ *  2. The canned auto-reply was excluded with an exact `<>` match, so variants
+ *     (curly vs straight apostrophe, trailing whitespace) slipped through and
+ *     were graded as if an agent wrote them, dragging down every average.
+ *  3. INFO-severity entries scored zero but sat in rule_report.violations,
+ *     where they tagged review cards and topped the "most broken rules" chart.
+ *     The engine now returns them under `advisories`.
+ *
+ * None of this changes a score: info always carried a zero penalty.
+ */
+async function migration_028_qa_review_backfill(db) {
+  const storeFix = await db.query(`
+    UPDATE qa_reviews q
+       SET store_id = c.shop_id
+      FROM conversations c
+     WHERE c.id = q.conversation_id
+       AND q.store_id IS DISTINCT FROM c.shop_id
+  `);
+  console.log(`   [028] backfilled store_id on ${storeFix.rowCount} review(s)`);
+
+  // The underscore is a LIKE wildcard and matches either apostrophe.
+  const autoReplies = await db.query(`
+    DELETE FROM qa_reviews
+     WHERE content LIKE 'Thanks for reaching out! We_re available 24/7 and will get back to you as soon as possible.%'
+  `);
+  console.log(`   [028] removed ${autoReplies.rowCount} graded auto-reply/-ies`);
+
+  const split = await db.query(`
+    UPDATE qa_reviews
+       SET rule_report = jsonb_set(
+             jsonb_set(
+               rule_report,
+               '{violations}',
+               COALESCE((SELECT jsonb_agg(v)
+                           FROM jsonb_array_elements(rule_report -> 'violations') v
+                          WHERE v ->> 'severity' IS DISTINCT FROM 'info'), '[]'::jsonb)
+             ),
+             '{advisories}',
+             COALESCE((SELECT jsonb_agg(v)
+                         FROM jsonb_array_elements(rule_report -> 'violations') v
+                        WHERE v ->> 'severity' = 'info'), '[]'::jsonb)
+           )
+     WHERE rule_report ? 'violations'
+       AND rule_report -> 'violations' @> '[{"severity":"info"}]'::jsonb
+  `);
+  console.log(`   [028] moved advisories out of violations on ${split.rowCount} review(s)`);
+
+  // Uniform shape for everything else so the dashboard never sees a missing key.
+  await db.query(`
+    UPDATE qa_reviews
+       SET rule_report = jsonb_set(rule_report, '{advisories}', '[]'::jsonb)
+     WHERE rule_report IS NOT NULL
+       AND NOT (rule_report ? 'advisories')
+  `);
+
+  // NOTE: rule behaviour changed with this deploy — [brackets] no longer
+  // satisfy the date rule, and "its" / "were not" / "ill" / "lets" no longer
+  // count as dropped apostrophes. Scores either side of this line are not
+  // strictly comparable. Deliberately NOT re-grading here: that costs one AI
+  // call per reply and belongs behind POST /api/qa/scan, not a boot migration.
+}
+
 // ============================================================================
 // SEARCH INDEXES — build out of band. See scripts/build-search-indexes.js
 // ============================================================================
@@ -2682,6 +2928,9 @@ const SEARCH_INDEX_STATEMENTS = [
      ON conversations USING gin (customer_email gin_trgm_ops)`,
   `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_conv_name_trgm
      ON conversations USING gin (customer_name gin_trgm_ops)`,
+  // Backs the ILIKE search on the QA replies list.
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_qa_reviews_content_trgm
+     ON qa_reviews USING gin (content gin_trgm_ops)`,
 ];
 
 /**
@@ -2715,7 +2964,8 @@ async function checkSearchIndexes() {
     SELECT c.relname AS index_name, i.indisvalid AS valid
       FROM pg_class c
       JOIN pg_index i ON i.indexrelid = c.oid
-     WHERE c.relname IN ('idx_messages_content_trgm','idx_conv_email_trgm','idx_conv_name_trgm')
+     WHERE c.relname IN ('idx_messages_content_trgm','idx_conv_email_trgm',
+                         'idx_conv_name_trgm','idx_qa_reviews_content_trgm')
   `);
   return rows;
 }
