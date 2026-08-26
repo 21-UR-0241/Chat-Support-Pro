@@ -21,7 +21,70 @@
 //   const editTextareaRef                         = useRef(null);
 
 //   const [detailedModal, setDetailedModal]       = useState(null);
-//   const [activeTab, setActiveTab]               = useState(0);
+//   // ── Panel width ────────────────────────────────────────────────────────────
+  // Agents read long drafts in this panel and 300px forces most of them to wrap
+  // into a narrow column. The left edge is draggable; the chosen width is per
+  // browser, so one agent widening it does not change anyone else's layout.
+  const PANEL_MIN_WIDTH = 260;
+  const PANEL_MAX_WIDTH = 900;
+  const PANEL_WIDTH_KEY = 'ai-panel-width';
+
+  const readStoredWidth = () => {
+    try {
+      const raw = parseInt(localStorage.getItem(PANEL_WIDTH_KEY), 10);
+      if (Number.isFinite(raw)) return Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, raw));
+    } catch {
+      // Private mode, blocked site data — fall through to the default.
+    }
+    return 300;
+  };
+
+  const [panelWidth, setPanelWidth] = useState(readStoredWidth);
+  const [isResizing, setIsResizing] = useState(false);
+  const panelRef = useRef(null);
+
+  const clampWidth = (px) => Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, px));
+
+  const persistWidth = (px) => {
+    try { localStorage.setItem(PANEL_WIDTH_KEY, String(px)); } catch { /* not worth surfacing */ }
+  };
+
+  const startResize = (event) => {
+    event.preventDefault();
+    setIsResizing(true);
+
+    // Dragging LEFT widens the panel, so the delta is inverted relative to x.
+    const startX = event.clientX;
+    const startWidth = panelRef.current?.getBoundingClientRect().width ?? panelWidth;
+
+    const onMove = (moveEvent) => setPanelWidth(clampWidth(startWidth + (startX - moveEvent.clientX)));
+
+    const onUp = (upEvent) => {
+      const finalWidth = clampWidth(startWidth + (startX - upEvent.clientX));
+      setPanelWidth(finalWidth);
+      persistWidth(finalWidth);
+      setIsResizing(false);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
+  // Keyboard equivalent, so the panel is not mouse-only.
+  const nudgeWidth = (event) => {
+    const step = event.shiftKey ? 50 : 10;
+    let next = null;
+    if (event.key === 'ArrowLeft')  next = clampWidth(panelWidth + step);
+    if (event.key === 'ArrowRight') next = clampWidth(panelWidth - step);
+    if (next === null) return;
+    event.preventDefault();
+    setPanelWidth(next);
+    persistWidth(next);
+  };
+
+  const [activeTab, setActiveTab]               = useState(0);
 
 //   const [uploadedImage, setUploadedImage]       = useState(null);
 //   const [imageAnalyzing, setImageAnalyzing]     = useState(false);
@@ -1150,11 +1213,23 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
     const lastCustomerMessages = customerMessages.filter(m => !m._optimistic).slice(-2);
     const lastAgentMessages    = agentMessages.filter(m => !m._optimistic).slice(-2);
 
-    const chatHistory = messages.slice(-40).map(m => {
+    // The model is asked to answer "the ONE thing they asked" without repeating
+    // or contradicting the agent, which it can only do from the actual exchange.
+    // 40 was silently dropping the start of any longer thread, and a silent drop
+    // is the worst version: the model reads a partial history as if it were the
+    // whole one. Take more, and when it still does not fit, say so in the text
+    // so the model knows it is looking at a tail rather than a beginning.
+    const HISTORY_LIMIT = 60;
+    const omitted = Math.max(0, messages.length - HISTORY_LIMIT);
+    const historyLines = messages.slice(-HISTORY_LIMIT).map(m => {
       const role    = m.senderType === 'customer' ? 'Customer' : 'Agent';
       const content = m.content || (m.fileData ? `[File: ${m.fileData?.name || 'attachment'}]` : '');
       return `${role}: ${content}`;
-    }).join('\n');
+    });
+    if (omitted > 0) {
+      historyLines.unshift(`[${omitted} earlier message${omitted === 1 ? '' : 's'} in this conversation are not shown]`);
+    }
+    const chatHistory = historyLines.join('\n');
 
     // Raw samples. The backend filters these through filterOnVoiceSamples()
     // before extractAdminStyle() learns from them — do not pre-filter here, the
@@ -1673,7 +1748,21 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
 
   return (
     <>
-      <div className={`ai-suggestions-panel ${collapsed ? 'collapsed' : ''} ${pasteHighlight ? 'ai-paste-highlight' : ''}`}>
+      <div
+        ref={panelRef}
+        className={`ai-suggestions-panel ${collapsed ? 'collapsed' : ''} ${isResizing ? 'is-resizing' : ''} ${pasteHighlight ? 'ai-paste-highlight' : ''}`}
+        style={{ '--ai-panel-width': `${panelWidth}px` }}
+      >
+        {!collapsed && (
+          <button
+            type="button"
+            className="ai-resize-handle"
+            onPointerDown={startResize}
+            onKeyDown={nudgeWidth}
+            aria-label="Resize AI suggestions panel"
+            title="Drag to resize, or focus and use the arrow keys"
+          />
+        )}
 
         <div className="ai-suggestions-header">
           <div className="ai-suggestions-title">

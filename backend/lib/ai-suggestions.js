@@ -3025,6 +3025,49 @@ function pickModelTier({ sentiment, isTrustQuestion, isSafetyDosing, isRefundOrC
 }
 
 // ============ EMOTION ============
+// ============ AGENT COMMITMENTS ============
+
+/**
+ * What the agent has already told this customer, in their own words.
+ *
+ * The whole thread is sent to the model, but "read the history" is not the same
+ * instruction as "do not contradict it". A shipping question that the agent
+ * already answered with "2-3 business days" can come back as a suggestion
+ * quoting the documented "4-7 business days" from the brain — both defensible in
+ * isolation, and a flat contradiction to the customer reading the thread.
+ *
+ * Pulling the agent's own numbers out and naming them lets the prompt require a
+ * decision: match the earlier answer, or correct it openly. Silently swapping in
+ * a different number is the one option that should not be available.
+ *
+ * Reuses TIME_PROMISE_RE so a timeframe means the same thing here as it does to
+ * the guard that blocks invented ones — one definition, not two that drift.
+ */
+const _MONEY_RE = /\$\s?\d[\d,]*(?:\.\d{2})?|\b\d+\s?%\s?(?:off|discount)\b/gi;
+const _AGENT_LINE_RE = /^(?:agent|support):\s*/i;
+
+function extractAgentCommitments(chatHistory = '') {
+  const agentLines = String(chatHistory || '')
+    .split('\n')
+    .filter(l => _AGENT_LINE_RE.test(l.trim()))
+    .map(l => l.trim().replace(_AGENT_LINE_RE, ''));
+
+  const commitments = [];
+  for (const line of agentLines) {
+    const times = [...new Set((line.match(TIME_PROMISE_RE) || []).map(t => t.trim()))];
+    const money = [...new Set((line.match(_MONEY_RE) || []).map(t => t.trim()))];
+    for (const t of times) commitments.push({ kind: 'timeframe', value: t, said: line });
+    for (const m of money) commitments.push({ kind: 'amount', value: m, said: line });
+  }
+
+  // Latest wins: if the agent revised a number later in the thread, that is the
+  // one the customer is holding us to.
+  const byValue = new Map();
+  for (const c of commitments) byValue.set(`${c.kind}:${c.value.toLowerCase()}`, c);
+  return [...byValue.values()];
+}
+
+
 
 /**
  * Read the customer's emotional state from the conversation.
@@ -3462,6 +3505,7 @@ module.exports = {
   parseAIResponse,
   analyzeConversationState,
   detectEmotion,
+  extractAgentCommitments,
   pickModelTier,
   stableSystemPrefix,
   extractText,

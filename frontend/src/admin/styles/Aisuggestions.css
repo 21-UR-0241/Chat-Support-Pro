@@ -5,8 +5,11 @@
 /* ── Panel shell ───────────────────────────────────────────────────── */
 
 .ai-suggestions-panel {
-  width: 300px;
-  min-width: 300px;
+  /* Width is driven by --ai-panel-width so the drag handle can set it inline
+     without fighting a hardcoded rule. 300px stays the default for anyone who
+     has never dragged it. */
+  width: var(--ai-panel-width, 300px);
+  min-width: var(--ai-panel-width, 300px);
   background: #ffffff;
   border-left: 1px solid #e9edef;
   display: flex;
@@ -14,11 +17,61 @@
   height: 100%;
   overflow: hidden;
   transition: width 0.2s ease, min-width 0.2s ease;
+  position: relative;
+}
+
+/* While dragging, the transition would lag the pointer by 200ms and feel broken. */
+.ai-suggestions-panel.is-resizing {
+  transition: none;
+  user-select: none;
 }
 
 .ai-suggestions-panel.collapsed {
   width: 48px;
   min-width: 48px;
+}
+
+/* ── Resize handle ─────────────────────────────────────────────────── */
+/* Sits on the panel's left edge. Visually a hairline, but with a wider hit
+   area than it looks, since a 1px target is hostile to actually grab. */
+.ai-resize-handle {
+  position: absolute;
+  top: 0;
+  left: -3px;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 5;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  touch-action: none;
+}
+
+.ai-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 2px;
+  width: 3px;
+  height: 100%;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+
+.ai-resize-handle:hover::after,
+.ai-resize-handle:focus-visible::after,
+.is-resizing .ai-resize-handle::after {
+  background: #00a884;
+}
+
+.ai-resize-handle:focus-visible {
+  outline: none;
+}
+
+/* A collapsed panel has no width worth dragging. */
+.collapsed .ai-resize-handle {
+  display: none;
 }
 
 /* ── Header ────────────────────────────────────────────────────────── */
