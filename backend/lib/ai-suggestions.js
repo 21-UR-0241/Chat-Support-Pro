@@ -2624,14 +2624,10 @@ function detectServiceFailure(sentiment, analysisBlock, isTrustQuestion) {
  *   model splits the difference. Pass null (or a profile whose fields are null) to
  *   keep the built-in behaviour byte-for-byte.
  */
-function buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness, brainContext = '', brainSettings = {}, adminStyleBlock = '', imageAnalysis = '', sentiment = 'neutral', responseExamples = [], isTrustQuestion = false, isSafetyDosing = false, brainHasProductAnswer = false, voiceProfile = null) {
-  const hasBrain = brainContext && brainContext.trim().length > 0;
-  const trustBlock = isTrustQuestion ? TRUST_QUESTION_BLOCK : '';
-  const safetyBlock = isSafetyDosing ? SAFETY_DOSING_BLOCK : '';
-  const isServiceFailure = detectServiceFailure(sentiment, analysisBlock, isTrustQuestion);
-  const serviceFailureBlock = isServiceFailure ? SERVICE_FAILURE_BLOCK : '';
-
-  const humanVoiceBlock = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Hoisted to module scope so stableSystemPrefix() below can hand the exact same
+// bytes to the prompt cache. The block is a static template with no
+// interpolation, so its position does not change what it renders.
+const humanVoiceBlock = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #1 RULE — ONE MESSAGE, ONE THING, THEN STOP.
 You're a real person who already knows the answer, texting a customer fast.
 Not a call center. Not a script. Not a corporate email.
@@ -2689,6 +2685,33 @@ NEVER (these are the tells that scream AI):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 `;
+
+/**
+ * The leading, request-invariant slice of the system prompt.
+ *
+ * buildSystemPrompt() emits `${voiceText}${examplesText}` first and everything
+ * turn-specific after it, so this prefix is byte-identical across every request
+ * for a given voice profile — which is exactly the condition prompt caching
+ * needs. Splitting the finished prompt here is metadata only: the model still
+ * receives the identical string it received before.
+ *
+ * Keep this in lockstep with the head of buildSystemPrompt's return. The route
+ * verifies the prompt actually starts with this and silently skips caching if
+ * it does not, so drift costs money rather than correctness.
+ */
+function stableSystemPrefix(voiceProfile) {
+  const voiceText    = voiceProfile?.voiceBlock    ?? humanVoiceBlock;
+  const examplesText = voiceProfile?.examplesBlock ?? ROBOT_VS_HUMAN_BLOCK;
+  return `${voiceText}${examplesText}`;
+}
+
+function buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness, brainContext = '', brainSettings = {}, adminStyleBlock = '', imageAnalysis = '', sentiment = 'neutral', responseExamples = [], isTrustQuestion = false, isSafetyDosing = false, brainHasProductAnswer = false, voiceProfile = null) {
+  const hasBrain = brainContext && brainContext.trim().length > 0;
+  const trustBlock = isTrustQuestion ? TRUST_QUESTION_BLOCK : '';
+  const safetyBlock = isSafetyDosing ? SAFETY_DOSING_BLOCK : '';
+  const isServiceFailure = detectServiceFailure(sentiment, analysisBlock, isTrustQuestion);
+  const serviceFailureBlock = isServiceFailure ? SERVICE_FAILURE_BLOCK : '';
+
 
   const cleanExamples = (responseExamples || [])
     .map(r => (typeof r === 'string' ? r : r?.text))
@@ -3387,6 +3410,7 @@ module.exports = {
   analyzeConversationState,
   detectEmotion,
   pickModelTier,
+  stableSystemPrefix,
   validateSuggestions,
   validateSafetyDosing,
   generateSmartFallbackSuggestionsRaw,

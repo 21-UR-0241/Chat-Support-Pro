@@ -142,6 +142,55 @@ group('detectStall', () => {
   });
 });
 
+// ── Prompt cache prefix ─────────────────────────────────────────────────────
+// The cache split is only safe while the prompt genuinely starts with this
+// prefix. If buildSystemPrompt's return is ever reordered, these fail here
+// rather than silently costing 1.25x per request in production.
+
+group('stableSystemPrefix', () => {
+  const build = (over = {}) => ai.buildSystemPrompt(
+    over.store ?? 'TestStore', over.customer ?? '', over.analysis ?? '', over.policy ?? '',
+    'minimal', 'brief', over.brain ?? '', {}, over.style ?? '', '',
+    over.sentiment ?? 'neutral', [], false, false, false, null,
+  );
+
+  test('is a prefix of the built system prompt', () => {
+    assert.ok(build().startsWith(ai.stableSystemPrefix(null)));
+  });
+
+  test('stays a prefix when turn-specific content is present', () => {
+    const prompt = build({
+      brain: 'Retatrutide ships in 10mg vials.',
+      customer: 'Customer: Linda',
+      analysis: 'SIGNALS:\n• angry',
+      sentiment: 'very_negative',
+    });
+    assert.ok(prompt.startsWith(ai.stableSystemPrefix(null)),
+      'turn-specific blocks must stay BEHIND the cached prefix');
+  });
+
+  test('is byte-identical across calls', () => {
+    assert.strictEqual(ai.stableSystemPrefix(null), ai.stableSystemPrefix(null));
+  });
+
+  test('does not vary with the store name or the customer', () => {
+    const a = build({ store: 'StoreA', customer: 'Customer: Linda' });
+    const b = build({ store: 'StoreB', customer: 'Customer: Sam' });
+    const prefix = ai.stableSystemPrefix(null);
+    assert.ok(a.startsWith(prefix) && b.startsWith(prefix));
+  });
+
+  test('is large enough for the API to actually cache it', () => {
+    assert.ok(ai.stableSystemPrefix(null).length >= 4000,
+      'below roughly 1k tokens the prefix is silently not cached');
+  });
+
+  test('honours a voice profile override', () => {
+    const profile = { voiceBlock: 'VOICE.', examplesBlock: 'EXAMPLES.' };
+    assert.strictEqual(ai.stableSystemPrefix(profile), 'VOICE.EXAMPLES.');
+  });
+});
+
 // ── Model tier routing ──────────────────────────────────────────────────────
 // Routing must be conservative in one direction only: sending a routine turn to
 // the expensive model wastes money, but sending an angry customer to the cheap

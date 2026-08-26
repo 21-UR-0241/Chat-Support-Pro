@@ -1083,6 +1083,7 @@ const {
   buildPolicyBlock,
   analyzeConversationState,
   pickModelTier,
+  stableSystemPrefix,
   detectEmotion,
   validateSuggestions,
   validateSafetyDosing,
@@ -1829,13 +1830,39 @@ module.exports = function createAiRoutes({ getCachedStore }) {
       // Opus 5 rejects `temperature` outright (400), and thinking is on by
       // default there — effort is the lever, not sampling. The routine tier keeps
       // temperature because Haiku still accepts it and the DeepSeek shim reads it.
+      // ── PROMPT CACHE ─────────────────────────────────────────────────────────
+      // The voice block and the robot-vs-human examples open every system prompt
+      // and do not vary by request — roughly 2.4k tokens re-sent verbatim on every
+      // suggestion. Split them into their own cached block so repeat turns read
+      // them at cache rates instead of paying full input price each time.
+      //
+      // This is metadata only. The two blocks concatenate back to byte-identical
+      // text, so the model sees exactly the prompt it saw before. If the prefix
+      // ever stops matching (someone reorders buildSystemPrompt's return), the
+      // guard below drops back to the plain string: the cost goes up, the output
+      // does not change.
+      const cachePrefix = stableSystemPrefix(voiceProfile);
+      const canCache = isPremium
+        && systemPrompt.startsWith(cachePrefix)
+        && cachePrefix.length >= 4000;   // under ~1k tokens the API will not cache it
+      if (isPremium && !canCache) {
+        console.warn('✦ [AI] prompt cache skipped — system prompt no longer starts with the stable prefix');
+      }
+      const systemField = canCache
+        ? [
+            { type: 'text', text: cachePrefix, cache_control: { type: 'ephemeral' } },
+            { type: 'text', text: systemPrompt.slice(cachePrefix.length) },
+          ]
+        : systemPrompt;
+
+
       const buildBody = (prompt) => JSON.stringify({
         model: isPremium ? PREMIUM_MODEL : SUGGEST_MODEL,
         max_tokens: SUGGEST_MAX_TOKENS,
         ...(isPremium
           ? { output_config: { effort: PREMIUM_EFFORT } }
           : { temperature: 0.6 }),
-        system: systemPrompt,
+        system: systemField,
         messages: [{ role: 'user', content: prompt }],
         ...(DEEPSEEK_SUGGEST_MODEL && { deepseekModel: DEEPSEEK_SUGGEST_MODEL }),
         ...(DEEPSEEK_SUGGEST_EFFORT && { deepseekReasoningEffort: DEEPSEEK_SUGGEST_EFFORT }),
@@ -1861,6 +1888,14 @@ module.exports = function createAiRoutes({ getCachedStore }) {
       const usage = anthropicData?.usage || {};
       if (usage.output_tokens != null || usage.completion_tokens != null) {
         console.log(`✦ [AI] usage — in:${usage.input_tokens ?? usage.prompt_tokens ?? '?'} out:${usage.output_tokens ?? usage.completion_tokens ?? '?'} reasoning:${usage.reasoning_tokens ?? '?'} cap:${SUGGEST_MAX_TOKENS} stop:${anthropicData?.stop_reason || 'unknown'}`);
+        // Cache reads are the whole point of the split above. If this stays at 0
+        // across repeated turns, something upstream is varying the prefix and the
+        // cache is costing 1.25x on every write instead of saving on reads.
+        if (canCache) {
+          const wrote = usage.cache_creation_input_tokens ?? 0;
+          const read  = usage.cache_read_input_tokens ?? 0;
+          console.log(`✦ [AI] cache — read:${read} wrote:${wrote}${read === 0 && wrote === 0 ? ' (NOT CACHING — check the prefix is byte-stable)' : ''}`);
+        }
       }
       warnIfTruncated(anthropicData, SUGGEST_MAX_TOKENS, 'Suggestions');
 
