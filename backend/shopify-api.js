@@ -138,6 +138,32 @@ async function getCustomerContext(store, customerEmail) {
         currency: order.currency,
         financialStatus: order.financial_status,
         fulfillmentStatus: order.fulfillment_status,
+        // fulfillment_status above is only 'fulfilled' / 'partial' / null — it says
+        // nothing about WHERE the parcel is. The tracking number, carrier and
+        // carrier URL live on the fulfillments, which were being dropped here, so
+        // an agent asking "what's their tracking?" had to open Shopify to find a
+        // value this response had already fetched.
+        //
+        // A label printed in Shopify means Shopify holds the tracking link, which
+        // is why this needs no carrier integration to answer "where is my order".
+        // What it does NOT tell you is whether the carrier ever physically scanned
+        // the parcel — a label can exist for days without a handoff.
+        fulfillments: (order.fulfillments || []).map(f => ({
+          id: f.id,
+          status: f.status,
+          shipmentStatus: f.shipment_status,
+          createdAt: f.created_at,
+          updatedAt: f.updated_at,
+          trackingCompany: f.tracking_company || null,
+          // Shopify exposes both singular and plural forms depending on how the
+          // fulfillment was created; the plural is authoritative when present.
+          trackingNumbers: f.tracking_numbers?.length
+            ? f.tracking_numbers
+            : (f.tracking_number ? [f.tracking_number] : []),
+          trackingUrls: f.tracking_urls?.length
+            ? f.tracking_urls
+            : (f.tracking_url ? [f.tracking_url] : []),
+        })),
         lineItems: order.line_items?.slice(0, 5).map(item => ({
           title: item.title,
           quantity: item.quantity,

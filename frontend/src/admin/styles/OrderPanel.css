@@ -1,0 +1,128 @@
+/* ===================================================================
+   Order panel — Shopify orders for the current conversation
+   Sits under the AI suggestions in the right-hand panel.
+   =================================================================== */
+
+.order-panel {
+  border-top: 1px solid #e9edef;
+  padding: 12px 14px 16px;
+}
+
+.order-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #667781;
+  margin-bottom: 10px;
+}
+
+.order-panel-load {
+  font: inherit;
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid #d1d7db;
+  background: #fff;
+  color: #00a884;
+  cursor: pointer;
+}
+
+.order-panel-load:hover:not(:disabled) { background: #f0fdf9; border-color: #00a884; }
+.order-panel-load:disabled { opacity: 0.6; cursor: default; }
+
+.order-panel-empty,
+.order-panel-error {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #667781;
+}
+
+.order-panel-error { color: #b91c1c; }
+
+.order-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+
+.order-card {
+  border: 1px solid #e9edef;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fff;
+}
+
+.order-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.order-number { font-weight: 600; font-size: 13px; color: #111b21; }
+
+.order-status {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  background: rgba(102, 119, 129, 0.12);
+  color: #667781;
+}
+
+.order-status--shipped,
+.order-status--delivered { background: rgba(0, 168, 132, 0.12); color: #027a5b; }
+.order-status--refunded,
+.order-status--cancelled { background: rgba(239, 68, 68, 0.12); color: #b91c1c; }
+.order-status--not-shipped-yet,
+.order-status--awaiting-payment { background: rgba(245, 158, 11, 0.14); color: #b45309; }
+
+.order-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 5px;
+  font-size: 11px;
+  color: #667781;
+}
+
+.order-items { flex-basis: 100%; }
+
+/* A printed label is not a handoff. Amber, not red: it is a prompt to check,
+   not a confirmed problem. */
+.order-warn {
+  margin: 8px 0 0;
+  padding: 6px 8px;
+  border-left: 3px solid #f59e0b;
+  border-radius: 0 4px 4px 0;
+  background: rgba(245, 158, 11, 0.08);
+  font-size: 11px;
+  line-height: 1.45;
+  color: #b45309;
+}
+
+.order-tracking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+
+.order-carrier { font-weight: 600; color: #111b21; }
+.order-tracking a { color: #2563eb; text-decoration: underline; word-break: break-all; }
+
+.order-copy {
+  font: inherit;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #d1d7db;
+  background: #fff;
+  color: #667781;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.order-copy:hover { border-color: #00a884; color: #00a884; }

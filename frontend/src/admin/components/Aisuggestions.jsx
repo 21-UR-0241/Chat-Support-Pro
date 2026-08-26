@@ -916,6 +916,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import api from '../services/api';
+import OrderPanel from './OrderPanel';
 import '../styles/Aisuggestions.css';
 
 // Unpacks the API's `voiceFlags` into an index-keyed lookup.
@@ -2065,6 +2066,10 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
 
           </div>
         )}
+
+        {/* Shopify orders for this customer. Agent-facing: the AI does not read
+            this, so the guards against invented tracking numbers still hold. */}
+        {!collapsed && <OrderPanel conversation={conversation} />}
       </div>
 
       {detailedModal && (

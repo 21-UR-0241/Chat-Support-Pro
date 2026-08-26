@@ -1152,6 +1152,9 @@ function StoreManagement({ onBack, onStoresUpdated }) {
       s.is_active !== undefined ? s.is_active : true,
     store_group:      s.storeGroup      || s.store_group      || '',
     store_group_name: s.storeGroupName  || s.store_group_name || '',
+    // Derived server-side from whether an access_token exists. The token
+    // itself is never sent to the browser.
+    shopify_connected: s.shopifyConnected === true,
   });
 
   const loadStores = async () => {
@@ -1339,6 +1342,20 @@ function StoreManagement({ onBack, onStoresUpdated }) {
       setSaving(false);
     }
   };
+
+  // Kicks off the Shopify OAuth install for one store.
+  //
+  // Opens the backend's /auth endpoint in a new tab rather than fetching it:
+  // the flow is a redirect chain through Shopify's consent screen and back to
+  // /auth/callback, which only works in a real browser context. The token is
+  // written server-side by the callback, so nothing sensitive passes through
+  // here — this button only starts the journey.
+  const handleConnectShopify = (store) => {
+    if (!store.shop_domain) return;
+    const base = (api.baseUrl || '').replace(/\/$/, '');
+    window.open(`${base}/auth?shop=${encodeURIComponent(store.shop_domain)}`, '_blank', 'noopener');
+  };
+
 
   const handleToggleActive = async (store) => {
     try {
@@ -1612,6 +1629,7 @@ function StoreManagement({ onBack, onStoresUpdated }) {
                   <th>Identifier</th>
                   <th>Shop Domain</th>
                   <th>Group</th>
+                  <th>Shopify</th>
                   <th>Status</th>
                   <th>Actions</th>
                 </tr>
@@ -1632,6 +1650,23 @@ function StoreManagement({ onBack, onStoresUpdated }) {
                         </span>
                       ) : (
                         <span className="group-badge group-badge-empty">Ungrouped</span>
+                      )}
+                    </td>
+                    <td>
+                      {store.shopify_connected ? (
+                        <span className="shopify-badge shopify-badge--connected">Connected</span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="shopify-connect"
+                          onClick={() => handleConnectShopify(store)}
+                          disabled={!store.shop_domain}
+                          title={store.shop_domain
+                            ? `Install the app on ${store.shop_domain}`
+                            : 'Add a shop domain before connecting'}
+                        >
+                          Connect
+                        </button>
                       )}
                     </td>
                     <td>
@@ -2143,6 +2178,23 @@ function StoreManagement({ onBack, onStoresUpdated }) {
           color: var(--text-secondary, #555);
         }
         .store-domain { font-size: 13px; color: var(--text-secondary, #666); }
+        .shopify-badge {
+          display: inline-block; font-size: 11px; font-weight: 600;
+          padding: 3px 10px; border-radius: 999px; white-space: nowrap;
+        }
+        .shopify-badge--connected {
+          color: #027a5b; background: rgba(0, 168, 132, 0.12);
+          border: 1px solid rgba(0, 168, 132, 0.3);
+        }
+        /* Not an error state - most stores simply have not been installed yet,
+           so this reads as an available action rather than a failure. */
+        .shopify-connect {
+          font: inherit; font-size: 11px; font-weight: 600;
+          padding: 3px 12px; border-radius: 999px; cursor: pointer;
+          color: #2563eb; background: #fff; border: 1px solid #bfdbfe;
+        }
+        .shopify-connect:hover:not(:disabled) { background: #eff6ff; border-color: #2563eb; }
+        .shopify-connect:disabled { opacity: 0.5; cursor: not-allowed; color: #94a3b8; border-color: #e2e8f0; }
         .group-badge {
           display: inline-block;
           background: #eef2ff;
