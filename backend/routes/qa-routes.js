@@ -33,7 +33,7 @@ const {
   VOICE_REFERENCE,
   CRITICAL_CAP,
 } = require('../lib/qa-voice-rules');
-const { callAnthropicAPIWithRetry } = require('../lib/ai-suggestions');
+const { callAnthropicAPIWithRetry, extractText } = require('../lib/ai-suggestions');
 
 /**
  * The canonical auto-reply. Kept for reference, but the scan filters with the
@@ -144,7 +144,7 @@ async function aiVoicePass(reply, customerPrompt) {
 
   try {
     const data = await callAnthropicAPIWithRetry(body, apiKey);
-    const raw = data.content?.[0]?.text || '';
+    const raw = extractText(data) || '';
     const cleaned = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
     const parsed = JSON.parse(cleaned);
 

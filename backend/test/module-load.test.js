@@ -30,6 +30,8 @@ const MODULES = [
   '../brain-context',
   '../auth',
   '../routes/ai-routes',
+  '../routes/ai-training-routes',
+  '../routes/qa-routes',
 ];
 
 let passed = 0;

@@ -5,6 +5,7 @@ const router  = express.Router();
 
 const { authenticateToken } = require('../auth');
 const db = require('../database');
+const { extractText } = require('../lib/ai-suggestions');
 const {
   ensureProviderKeysTable, getProviderKey, saveProviderKey, deleteProviderKey,
   maskKey, isCreditExhaustedError, tryDeepSeekFallback,
@@ -167,7 +168,7 @@ RESPONSE FORMAT — valid JSON only, no markdown:
 
     const response = await callAnthropicAPI(requestBody, ANTHROPIC_API_KEY);
     const truncated = response?.stop_reason === 'max_tokens';
-    const raw = response.content?.[0]?.text || '{}';
+    const raw = extractText(response) || '{}';
     const parsed = parseAIResponse(raw);
 
     // Previously fell back to { rules: [], summary: 'Could not parse...' } and
@@ -358,7 +359,7 @@ RESPONSE FORMAT — valid JSON only, no markdown:
         });
 
         const response = await callAnthropicAPI(requestBody, ANTHROPIC_API_KEY);
-        const raw = response.content?.[0]?.text || '{}';
+        const raw = extractText(response) || '{}';
         const parsed = parseAIResponse(raw) || { rules: [], gaps: [] };
 
         (parsed.rules || []).forEach(r => {
@@ -467,7 +468,7 @@ Generate the interview.`;
     });
 
     const response = await callAnthropicAPI(requestBody, ANTHROPIC_API_KEY);
-    const raw = response.content?.[0]?.text || '{}';
+    const raw = extractText(response) || '{}';
     const parsed = parseAIResponse(raw) || {
       intro: "I found some gaps in your conversations — let me ask a few questions.",
       questions: gaps.slice(0, 6).map((g, i) => ({
@@ -679,7 +680,7 @@ JSON SHAPE — no markdown fences, no code blocks, just the object:
     if (anthropicResponse._fallbackProvider) {
       console.log(`[AI Training] chat served via fallback provider: ${anthropicResponse._fallbackProvider}`);
     }
-    const rawContent = anthropicResponse.content?.[0]?.text || '{}';
+    const rawContent = extractText(anthropicResponse) || '{}';
 
     const parsed = parseAIResponse(rawContent) || {
       message: rawContent,
@@ -1994,7 +1995,7 @@ RESPONSE FORMAT — valid JSON only, no markdown fences:
     });
 
     const response = await callAnthropicAPI(requestBody, apiKey);
-    const raw = response.content?.[0]?.text || '{}';
+    const raw = extractText(response) || '{}';
     const parsed = parseAIResponse(raw);
     if (!parsed || !Array.isArray(parsed.rules)) return null;
 
@@ -2046,7 +2047,7 @@ What concrete details from ORIGINAL are missing in CONSOLIDATED?`;
     });
 
     const response = await callAnthropicAPI(requestBody, apiKey);
-    const raw = response.content?.[0]?.text || '{}';
+    const raw = extractText(response) || '{}';
     const parsed = parseAIResponse(raw);
     if (!parsed || !Array.isArray(parsed.lost)) return [];
 
