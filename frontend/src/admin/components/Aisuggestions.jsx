@@ -21,70 +21,7 @@
 //   const editTextareaRef                         = useRef(null);
 
 //   const [detailedModal, setDetailedModal]       = useState(null);
-//   // ── Panel width ────────────────────────────────────────────────────────────
-  // Agents read long drafts in this panel and 300px forces most of them to wrap
-  // into a narrow column. The left edge is draggable; the chosen width is per
-  // browser, so one agent widening it does not change anyone else's layout.
-  const PANEL_MIN_WIDTH = 260;
-  const PANEL_MAX_WIDTH = 900;
-  const PANEL_WIDTH_KEY = 'ai-panel-width';
-
-  const readStoredWidth = () => {
-    try {
-      const raw = parseInt(localStorage.getItem(PANEL_WIDTH_KEY), 10);
-      if (Number.isFinite(raw)) return Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, raw));
-    } catch {
-      // Private mode, blocked site data — fall through to the default.
-    }
-    return 300;
-  };
-
-  const [panelWidth, setPanelWidth] = useState(readStoredWidth);
-  const [isResizing, setIsResizing] = useState(false);
-  const panelRef = useRef(null);
-
-  const clampWidth = (px) => Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, px));
-
-  const persistWidth = (px) => {
-    try { localStorage.setItem(PANEL_WIDTH_KEY, String(px)); } catch { /* not worth surfacing */ }
-  };
-
-  const startResize = (event) => {
-    event.preventDefault();
-    setIsResizing(true);
-
-    // Dragging LEFT widens the panel, so the delta is inverted relative to x.
-    const startX = event.clientX;
-    const startWidth = panelRef.current?.getBoundingClientRect().width ?? panelWidth;
-
-    const onMove = (moveEvent) => setPanelWidth(clampWidth(startWidth + (startX - moveEvent.clientX)));
-
-    const onUp = (upEvent) => {
-      const finalWidth = clampWidth(startWidth + (startX - upEvent.clientX));
-      setPanelWidth(finalWidth);
-      persistWidth(finalWidth);
-      setIsResizing(false);
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-    };
-
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-  };
-
-  // Keyboard equivalent, so the panel is not mouse-only.
-  const nudgeWidth = (event) => {
-    const step = event.shiftKey ? 50 : 10;
-    let next = null;
-    if (event.key === 'ArrowLeft')  next = clampWidth(panelWidth + step);
-    if (event.key === 'ArrowRight') next = clampWidth(panelWidth - step);
-    if (next === null) return;
-    event.preventDefault();
-    setPanelWidth(next);
-    persistWidth(next);
-  };
-
-  const [activeTab, setActiveTab]               = useState(0);
+//   const [activeTab, setActiveTab]               = useState(0);
 
 //   const [uploadedImage, setUploadedImage]       = useState(null);
 //   const [imageAnalyzing, setImageAnalyzing]     = useState(false);
@@ -1088,6 +1025,73 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
   const editTextareaRef                         = useRef(null);
 
   const [detailedModal, setDetailedModal]       = useState(null);
+  // ── Panel width ────────────────────────────────────────────────────────────
+  // Agents read long drafts in this panel and 300px forces most of them to wrap
+  // into a narrow column. The left edge is draggable; the chosen width is per
+  // browser, so one agent widening it does not change anyone else's layout.
+  //
+  // These are hooks, so they must stay inside the component body. An earlier
+  // revision of this block landed at module scope and every admin page render
+  // died on "Cannot read properties of null (reading 'useState')".
+  const PANEL_MIN_WIDTH = 260;
+  const PANEL_MAX_WIDTH = 900;
+  const PANEL_WIDTH_KEY = 'ai-panel-width';
+
+  const readStoredWidth = () => {
+    try {
+      const raw = parseInt(localStorage.getItem(PANEL_WIDTH_KEY), 10);
+      if (Number.isFinite(raw)) return Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, raw));
+    } catch {
+      // Private mode, blocked site data — fall through to the default.
+    }
+    return 300;
+  };
+
+  const [panelWidth, setPanelWidth] = useState(readStoredWidth);
+  const [isResizing, setIsResizing] = useState(false);
+  const panelRef = useRef(null);
+
+  const clampWidth = (px) => Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, px));
+
+  const persistWidth = (px) => {
+    try { localStorage.setItem(PANEL_WIDTH_KEY, String(px)); } catch { /* not worth surfacing */ }
+  };
+
+  const startResize = (event) => {
+    event.preventDefault();
+    setIsResizing(true);
+
+    // Dragging LEFT widens the panel, so the delta is inverted relative to x.
+    const startX = event.clientX;
+    const startWidth = panelRef.current?.getBoundingClientRect().width ?? panelWidth;
+
+    const onMove = (moveEvent) => setPanelWidth(clampWidth(startWidth + (startX - moveEvent.clientX)));
+
+    const onUp = (upEvent) => {
+      const finalWidth = clampWidth(startWidth + (startX - upEvent.clientX));
+      setPanelWidth(finalWidth);
+      persistWidth(finalWidth);
+      setIsResizing(false);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
+  // Keyboard equivalent, so the panel is not mouse-only.
+  const nudgeWidth = (event) => {
+    const step = event.shiftKey ? 50 : 10;
+    let next = null;
+    if (event.key === 'ArrowLeft')  next = clampWidth(panelWidth + step);
+    if (event.key === 'ArrowRight') next = clampWidth(panelWidth - step);
+    if (next === null) return;
+    event.preventDefault();
+    setPanelWidth(next);
+    persistWidth(next);
+  };
+
   const [activeTab, setActiveTab]               = useState(0);
 
   const [uploadedImage, setUploadedImage]       = useState(null);

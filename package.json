@@ -17,12 +17,13 @@
     "build": "npm run frontend:build",
     "deploy": "npm run build && shopify app deploy",
     "clean": "taskkill /F /IM node.exe 2>nul || echo No processes to clean",
-    "test": "node backend/test/safety-guards.test.js && node backend/test/module-load.test.js",
-    "lint": "eslint backend frontend",
+    "test": "npm run lint && node backend/test/safety-guards.test.js && node backend/test/module-load.test.js",
+    "lint": "eslint backend frontend --ext .js,.jsx",
     "format": "prettier --write \"**/*.{js,jsx,json,md}\"",
     "db:migrate": "node scripts/migrate.js",
     "db:seed": "node scripts/seed.js",
-    "db:setup": "npm run db:migrate && npm run db:seed"
+    "db:setup": "npm run db:migrate && npm run db:seed",
+    "test:ui": "npm run frontend:build && node frontend/test/admin-smoke.mjs dist /admin.html"
   },
   "keywords": [
     "shopify",
@@ -78,6 +79,7 @@
     "eslint": "^8.54.0",
     "eslint-config-prettier": "^9.0.0",
     "eslint-plugin-react": "^7.33.2",
+    "eslint-plugin-react-hooks": "^4.6.2",
     "nodemon": "^3.0.2",
     "prettier": "^3.1.0"
   },
