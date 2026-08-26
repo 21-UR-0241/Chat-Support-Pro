@@ -142,6 +142,59 @@ group('detectStall', () => {
   });
 });
 
+// ── Model tier routing ──────────────────────────────────────────────────────
+// Routing must be conservative in one direction only: sending a routine turn to
+// the expensive model wastes money, but sending an angry customer to the cheap
+// one is the failure that gets noticed.
+
+group('pickModelTier', () => {
+  const routine = { sentiment: 'neutral', isTrustQuestion: false, isSafetyDosing: false,
+                    isRefundOrComplaint: false, conversationState: {} };
+
+  test('keeps a plain order-status turn on the cheap tier', () => {
+    assert.strictEqual(pickTier(routine), 'routine');
+  });
+
+  test('escalates an angry customer', () => {
+    assert.strictEqual(pickTier({ ...routine, sentiment: 'very_negative' }), 'premium');
+  });
+
+  test('escalates a merely negative customer too', () => {
+    assert.strictEqual(pickTier({ ...routine, sentiment: 'negative' }), 'premium');
+  });
+
+  test('escalates anything touching dosing', () => {
+    assert.strictEqual(pickTier({ ...routine, isSafetyDosing: true }), 'premium');
+  });
+
+  test('escalates a trust challenge', () => {
+    assert.strictEqual(pickTier({ ...routine, isTrustQuestion: true }), 'premium');
+  });
+
+  test('escalates refunds and complaints', () => {
+    assert.strictEqual(pickTier({ ...routine, isRefundOrComplaint: true }), 'premium');
+  });
+
+  test('escalates an explicitly escalating thread', () => {
+    assert.strictEqual(pickTier({ ...routine, conversationState: { isEscalating: true } }), 'premium');
+  });
+
+  test('reports why it escalated', () => {
+    const { reasons } = ai.pickModelTier({ ...routine, sentiment: 'very_negative', isSafetyDosing: true });
+    assert.ok(reasons.length >= 2, 'every reason should be recorded, not just the first');
+  });
+
+  test('gives a positive customer the cheap tier', () => {
+    assert.strictEqual(pickTier({ ...routine, sentiment: 'very_positive' }), 'routine');
+  });
+
+  test('survives a missing conversationState', () => {
+    assert.strictEqual(pickTier({ ...routine, conversationState: null }), 'routine');
+  });
+});
+
+function pickTier(args) { return ai.pickModelTier(args).tier; }
+
 // ── Emotion ─────────────────────────────────────────────────────────────────
 // The regression that motivated moving this off the browser: real anger is
 // usually expressed in facts and repetition, not adjectives.

@@ -1082,6 +1082,7 @@ const {
   buildCustomerContext,
   buildPolicyBlock,
   analyzeConversationState,
+  pickModelTier,
   detectEmotion,
   validateSuggestions,
   validateSafetyDosing,
@@ -1282,9 +1283,44 @@ const {
 })();
 
 // Tunable models in one place.
-const SUGGEST_MODEL  = 'claude-haiku-4-5-20251001';
-const DETAILED_MODEL = 'claude-sonnet-4-6';
-const IMAGE_MODEL    = 'claude-sonnet-4-6';
+// ── MODEL TIERS ──────────────────────────────────────────────────────────────
+// Two tiers, because reply quality and cost pull in opposite directions and a
+// single model has to lose one of them.
+//
+// ROUTINE covers turns where the answer is largely determined by the facts:
+// order status, shipping windows, account questions. Voice matters least here
+// and the wording is close to formulaic, so these keep the existing cheap path
+// (DeepSeek primary, Haiku on fallback) and the cost profile that goes with it.
+//
+// PREMIUM covers turns where the wording IS the job — an angry customer, a
+// refund, a trust challenge, a product recommendation, anything touching dosing.
+// These skip DeepSeek entirely and go to Opus. Routing a turn here and then
+// letting the cheap provider answer first would quietly undo the decision.
+//
+// The split matters commercially: if most traffic is routine, blended cost per
+// suggestion stays near the cheap tier while the turns a customer remembers get
+// the strong model.
+const ROUTINE_MODEL  = 'claude-haiku-4-5';   // fallback for the cheap tier
+const PREMIUM_MODEL  = 'claude-opus-5';      // the tier that earns its cost
+const DETAILED_MODEL = 'claude-opus-5';      // "expand this" is always deliberate
+const IMAGE_MODEL    = 'claude-sonnet-5';
+
+// Kept under the old name because the DeepSeek shim reads `model` off the body
+// and several log lines still refer to it.
+const SUGGEST_MODEL  = ROUTINE_MODEL;
+
+// Effort tunes how much the model thinks before answering. A support reply is
+// not a reasoning problem, so premium fast suggestions sit at 'medium' rather
+// than the 'high' default; the detailed expansion earns 'high'. Thinking is left
+// ON at every tier: disabling it on Opus 5 risks tool-call text and stray tags
+// leaking into the visible reply, and lowering effort is the cheaper lever.
+const PREMIUM_EFFORT  = process.env.PREMIUM_EFFORT  || 'medium';
+const DETAILED_EFFORT = process.env.DETAILED_EFFORT || 'high';
+
+// A thinking-enabled Opus turn does not fit in the 15s default sized for Haiku,
+// and a timeout here degrades to canned templates rather than to a slower reply.
+const PREMIUM_TIMEOUT_MS = Number(process.env.PREMIUM_TIMEOUT_MS) || 60000;
+
 // Per-intent brain budget. Reasoning cost scales with how much context the model
 // has to reason over, and DeepSeek spends 93-98% of its completion tokens on
 // reasoning (measured: 1175-3768 reasoning tokens to emit ~84 tokens of JSON).
@@ -1322,7 +1358,8 @@ const SUGGEST_MAX_TOKENS = Number(process.env.SUGGEST_MAX_TOKENS) || 6000;
 // failed request per boot. Set these explicitly once GET /api/ai/deepseek-models
 // tells you what the account actually serves.
 const DEEPSEEK_SUGGEST_MODEL  = process.env.DEEPSEEK_SUGGEST_MODEL  || null;
-const DEEPSEEK_DETAILED_MODEL = process.env.DEEPSEEK_DETAILED_MODEL || null;
+// DEEPSEEK_DETAILED_MODEL is gone: detailed mode is always premium tier now and
+// skips DeepSeek entirely, so a per-request hint for it had nothing to steer.
 
 // 90s, not 25s. Measured over 9 runs: 20.1-59.1s, median 31.5s. A 25s ceiling
 // would time out 6 of 9 and make Haiku the PRIMARY path for fast mode, which is
@@ -1670,18 +1707,20 @@ module.exports = function createAiRoutes({ getCachedStore }) {
         // Detailed mode keeps the reasoning model: the agent chose to expand, so a
         // slower, better answer is the point. No timeout override, so it uses the
         // provider default.
-        const DETAILED_MAX_TOKENS = 3000;
+        // Raised from 3000: on Opus this budget covers thinking AND the visible
+        // reply, and a truncated completion never emits closing JSON — which
+        // surfaces as a silent template fallback rather than as an error.
+        const DETAILED_MAX_TOKENS = 8000;
         const requestBody = JSON.stringify({
           model: DETAILED_MODEL,
           max_tokens: DETAILED_MAX_TOKENS,
-          temperature: 0.5,
+          output_config: { effort: DETAILED_EFFORT },
           system: systemPrompt,
           messages: [{ role: 'user', content: userPrompt }],
-          ...(DEEPSEEK_DETAILED_MODEL && { deepseekModel: DEEPSEEK_DETAILED_MODEL }),
         });
 
         console.time('✦ [AI] llmDetailed');
-        const { data: anthropicData, provider } = await callAIForSuggestions(requestBody, ANTHROPIC_API_KEY);
+        const { data: anthropicData, provider } = await callAIForSuggestions(requestBody, ANTHROPIC_API_KEY, { skipDeepSeek: true, timeoutMs: PREMIUM_TIMEOUT_MS });
         console.timeEnd('✦ [AI] llmDetailed');
 
         const rawContent = anthropicData.content?.[0]?.text || '';
@@ -1782,10 +1821,20 @@ module.exports = function createAiRoutes({ getCachedStore }) {
       // `model` is the CLAUDE fallback model. lib/deepseek-fallback.js currently
       // ignores it and hardcodes its own, so `deepseekModel` is passed alongside as
       // an explicit hint for it to honour.
+      const { tier, reasons: tierReasons } = pickModelTier({
+        sentiment, isTrustQuestion, isSafetyDosing, isRefundOrComplaint, conversationState,
+      });
+      const isPremium = tier === 'premium';
+
+      // Opus 5 rejects `temperature` outright (400), and thinking is on by
+      // default there — effort is the lever, not sampling. The routine tier keeps
+      // temperature because Haiku still accepts it and the DeepSeek shim reads it.
       const buildBody = (prompt) => JSON.stringify({
-        model: SUGGEST_MODEL,
+        model: isPremium ? PREMIUM_MODEL : SUGGEST_MODEL,
         max_tokens: SUGGEST_MAX_TOKENS,
-        temperature: 0.6,
+        ...(isPremium
+          ? { output_config: { effort: PREMIUM_EFFORT } }
+          : { temperature: 0.6 }),
         system: systemPrompt,
         messages: [{ role: 'user', content: prompt }],
         ...(DEEPSEEK_SUGGEST_MODEL && { deepseekModel: DEEPSEEK_SUGGEST_MODEL }),
@@ -1793,9 +1842,14 @@ module.exports = function createAiRoutes({ getCachedStore }) {
         deepseekTimeoutMs: DEEPSEEK_SUGGEST_TIMEOUT_MS,
       });
 
-      console.log(`✦ [AI] Calling suggestions (DeepSeek primary / ${SUGGEST_MODEL} fallback) — brain: ${brainContext.length}c, style: ${adminStyleBlock.length}c, voice: ${voiceProfile.id}, budget: ${brainBudget}c, dsModel: ${DEEPSEEK_SUGGEST_MODEL || process.env.DEEPSEEK_MODEL || 'provider default'}, maxTokens: ${SUGGEST_MAX_TOKENS}, sysPrompt: ${systemPrompt.length}c, userPrompt: ${userPrompt.length}c, examples: ${responseExamples.length}, image: ${!!imageAnalysis}, productAnswer: ${brainHasProductAnswer}`);
+      const callOpts = isPremium
+        ? { skipDeepSeek: true, timeoutMs: PREMIUM_TIMEOUT_MS }
+        : {};
+
+      console.log(`✦ [AI] tier=${tier}${tierReasons.length ? ` (${tierReasons.join(', ')})` : ''} model=${isPremium ? PREMIUM_MODEL : `deepseek→${SUGGEST_MODEL}`}`);
+      console.log(`✦ [AI] Calling suggestions — brain: ${brainContext.length}c, style: ${adminStyleBlock.length}c, voice: ${voiceProfile.id}, budget: ${brainBudget}c, dsModel: ${DEEPSEEK_SUGGEST_MODEL || process.env.DEEPSEEK_MODEL || 'provider default'}, maxTokens: ${SUGGEST_MAX_TOKENS}, sysPrompt: ${systemPrompt.length}c, userPrompt: ${userPrompt.length}c, examples: ${responseExamples.length}, image: ${!!imageAnalysis}, productAnswer: ${brainHasProductAnswer}`);
       console.time('✦ [AI] llmSuggest');
-      const { data: anthropicData, provider } = await callAIForSuggestions(buildBody(userPrompt), ANTHROPIC_API_KEY);
+      const { data: anthropicData, provider } = await callAIForSuggestions(buildBody(userPrompt), ANTHROPIC_API_KEY, callOpts);
       console.timeEnd('✦ [AI] llmSuggest');
 
       const rawContent = anthropicData.content?.[0]?.text || '';
@@ -1896,7 +1950,7 @@ module.exports = function createAiRoutes({ getCachedStore }) {
         if (stalled) {
           try {
             console.time('✦ [AI] llmStallRetry');
-            const retry = await callAIForSuggestions(buildBody(userPrompt + STALL_RETRY_INSTRUCTION), ANTHROPIC_API_KEY);
+            const retry = await callAIForSuggestions(buildBody(userPrompt + STALL_RETRY_INSTRUCTION), ANTHROPIC_API_KEY, callOpts);
             console.timeEnd('✦ [AI] llmStallRetry');
             warnIfTruncated(retry.data, SUGGEST_MAX_TOKENS, 'Stall retry');
             const retryParsed = parseAIResponse(retry.data.content?.[0]?.text || '', 'suggestions');

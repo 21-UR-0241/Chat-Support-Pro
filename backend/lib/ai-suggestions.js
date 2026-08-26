@@ -2247,6 +2247,7 @@ function buildBrainQuery(clientMessage = '', chatHistory = '', conversationState
 // ============ ANTHROPIC CLIENT (with retry) ============
 
 function callAnthropicAPIWithRetry(requestBody, apiKey, retries = 1, timeoutMs = 15000) {
+  timeoutMs = timeoutMs || 15000;
   const attempt = (attemptsLeft) => new Promise((resolve, reject) => {
     const options = { hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Length': Buffer.byteLength(requestBody) } };
     const req = require('https').request(options, apiRes => {
@@ -2270,20 +2271,37 @@ function callAnthropicAPIWithRetry(requestBody, apiKey, retries = 1, timeoutMs =
   return attempt(retries);
 }
 
-async function callAIForSuggestions(requestBody, apiKey) {
-  try {
-    const { tryDeepSeekFallback } = require('./deepseek-fallback');
-    const primary = await tryDeepSeekFallback(requestBody);
-    if (primary) {
-      console.log('✦ [AI] Suggestions served via DeepSeek (primary)');
-      return { data: primary, provider: 'deepseek' };
+/**
+ * @param {string} requestBody  Anthropic-shaped request body, already serialised.
+ * @param {string} apiKey
+ * @param {object} [opts]
+ * @param {boolean} [opts.skipDeepSeek]  Go straight to Anthropic. Set for turns
+ *   routed to the premium tier, where the whole point is the stronger model —
+ *   letting DeepSeek answer first would silently undo the routing decision.
+ * @param {number} [opts.timeoutMs]  Anthropic socket timeout. The 15s default
+ *   is sized for Haiku; a thinking-enabled Opus turn needs considerably more,
+ *   and a timeout here degrades to canned templates rather than to a slower
+ *   reply, so it is worth being generous.
+ */
+async function callAIForSuggestions(requestBody, apiKey, opts = {}) {
+  const { skipDeepSeek = false, timeoutMs } = opts;
+
+  if (!skipDeepSeek) {
+    try {
+      const { tryDeepSeekFallback } = require('./deepseek-fallback');
+      const primary = await tryDeepSeekFallback(requestBody);
+      if (primary) {
+        console.log('✦ [AI] Suggestions served via DeepSeek (primary)');
+        return { data: primary, provider: 'deepseek' };
+      }
+      console.warn('✦ [AI] DeepSeek primary unavailable — falling back to Claude');
+    } catch (err) {
+      console.warn(`✦ [AI] DeepSeek primary error: ${err.message} — falling back to Claude`);
     }
-    console.warn('✦ [AI] DeepSeek primary unavailable — falling back to Claude');
-  } catch (err) {
-    console.warn(`✦ [AI] DeepSeek primary error: ${err.message} — falling back to Claude`);
   }
-  console.log('✦ [AI] Suggestions served via Claude (fallback)');
-  const data = await callAnthropicAPIWithRetry(requestBody, apiKey);
+
+  console.log(`✦ [AI] Suggestions served via Claude (${skipDeepSeek ? 'premium tier' : 'fallback'})`);
+  const data = await callAnthropicAPIWithRetry(requestBody, apiKey, 1, timeoutMs);
   return { data, provider: 'claude' };
 }
 
@@ -2912,6 +2930,24 @@ right person now"), don't recite ownership theatre.`;
 
 // ============ CONVERSATION STATE ============
 
+/**
+ * Decide which tier a turn belongs to.
+ *
+ * Every signal here is already computed upstream for other reasons, so routing
+ * costs nothing extra — no classifier call, no added latency.
+ */
+function pickModelTier({ sentiment, isTrustQuestion, isSafetyDosing, isRefundOrComplaint, conversationState }) {
+  const reasons = [];
+  if (isSafetyDosing)                          reasons.push('dosing/safety');
+  if (isTrustQuestion)                         reasons.push('trust challenge');
+  if (isRefundOrComplaint)                     reasons.push('refund/complaint');
+  if (sentiment === 'negative' ||
+      sentiment === 'very_negative')           reasons.push(`sentiment ${sentiment}`);
+  if (conversationState?.isEscalating)         reasons.push('escalating');
+  if (conversationState?.isLongConversation)   reasons.push('long conversation');
+  return { tier: reasons.length ? 'premium' : 'routine', reasons };
+}
+
 // ============ EMOTION ============
 
 /**
@@ -3350,6 +3386,7 @@ module.exports = {
   parseAIResponse,
   analyzeConversationState,
   detectEmotion,
+  pickModelTier,
   validateSuggestions,
   validateSafetyDosing,
   generateSmartFallbackSuggestionsRaw,
