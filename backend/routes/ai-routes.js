@@ -900,7 +900,7 @@
 //         }
 //       });
 
-//       console.log(`✦ [AI] FINAL (${suggestions.length}) — fallback:${usedFallback}${usedFallback ? ` (${fallbackReason})` : ''}, blocked:${blocked || 'none'}, needsReview:${safetyReview.length}, voiceFlags:${voiceFlags.length}, placeholders:${placeholderCount}`);
+//       console.log(`✦ [AI] FINAL (${suggestions.length}) — fallback:${usedFallback}${usedFallback ? ` (${fallbackReason})` : ''}, blocked:${blocked || 'none'}, needsReview:${safetyReview.length}, voiceFlags:${voiceFlags.length}, aiTells:${aiTells.length}, placeholders:${placeholderCount}`);
 //       if (usedFallback) console.warn(`⚠️  [AI] FALLBACK reason=${fallbackReason} provider=${provider}`);
 
 //       res.json({
@@ -1051,7 +1051,8 @@ const { authenticateToken } = require('../auth');
 const { getBrainContext, getBrainSettings, refreshBrainCache } = require('../brain-context');
 
 const {
-  humanizeText,
+  normalizeTypography,
+  detectAITells,
   callAnthropicAPIWithRetry,
   callAIForSuggestions,
   parseAIResponse,
@@ -1703,13 +1704,19 @@ module.exports = function createAiRoutes({ getCachedStore }) {
         // Voice pass LAST — after every safety guard has had its say, so a scrub
         // never changes what a guard already inspected.
         const detailedVoiceFlags = [];
+        const detailedAiTells = [];
         detailedAnswers.forEach((a, i) => {
           if (!a?.text) return;
-          a.text = scrubVoice(humanizeText(a.text), voiceProfile);
+          a.text = scrubVoice(normalizeTypography(a.text), voiceProfile);
           const flags = lintVoice(a.text, voiceProfile, { detailed: true });
           if (flags.length) {
             detailedVoiceFlags.push({ index: i, label: a.label, flags });
             console.warn(`🗣️  [Voice] detailed[${i}] ${a.label}: ${flags.map(f => f.label).join(', ')}`);
+          }
+          const tells = detectAITells(a.text);
+          if (tells.length) {
+            detailedAiTells.push({ index: i, label: a.label, tells });
+            console.warn(`🤖 [AITell] detailed[${i}] ${a.label}: ${tells.map(t => `"${t.match}"`).join(', ')}`);
           }
         });
 
@@ -1721,6 +1728,7 @@ module.exports = function createAiRoutes({ getCachedStore }) {
           voiceProfile: voiceProfile.id,
           voiceRulesVersion: VOICE_VERSION,
           ...(detailedVoiceFlags.length && { voiceFlags: detailedVoiceFlags }),
+          ...(detailedAiTells.length && { aiTells: detailedAiTells }),
         });
       }
 
@@ -1938,7 +1946,7 @@ module.exports = function createAiRoutes({ getCachedStore }) {
       // Runs after every safety guard so a scrub can never alter text a guard
       // already cleared. scrubVoice only strips formatting and filler; anything
       // it cannot safely fix comes back as a flag for the agent to eyeball.
-      suggestions = suggestions.map(s => scrubVoice(humanizeText(s), voiceProfile));
+      suggestions = suggestions.map(s => scrubVoice(normalizeTypography(s), voiceProfile));
 
       const voiceFlags = [];
       suggestions.forEach((s, i) => {
@@ -1946,6 +1954,18 @@ module.exports = function createAiRoutes({ getCachedStore }) {
         if (flags.length) {
           voiceFlags.push({ index: i, flags });
           console.warn(`🗣️  [Voice] suggestion[${i}]: ${flags.map(f => f.detail ? `${f.label} (${f.detail})` : f.label).join(', ')}`);
+        }
+      });
+
+      // AI tells are reported, never rewritten — see detectAITells(). This runs
+      // independently of the voice profile, because the built-in 'direct-support'
+      // profile has no lint config and would otherwise surface nothing at all.
+      const aiTells = [];
+      suggestions.forEach((s, i) => {
+        const tells = detectAITells(s);
+        if (tells.length) {
+          aiTells.push({ index: i, tells });
+          console.warn(`🤖 [AITell] suggestion[${i}]: ${tells.map(t => `"${t.match}"`).join(', ')}`);
         }
       });
 
@@ -1964,6 +1984,7 @@ module.exports = function createAiRoutes({ getCachedStore }) {
         ...(usedFallback && { fallbackReason: fallbackReason || FALLBACK_REASON.ALL_FILTERED }),
         ...(usedFallback && fallbackDetail && { fallbackDetail }),
         ...(voiceFlags.length && { voiceFlags }),
+        ...(aiTells.length && { aiTells }),
         ...(blocked && { blocked }),
         ...(isSafetyDosing && { coverage: { product: coverage.product, complete: coverage.complete } }),
       });

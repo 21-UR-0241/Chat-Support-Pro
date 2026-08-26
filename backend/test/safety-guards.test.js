@@ -142,6 +142,64 @@ group('detectStall', () => {
   });
 });
 
+// ── AI tells: detect, never rewrite ─────────────────────────────────────────
+// The contract that replaced the old scrubber. detectAITells reports; the text
+// it was given must come back byte-identical from normalizeTypography.
+
+group('detectAITells', () => {
+  test('reports a canned closer', () => {
+    const tells = ai.detectAITells('Your order ships Tuesday. Let me know if there is anything else I can help with!');
+    assert.ok(tells.some(t => /anything else/i.test(t.label)), 'the closer should be reported');
+  });
+
+  test('reports ownership theatre', () => {
+    const tells = ai.detectAITells("I'm personally handling this for you.");
+    assert.ok(tells.length > 0);
+  });
+
+  test('says nothing about a clean reply', () => {
+    assert.deepStrictEqual(ai.detectAITells('Shipped Tuesday, tracking is in your email.'), []);
+  });
+
+  test('deduplicates a phrase repeated in one reply', () => {
+    const tells = ai.detectAITells('Feel free to reach out. Really, reach out any time.');
+    const labels = tells.map(t => t.label);
+    assert.strictEqual(new Set(labels).size, labels.length, 'labels must be unique');
+  });
+
+  test('never mutates the text it inspects', () => {
+    const original = 'Thanks for your patience, I am here to help. Kindly confirm your order number.';
+    const copy = String(original);
+    ai.detectAITells(original);
+    assert.strictEqual(original, copy);
+  });
+
+  test('tolerates null and non-strings', () => {
+    assert.deepStrictEqual(ai.detectAITells(null), []);
+    assert.deepStrictEqual(ai.detectAITells(42), []);
+  });
+});
+
+group('normalizeTypography', () => {
+  test('converts em dashes to commas', () => {
+    assert.strictEqual(ai.normalizeTypography('It shipped — Tuesday'), 'It shipped, Tuesday');
+  });
+
+  test('leaves a flagged phrase completely intact', () => {
+    const text = 'Thank you for your patience. Your order ships Tuesday.';
+    assert.strictEqual(ai.normalizeTypography(text), text);
+  });
+
+  test('preserves dosing numbers exactly', () => {
+    const dosing = 'Reconstitute the 10mg vial with 2.5mL of BAC water for 4mg/mL.';
+    assert.strictEqual(ai.normalizeTypography(dosing), dosing);
+  });
+
+  test('preserves newlines while collapsing space runs', () => {
+    assert.strictEqual(ai.normalizeTypography('a  b\nc'), 'a b\nc');
+  });
+});
+
 // ── Parsing ─────────────────────────────────────────────────────────────────
 
 group('parseAIResponse', () => {

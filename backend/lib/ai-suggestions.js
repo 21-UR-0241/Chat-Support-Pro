@@ -1552,7 +1552,7 @@
 // }
 
 // function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis, adminNote, opts = {}) {
-//   return generateSmartFallbackSuggestionsRaw(customerMsg, chatHistory, analysis, adminNote, opts).map(humanizeText);
+//   return generateSmartFallbackSuggestionsRaw(customerMsg, chatHistory, analysis, adminNote, opts).map(normalizeTypography);
 // }
 
 // module.exports = {
@@ -1671,99 +1671,91 @@ function agentLastStalled(chatHistory = '') {
   return !!last && STALL_RE.test(last);
 }
 
-const BANNED_PHRASE_REPLACEMENTS = [
-  // — patience / inconvenience —
-  [/\bthank you for your patience\b[.!]?/gi, ''],
-  [/\bthanks for your patience\b[.!]?/gi, ''],
-  [/\bi apolog(?:ize|ise) for any inconvenience\b[.!]?/gi, 'sorry about that'],
-  [/\bwe apolog(?:ize|ise) for any inconvenience\b[.!]?/gi, 'sorry about that'],
-
-  // — "great question" family —
-  [/\bthat['’]s a (?:really )?great question\b[.!]?/gi, ''],
-  [/\bthat is a (?:really )?great question\b[.!]?/gi, ''],
-  [/\bgreat question\b[.!]?/gi, ''],
-  [/\bgood question\b[.!]?/gi, ''],
-
-  // — "happy to help" softening (keep, don't hard-ban) —
-  [/\bi['’]d be happy to help\b/gi, 'happy to help'],
-  [/\bi would be happy to help\b/gi, 'happy to help'],
-  [/\bmore than happy to\b/gi, 'happy to'],
-  [/\bi['’]d be happy to\b/gi, 'I can'],
-  [/\bi would be happy to\b/gi, 'I can'],
-
-  // — ownership theatre —
-  // Widened after "I'm personally on this now" survived both the ban list and the
-  // scrubber. Match the construction, not an enumerated verb list.
-  [/\b(?:i['’]m|i am|im) personally (?:handling|taking care of|looking into|on|overseeing|seeing to|dealing with|sorting|chasing)\s*(?:this|it)?\b[,.!]?\s*(?:now|right now|myself)?/gi, ''],
-  [/\b(?:i['’]m|i am|im) personally\b/gi, "I'm"],
-  [/\b(?:i['’]m|i am) (?:personally )?taking (?:full )?ownership(?: of this)?\b[.!]?/gi, ''],
-  [/\bi['’]ll personally\b/gi, "I'll"],
-  [/\bi will personally\b/gi, "I'll"],
-  [/\bon your behalf\b/gi, ''],
-  [/\brest assured(?:,| that)?\b[,.]?/gi, ''],
-
-  // — reach-out / hesitate / closers —
-  [/\bfeel free to reach out\b/gi, 'just let me know'],
-  [/\bdon['’]t hesitate to reach out\b/gi, 'just let me know'],
-  [/\bdon['’]t hesitate to\b/gi, 'just'],
-  [/\bplease don['’]t hesitate\b[.!]?/gi, ''],
-  [/\breach out\b/gi, 'get in touch'],
-  [/\b(?:please )?let me know if (?:there['’]s|there is) anything else\b[.!]?/gi, ''],
-  [/\bif (?:there['’]s|there is) anything else (?:i can help(?: with)?|you need)\b[.!]?/gi, ''],
-  [/\bis there anything else i can help(?: you)?(?: with)?\b[.!?]?/gi, ''],
-  [/\bi['’]m here to help\b[.!]?/gi, ''],
-  [/\bi am here to help\b[.!]?/gi, ''],
-
-  // — signposting —
-  [/\bhere['’]s what i can do\b[:.!]?/gi, ''],
-  [/\bjust to clarify\b[,]?/gi, ''],
-  [/\bto answer your question\b[,]?/gi, ''],
-  [/\bplease be advised\b[,.]?/gi, ''],
-  [/\bas per our policy\b/gi, ''],
-  [/\bas per our\b/gi, 'per our'],
-
-  // — misc corporate —
-  [/\bat your earliest convenience\b/gi, 'when you can'],
-  [/\bwe appreciate your\b/gi, 'thanks for your'],
-  [/\bi appreciate you bringing this to my attention\b[.!]?/gi, 'thanks for flagging this'],
-  [/\bi hope this (?:message |email )?finds you well\b[.!]?/gi, ''],
-  [/\bi['’]d like to inquire\b/gi, ''],
-  [/\bi understand your frustration\b[.!]?/gi, 'I hear you'],
-  [/\bi (?:completely |totally )?understand your frustration\b[.!]?/gi, 'I hear you'],
-  [/\bi understand your concern\b[.!]?/gi, 'I hear you'],
-  [/\bkindly\b\s*/gi, ''],
+// ── AI TELLS ────────────────────────────────────────────────────────────────
+// The phrases below are what make a support reply read as machine-written. The
+// system prompt already forbids every one of them by name, so this list is a
+// DETECTOR — it reports, it does not rewrite.
+//
+// It used to rewrite. ~60 regexes deleted the offending phrase in place, then
+// re-capitalised and re-punctuated whatever was left. Two problems came out of
+// that, and between them they were most of why the output read flat:
+//
+//   1. Deletion leaves a stub. "Thank you for your patience." removed from the
+//      middle of a reply welds the sentences on either side of it together, and
+//      the clean-up pass then capitalises the seam into a new sentence that the
+//      model never wrote.
+//   2. It subtracts warmth without adding any. Stripping the padding out of a
+//      padded reply does not produce a human one; it produces a shorter machine
+//      one, which is the exact quality being complained about.
+//
+// A model told not to write these mostly doesn't. When it does, the agent is
+// reading the draft before it sends anyway — so surfacing a flag beats silently
+// mangling the text underneath them.
+const AI_TELL_PATTERNS = [
+  { re: /\bthanks? you? for your patience\b/i,                     label: 'thanks for your patience' },
+  { re: /\b(?:i|we) apolog(?:ize|ise) for any inconvenience\b/i,   label: 'apologise for any inconvenience' },
+  { re: /\b(?:that(?:'|’)?s|that is) a (?:really )?great question\b/i, label: 'great question' },
+  { re: /\b(?:great|good) question\b/i,                            label: 'great question' },
+  { re: /\b(?:i(?:'|’)?d|i would) be (?:more than )?happy to\b/i,  label: 'happy to help' },
+  { re: /\b(?:i(?:'|’)?m|i am|im) personally\b/i,                  label: 'ownership theatre' },
+  { re: /\b(?:i(?:'|’)?ll|i will) personally\b/i,                  label: 'ownership theatre' },
+  { re: /\btaking (?:full )?ownership\b/i,                         label: 'ownership theatre' },
+  { re: /\bon your behalf\b/i,                                     label: 'on your behalf' },
+  { re: /\brest assured\b/i,                                       label: 'rest assured' },
+  { re: /\b(?:feel free to|don(?:'|’)?t hesitate to) reach out\b/i, label: 'feel free to reach out' },
+  { re: /\bdon(?:'|’)?t hesitate\b/i,                              label: "don't hesitate" },
+  { re: /\breach out\b/i,                                          label: 'reach out' },
+  { re: /\blet me know if (?:there(?:'|’)?s|there is) anything else\b/i, label: 'anything else closer' },
+  { re: /\bis there anything else i can help\b/i,                  label: 'anything else closer' },
+  { re: /\bi(?:'|’)?m here to help\b/i,                            label: "I'm here to help" },
+  { re: /\bhere(?:'|’)?s what i can do\b/i,                        label: 'signposting' },
+  { re: /\bjust to clarify\b/i,                                    label: 'signposting' },
+  { re: /\bto answer your question\b/i,                            label: 'signposting' },
+  { re: /\bplease be advised\b/i,                                  label: 'please be advised' },
+  { re: /\bas per our\b/i,                                         label: 'as per our policy' },
+  { re: /\bat your earliest convenience\b/i,                       label: 'at your earliest convenience' },
+  { re: /\bwe appreciate your\b/i,                                 label: 'we appreciate your' },
+  { re: /\bi appreciate you bringing this to my attention\b/i,     label: 'corporate acknowledgement' },
+  { re: /\bi hope this (?:message |email )?finds you well\b/i,     label: 'hope this finds you well' },
+  { re: /\bi(?:'|’)?d like to inquire\b/i,                         label: 'I would like to inquire' },
+  { re: /\bi (?:completely |totally )?understand your (?:frustration|concern)\b/i, label: 'understand your frustration' },
+  { re: /\bkindly\b/i,                                             label: 'kindly' },
 ];
 
-function scrubBannedPhrases(text) {
-  if (!text || typeof text !== 'string') return text;
-  let out = text;
-  for (const [pattern, replacement] of BANNED_PHRASE_REPLACEMENTS) out = out.replace(pattern, replacement);
-  out = out
-    .replace(/[^\S\n]{2,}/g, ' ')
-    .replace(/\s+([.,!?;:])/g, '$1')
-    .replace(/([.!?])\s*,/g, '$1')
-    .replace(/,\s*([.!?])/g, '$1')
-    .replace(/,\s*,/g, ',')
-    .replace(/([.!?])[ \t]*\1+/g, '$1')
-    .replace(/^[\s.,!?;:]+/, '')
-    .replace(/\s+$/g, '')
-    .replace(/(^|[.!?]\s+)([a-z])/g, (m, pre, ch) => pre + ch.toUpperCase())
-    .trim();
-  return out;
+/**
+ * Report the AI tells present in a draft. Never mutates.
+ *
+ * @returns {Array<{label: string, match: string}>} deduplicated by label, so a
+ *   reply that says "reach out" twice reports one flag rather than two.
+ */
+function detectAITells(text) {
+  if (!text || typeof text !== 'string') return [];
+  const seen = new Map();
+  for (const { re, label } of AI_TELL_PATTERNS) {
+    const hit = text.match(re);
+    if (hit && !seen.has(label)) seen.set(label, hit[0].trim());
+  }
+  return [...seen].map(([label, match]) => ({ label, match }));
 }
 
-function humanizeText(text) {
+/**
+ * Typographic normalisation only — the one transform that is genuinely lossless.
+ *
+ * Em and en dashes used as sentence separators are a strong machine tell and a
+ * comma always carries the same meaning, so converting them cannot change a
+ * claim, a number, a date or a promise. Everything that COULD change one of
+ * those now goes through detectAITells() instead.
+ */
+function normalizeTypography(text) {
   if (!text || typeof text !== 'string') return text;
-  const dashFixed = text
+  return text
     .replace(/\s*--\s*/g, ', ')   // double-hyphen used as a dash
     .replace(/\s*—\s*/g, ', ')    // em dash
     .replace(/\s*–\s*/g, ', ')    // en dash used as separator
     .replace(/,\s*,/g, ',')       // collapse accidental double commas
     .replace(/\s+,/g, ',')        // fix stray space before comma
+    .replace(/[^\S\n]{2,}/g, ' ') // runs of spaces, never newlines
     .trim();
-  const scrubbed = scrubBannedPhrases(dashFixed);
-
-  return scrubbed && scrubbed.length >= 4 ? scrubbed : dashFixed;
 }
 
 /**
@@ -3189,12 +3181,12 @@ function generateSmartFallbackSuggestionsRaw(customerMsg, chatHistory, analysis,
 }
 
 function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis, adminNote, opts = {}) {
-  return generateSmartFallbackSuggestionsRaw(customerMsg, chatHistory, analysis, adminNote, opts).map(humanizeText);
+  return generateSmartFallbackSuggestionsRaw(customerMsg, chatHistory, analysis, adminNote, opts).map(normalizeTypography);
 }
 
 module.exports = {
-  humanizeText,
-  scrubBannedPhrases,
+  normalizeTypography,
+  detectAITells,
   callAnthropicAPIWithRetry,
   callAIForSuggestions,
   extractAdminStyle,

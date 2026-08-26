@@ -932,6 +932,38 @@ function flagsByIndex(voiceFlags) {
   return map;
 }
 
+// Unpacks the API's `aiTells` into the SAME index-keyed flag shape as
+// flagsByIndex, so both streams render through one path.
+//
+// The server reports these instead of rewriting them: it used to delete the
+// offending phrase in place, which left a stub mid-sentence and stripped warmth
+// without adding any. A tell is now something the agent sees and decides about,
+// so the draft underneath it is exactly what the model wrote.
+//
+// Server shape: [{ index, tells: [{ label, match }] }]
+function tellsByIndex(aiTells) {
+  const map = {};
+  if (!Array.isArray(aiTells)) return map;
+  for (const entry of aiTells) {
+    if (!Number.isInteger(entry?.index)) continue;
+    map[entry.index] = (Array.isArray(entry.tells) ? entry.tells : []).map(t => ({
+      code: 'aitell',
+      label: t.label,
+      detail: t.match ? `reads as AI: "${t.match}"` : 'reads as AI',
+    }));
+  }
+  return map;
+}
+
+// Concatenates two index-keyed flag maps without losing either side.
+function mergeFlagMaps(a, b) {
+  const out = {};
+  for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    out[key] = [...(a[key] || []), ...(b[key] || [])];
+  }
+  return out;
+}
+
 // Human-readable text for the fallback codes the suggestions route can return.
 // The route is the source of truth for WHICH code fires; this map only decides
 // how it reads to an agent. An unrecognised code is shown verbatim rather than
@@ -1307,7 +1339,7 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
       setNeedsReview(data.needsReview || []);
       setIsFallback(fellBack);
       setFallbackInfo(fellBack ? describeFallback(data) : { code: null, message: null });
-      setServerVoiceFlags(flagsByIndex(data.voiceFlags));
+      setServerVoiceFlags(mergeFlagMaps(flagsByIndex(data.voiceFlags), tellsByIndex(data.aiTells)));
     } catch (err) {
       if (reqConv !== activeConvRef.current) return;
       setError(`Could not generate suggestions: ${err.message}`);
@@ -1507,7 +1539,7 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
         answers: data.detailedAnswers || [],
         fallback: fellBack,
         fallbackInfo: fellBack ? describeFallback(data) : { code: null, message: null },
-        voiceFlags: flagsByIndex(data.voiceFlags),
+        voiceFlags: mergeFlagMaps(flagsByIndex(data.voiceFlags), tellsByIndex(data.aiTells)),
       });
     } catch (err) {
       if (reqConv !== activeConvRef.current) return;

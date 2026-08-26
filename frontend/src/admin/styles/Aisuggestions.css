@@ -886,6 +886,16 @@
   border-color: rgba(239, 68, 68, 0.30);
 }
 
+/* AI tells — phrases that read as machine-written. Advisory, not a violation:
+   the server reports them and leaves the draft untouched, so the agent decides
+   whether to reword. Violet keeps them visually distinct from the red hard
+   violations above and the amber soft flags. */
+.ai-voice-flag--aitell {
+  color: #6d28d9;
+  background: rgba(139, 92, 246, 0.12);
+  border-color: rgba(139, 92, 246, 0.30);
+}
+
 /* Modal variant — sits under the expanded reply, not inside a card. */
 .ai-voice-flags--modal {
   flex-basis: auto;
