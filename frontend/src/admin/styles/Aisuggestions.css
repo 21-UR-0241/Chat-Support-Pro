@@ -886,6 +886,16 @@
   border-color: rgba(239, 68, 68, 0.30);
 }
 
+/* AI tells — phrases that read as machine-written. Advisory, not a violation:
+   the server reports them and leaves the draft untouched, so the agent decides
+   whether to reword. Violet keeps them visually distinct from the red hard
+   violations above and the amber soft flags. */
+.ai-voice-flag--aitell {
+  color: #6d28d9;
+  background: rgba(139, 92, 246, 0.12);
+  border-color: rgba(139, 92, 246, 0.30);
+}
+
 /* Modal variant — sits under the expanded reply, not inside a card. */
 .ai-voice-flags--modal {
   flex-basis: auto;
@@ -1262,6 +1272,21 @@
   color: #667781;
   font-style: italic;
   line-height: 1.45;
+}
+
+/* Why the model chose this angle — one line telling the agent when to pick it.
+   Sits above the reply so it reads as guidance about the reply, not as part of
+   the text they are about to send. */
+.ai-modal-answer-why {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--answer-color, #8b5cf6);
+  border-radius: 0 6px 6px 0;
+  background: rgba(139, 92, 246, 0.06);
+  color: #52525b;
+  font-size: 12px;
+  font-style: italic;
+  line-height: 1.5;
 }
 
 .ai-modal-answer-block {

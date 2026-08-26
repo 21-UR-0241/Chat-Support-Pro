@@ -455,6 +455,7 @@
 //                         : BRAIN_BUDGET.general;
 
 //       const analysisBlock = buildEnhancedAnalysisBlock(analysis, conversationState, recentContext);
+
 //       const customerContext = buildCustomerContext(customerName, customerEmail, conversationState);
 //       const policyBlock = buildPolicyBlock();
 
@@ -900,7 +901,7 @@
 //         }
 //       });
 
-//       console.log(`✦ [AI] FINAL (${suggestions.length}) — fallback:${usedFallback}${usedFallback ? ` (${fallbackReason})` : ''}, blocked:${blocked || 'none'}, needsReview:${safetyReview.length}, voiceFlags:${voiceFlags.length}, placeholders:${placeholderCount}`);
+//       console.log(`✦ [AI] FINAL (${suggestions.length}) — fallback:${usedFallback}${usedFallback ? ` (${fallbackReason})` : ''}, blocked:${blocked || 'none'}, needsReview:${safetyReview.length}, voiceFlags:${voiceFlags.length}, aiTells:${aiTells.length}, placeholders:${placeholderCount}`);
 //       if (usedFallback) console.warn(`⚠️  [AI] FALLBACK reason=${fallbackReason} provider=${provider}`);
 
 //       res.json({
@@ -1051,7 +1052,8 @@ const { authenticateToken } = require('../auth');
 const { getBrainContext, getBrainSettings, refreshBrainCache } = require('../brain-context');
 
 const {
-  humanizeText,
+  normalizeTypography,
+  detectAITells,
   callAnthropicAPIWithRetry,
   callAIForSuggestions,
   parseAIResponse,
@@ -1071,6 +1073,9 @@ const {
   buildCustomerContext,
   buildPolicyBlock,
   analyzeConversationState,
+  pickModelTier,
+  stableSystemPrefix,
+  detectEmotion,
   validateSuggestions,
   validateSafetyDosing,
   generateSmartFallbackSuggestions,
@@ -1270,9 +1275,44 @@ const {
 })();
 
 // Tunable models in one place.
-const SUGGEST_MODEL  = 'claude-haiku-4-5-20251001';
-const DETAILED_MODEL = 'claude-sonnet-4-6';
-const IMAGE_MODEL    = 'claude-sonnet-4-6';
+// ── MODEL TIERS ──────────────────────────────────────────────────────────────
+// Two tiers, because reply quality and cost pull in opposite directions and a
+// single model has to lose one of them.
+//
+// ROUTINE covers turns where the answer is largely determined by the facts:
+// order status, shipping windows, account questions. Voice matters least here
+// and the wording is close to formulaic, so these keep the existing cheap path
+// (DeepSeek primary, Haiku on fallback) and the cost profile that goes with it.
+//
+// PREMIUM covers turns where the wording IS the job — an angry customer, a
+// refund, a trust challenge, a product recommendation, anything touching dosing.
+// These skip DeepSeek entirely and go to Opus. Routing a turn here and then
+// letting the cheap provider answer first would quietly undo the decision.
+//
+// The split matters commercially: if most traffic is routine, blended cost per
+// suggestion stays near the cheap tier while the turns a customer remembers get
+// the strong model.
+const ROUTINE_MODEL  = 'claude-haiku-4-5';   // fallback for the cheap tier
+const PREMIUM_MODEL  = 'claude-opus-5';      // the tier that earns its cost
+const DETAILED_MODEL = 'claude-opus-5';      // "expand this" is always deliberate
+const IMAGE_MODEL    = 'claude-sonnet-5';
+
+// Kept under the old name because the DeepSeek shim reads `model` off the body
+// and several log lines still refer to it.
+const SUGGEST_MODEL  = ROUTINE_MODEL;
+
+// Effort tunes how much the model thinks before answering. A support reply is
+// not a reasoning problem, so premium fast suggestions sit at 'medium' rather
+// than the 'high' default; the detailed expansion earns 'high'. Thinking is left
+// ON at every tier: disabling it on Opus 5 risks tool-call text and stray tags
+// leaking into the visible reply, and lowering effort is the cheaper lever.
+const PREMIUM_EFFORT  = process.env.PREMIUM_EFFORT  || 'medium';
+const DETAILED_EFFORT = process.env.DETAILED_EFFORT || 'high';
+
+// A thinking-enabled Opus turn does not fit in the 15s default sized for Haiku,
+// and a timeout here degrades to canned templates rather than to a slower reply.
+const PREMIUM_TIMEOUT_MS = Number(process.env.PREMIUM_TIMEOUT_MS) || 60000;
+
 // Per-intent brain budget. Reasoning cost scales with how much context the model
 // has to reason over, and DeepSeek spends 93-98% of its completion tokens on
 // reasoning (measured: 1175-3768 reasoning tokens to emit ~84 tokens of JSON).
@@ -1310,7 +1350,8 @@ const SUGGEST_MAX_TOKENS = Number(process.env.SUGGEST_MAX_TOKENS) || 6000;
 // failed request per boot. Set these explicitly once GET /api/ai/deepseek-models
 // tells you what the account actually serves.
 const DEEPSEEK_SUGGEST_MODEL  = process.env.DEEPSEEK_SUGGEST_MODEL  || null;
-const DEEPSEEK_DETAILED_MODEL = process.env.DEEPSEEK_DETAILED_MODEL || null;
+// DEEPSEEK_DETAILED_MODEL is gone: detailed mode is always premium tier now and
+// skips DeepSeek entirely, so a per-request hint for it had nothing to steer.
 
 // 90s, not 25s. Measured over 9 runs: 20.1-59.1s, median 31.5s. A 25s ceiling
 // would time out 6 of 9 and make Haiku the PRIMARY path for fast mode, which is
@@ -1487,6 +1528,24 @@ module.exports = function createAiRoutes({ getCachedStore }) {
       }
 
       const conversationState = analyzeConversationState(chatHistory, clientMessage, analysis);
+
+      // Emotion is read HERE, from the transcript, not taken from the client.
+      // The panel used to compute it by counting fifteen adjectives in the
+      // browser and post it up with the request, which meant a customer writing
+      // "three weeks, third time asking, no reply" arrived labelled 'neutral'
+      // and every escalation path downstream stayed switched off. The client
+      // value is still accepted as a floor so a caller that knows something the
+      // transcript does not cannot be overruled downward.
+      const emotion = detectEmotion(chatHistory, clientMessage, conversationState);
+      const clientSentiment = conversationState?.sentiment || analysis?.sentiment || 'neutral';
+      const EMOTION_RANK = { very_negative: 0, negative: 1, neutral: 2, positive: 3, very_positive: 4 };
+      const sentiment = (EMOTION_RANK[clientSentiment] ?? 2) < (EMOTION_RANK[emotion.level] ?? 2)
+        ? clientSentiment
+        : emotion.level;
+      if (emotion.signals.length) {
+        console.log(`✦ [AI] emotion: ${emotion.level} (score ${emotion.score}) — ${emotion.signals.join('; ')}${sentiment !== emotion.level ? ` [client said ${clientSentiment}, using that]` : ''}`);
+      }
+
       const isTrustQuestion = detectTrustQuestion(clientMessage);
       const isSafetyDosing = detectSafetyDosingQuestion(clientMessage, chatHistory);
       const isRefundOrComplaint = REFUND_COMPLAINT_RE.test(clientMessage);
@@ -1499,7 +1558,17 @@ module.exports = function createAiRoutes({ getCachedStore }) {
                         : isRefundOrComplaint ? BRAIN_BUDGET.refund
                         : BRAIN_BUDGET.general;
 
-      const analysisBlock = buildEnhancedAnalysisBlock(analysis, conversationState, recentContext);
+      let analysisBlock = buildEnhancedAnalysisBlock(analysis, conversationState, recentContext);
+
+      // The signals, not just the label. "very_negative" tells the model to be
+      // sorry; "asked three times, three week wait, no reply" tells it what to be
+      // sorry ABOUT, which is the difference between a tailored reply and a
+      // generic apology. It is also what stops consecutive turns in an escalating
+      // thread producing interchangeable drafts.
+      if (emotion.signals.length) {
+        analysisBlock += `\nWhy they feel that way: ${emotion.signals.join('; ')}.`;
+        analysisBlock += `\nRespond to these specifics. Do not apologise in the abstract.`;
+      }
       const customerContext = buildCustomerContext(customerName, customerEmail, conversationState);
       const policyBlock = buildPolicyBlock();
 
@@ -1634,24 +1703,26 @@ module.exports = function createAiRoutes({ getCachedStore }) {
         const structureSection = voiceProfile.structureLong || '';
         const fallbackLength   = structureSection ? '' : '\n\nWrite three distinct, detailed replies in flowing paragraphs. No bullet points.';
 
-        const systemPrompt = `${trustSystemSection}${safetySystemSection}${compSystemSection}${brainSystemSection}${imageSystemSection}${adminStyleBlock ? `${adminStyleBlock}\n\n` : ''}${voiceSection}${examplesSection}${structureSection}\nYou are ghostwriting replies for a human support agent. All three styles must sound like the SAME person.\n\nNO fake time promises: state a shipping, handling, or delivery timeframe ONLY if it appears in the brain data above, quoted exactly, otherwise put a [bracketed placeholder] there. Never invent tracking status, stock, or pickup options.\n\nNever attribute a statement, symptom, or concern to the customer that they did not actually make. Never name a product, price, or free item that is not in the brain data.${fallbackLength}\n\n${policyBlock ? `Policies:\n${policyBlock}\n` : ''}${customerContext ? `Customer context:\n${customerContext}\n` : ''}${analysisBlock ? `Conversation analysis:\n${analysisBlock}\n` : ''}\nEmpathetic: Name the frustration once in the opening line, then straight into the answer. One line, never an apology paragraph.\nThorough: Covers every step, policy, and expectation the brain data authorises. Nothing left unanswered.\nAbove & Beyond: Everything in Thorough plus one genuine extra, a tip or a follow-up offer, only where the brain data authorises it.\n\nYour response MUST END with the JSON object and nothing after it. Return ONLY valid JSON:\n{\n  "detailedAnswers": [\n    { "label": "Empathetic",     "text": "..." },\n    { "label": "Thorough",       "text": "..." },\n    { "label": "Above & Beyond", "text": "..." }\n  ]\n}`;
+        const systemPrompt = `${trustSystemSection}${safetySystemSection}${compSystemSection}${brainSystemSection}${imageSystemSection}${adminStyleBlock ? `${adminStyleBlock}\n\n` : ''}${voiceSection}${examplesSection}${structureSection}\nYou are ghostwriting replies for a human support agent. All three styles must sound like the SAME person.\n\nNO fake time promises: state a shipping, handling, or delivery timeframe ONLY if it appears in the brain data above, quoted exactly, otherwise put a [bracketed placeholder] there. Never invent tracking status, stock, or pickup options.\n\nNever attribute a statement, symptom, or concern to the customer that they did not actually make. Never name a product, price, or free item that is not in the brain data.${fallbackLength}\n\n${policyBlock ? `Policies:\n${policyBlock}\n` : ''}${customerContext ? `Customer context:\n${customerContext}\n` : ''}${analysisBlock ? `Conversation analysis:\n${analysisBlock}\n` : ''}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nPICK THE ANGLES YOURSELF\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nGive the agent 2 to 4 genuinely different ways to handle THIS message. Not\nrewordings of one reply, different decisions about what to do.\n\nChoose the angles from the situation in front of you. A customer who has waited\nthree weeks needs different options than someone asking which vial to buy: maybe\n\"refund now\" versus \"reship today\", maybe \"answer the question\" versus \"answer it\nand flag the thing they have not thought of yet\". If only two angles are honestly\navailable, give two. Padding to a fixed count is what makes suggestions feel\ncanned.\n\nLabel each one with what it actually DOES, in 1 to 3 plain words the agent can\nscan: \"Refund now\", \"Reship today\", \"Answer + upsell\", \"Hold for stock\". Never\nreuse a generic ladder like Empathetic / Thorough / Above and Beyond, and never\nlabel one by how long it is.\n\nAdd \"why\" for each: one short line on when the agent should pick that one.\n\nEvery angle still obeys every rule above. Different strategies, one voice, and\nnothing invented that the brain data does not authorise.\n\nYour response MUST END with the JSON object and nothing after it. Return ONLY valid JSON:\n{\n  "detailedAnswers": [\n    { "label": "...", "why": "...", "text": "..." }\n  ]\n}`;
 
         const userPrompt = `${brainUserBlock}Conversation history:\n${chatHistory || '(none)'}\n\nCustomer's message:\n${clientMessage}${adminNote ? `\nAdmin note: ${adminNote}` : ''}\n\nWrite 3 detailed replies. Your response must END with the JSON, nothing after it.`;
         // Detailed mode keeps the reasoning model: the agent chose to expand, so a
         // slower, better answer is the point. No timeout override, so it uses the
         // provider default.
-        const DETAILED_MAX_TOKENS = 3000;
+        // Raised from 3000: on Opus this budget covers thinking AND the visible
+        // reply, and a truncated completion never emits closing JSON — which
+        // surfaces as a silent template fallback rather than as an error.
+        const DETAILED_MAX_TOKENS = 8000;
         const requestBody = JSON.stringify({
           model: DETAILED_MODEL,
           max_tokens: DETAILED_MAX_TOKENS,
-          temperature: 0.5,
+          output_config: { effort: DETAILED_EFFORT },
           system: systemPrompt,
           messages: [{ role: 'user', content: userPrompt }],
-          ...(DEEPSEEK_DETAILED_MODEL && { deepseekModel: DEEPSEEK_DETAILED_MODEL }),
         });
 
         console.time('✦ [AI] llmDetailed');
-        const { data: anthropicData, provider } = await callAIForSuggestions(requestBody, ANTHROPIC_API_KEY);
+        const { data: anthropicData, provider } = await callAIForSuggestions(requestBody, ANTHROPIC_API_KEY, { skipDeepSeek: true, timeoutMs: PREMIUM_TIMEOUT_MS });
         console.timeEnd('✦ [AI] llmDetailed');
 
         const rawContent = anthropicData.content?.[0]?.text || '';
@@ -1668,7 +1739,7 @@ module.exports = function createAiRoutes({ getCachedStore }) {
             suggestions: voicedFallback(voiceProfile, clientMessage, chatHistory, analysis, adminNote),
           });
         }
-        let detailedAnswers = Array.isArray(parsed.detailedAnswers) ? parsed.detailedAnswers.slice(0, 3) : null;
+        let detailedAnswers = Array.isArray(parsed.detailedAnswers) ? parsed.detailedAnswers.slice(0, 4) : null;
         if (!detailedAnswers) {
           console.warn('✦ [AI] Detailed parsed but detailedAnswers not an array — serving fallback');
           return fallbackReply(res, {
@@ -1703,13 +1774,19 @@ module.exports = function createAiRoutes({ getCachedStore }) {
         // Voice pass LAST — after every safety guard has had its say, so a scrub
         // never changes what a guard already inspected.
         const detailedVoiceFlags = [];
+        const detailedAiTells = [];
         detailedAnswers.forEach((a, i) => {
           if (!a?.text) return;
-          a.text = scrubVoice(humanizeText(a.text), voiceProfile);
+          a.text = scrubVoice(normalizeTypography(a.text), voiceProfile);
           const flags = lintVoice(a.text, voiceProfile, { detailed: true });
           if (flags.length) {
             detailedVoiceFlags.push({ index: i, label: a.label, flags });
             console.warn(`🗣️  [Voice] detailed[${i}] ${a.label}: ${flags.map(f => f.label).join(', ')}`);
+          }
+          const tells = detectAITells(a.text);
+          if (tells.length) {
+            detailedAiTells.push({ index: i, label: a.label, tells });
+            console.warn(`🤖 [AITell] detailed[${i}] ${a.label}: ${tells.map(t => `"${t.match}"`).join(', ')}`);
           }
         });
 
@@ -1721,6 +1798,7 @@ module.exports = function createAiRoutes({ getCachedStore }) {
           voiceProfile: voiceProfile.id,
           voiceRulesVersion: VOICE_VERSION,
           ...(detailedVoiceFlags.length && { voiceFlags: detailedVoiceFlags }),
+          ...(detailedAiTells.length && { aiTells: detailedAiTells }),
         });
       }
 
@@ -1732,7 +1810,7 @@ module.exports = function createAiRoutes({ getCachedStore }) {
       const systemPrompt = buildSystemPrompt(
         storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness,
         brainContext, brainSettings, adminStyleBlock, imageAnalysis,
-        conversationState?.sentiment || analysis?.sentiment || 'neutral',
+        sentiment,
         responseExamples, isTrustQuestion, isSafetyDosing, brainHasProductAnswer,
         voiceProfile
       ) + (isRefundOrComplaint ? COMPENSATION_BLOCK : '') + JSON_HARDENING_SUFFIX;
@@ -1745,20 +1823,61 @@ module.exports = function createAiRoutes({ getCachedStore }) {
       // `model` is the CLAUDE fallback model. lib/deepseek-fallback.js currently
       // ignores it and hardcodes its own, so `deepseekModel` is passed alongside as
       // an explicit hint for it to honour.
+      const { tier, reasons: tierReasons } = pickModelTier({
+        sentiment, isTrustQuestion, isSafetyDosing, isRefundOrComplaint, conversationState,
+      });
+      const isPremium = tier === 'premium';
+
+      // Opus 5 rejects `temperature` outright (400), and thinking is on by
+      // default there — effort is the lever, not sampling. The routine tier keeps
+      // temperature because Haiku still accepts it and the DeepSeek shim reads it.
+      // ── PROMPT CACHE ─────────────────────────────────────────────────────────
+      // The voice block and the robot-vs-human examples open every system prompt
+      // and do not vary by request — roughly 2.4k tokens re-sent verbatim on every
+      // suggestion. Split them into their own cached block so repeat turns read
+      // them at cache rates instead of paying full input price each time.
+      //
+      // This is metadata only. The two blocks concatenate back to byte-identical
+      // text, so the model sees exactly the prompt it saw before. If the prefix
+      // ever stops matching (someone reorders buildSystemPrompt's return), the
+      // guard below drops back to the plain string: the cost goes up, the output
+      // does not change.
+      const cachePrefix = stableSystemPrefix(voiceProfile);
+      const canCache = isPremium
+        && systemPrompt.startsWith(cachePrefix)
+        && cachePrefix.length >= 4000;   // under ~1k tokens the API will not cache it
+      if (isPremium && !canCache) {
+        console.warn('✦ [AI] prompt cache skipped — system prompt no longer starts with the stable prefix');
+      }
+      const systemField = canCache
+        ? [
+            { type: 'text', text: cachePrefix, cache_control: { type: 'ephemeral' } },
+            { type: 'text', text: systemPrompt.slice(cachePrefix.length) },
+          ]
+        : systemPrompt;
+
+
       const buildBody = (prompt) => JSON.stringify({
-        model: SUGGEST_MODEL,
+        model: isPremium ? PREMIUM_MODEL : SUGGEST_MODEL,
         max_tokens: SUGGEST_MAX_TOKENS,
-        temperature: 0.6,
-        system: systemPrompt,
+        ...(isPremium
+          ? { output_config: { effort: PREMIUM_EFFORT } }
+          : { temperature: 0.6 }),
+        system: systemField,
         messages: [{ role: 'user', content: prompt }],
         ...(DEEPSEEK_SUGGEST_MODEL && { deepseekModel: DEEPSEEK_SUGGEST_MODEL }),
         ...(DEEPSEEK_SUGGEST_EFFORT && { deepseekReasoningEffort: DEEPSEEK_SUGGEST_EFFORT }),
         deepseekTimeoutMs: DEEPSEEK_SUGGEST_TIMEOUT_MS,
       });
 
-      console.log(`✦ [AI] Calling suggestions (DeepSeek primary / ${SUGGEST_MODEL} fallback) — brain: ${brainContext.length}c, style: ${adminStyleBlock.length}c, voice: ${voiceProfile.id}, budget: ${brainBudget}c, dsModel: ${DEEPSEEK_SUGGEST_MODEL || process.env.DEEPSEEK_MODEL || 'provider default'}, maxTokens: ${SUGGEST_MAX_TOKENS}, sysPrompt: ${systemPrompt.length}c, userPrompt: ${userPrompt.length}c, examples: ${responseExamples.length}, image: ${!!imageAnalysis}, productAnswer: ${brainHasProductAnswer}`);
+      const callOpts = isPremium
+        ? { skipDeepSeek: true, timeoutMs: PREMIUM_TIMEOUT_MS }
+        : {};
+
+      console.log(`✦ [AI] tier=${tier}${tierReasons.length ? ` (${tierReasons.join(', ')})` : ''} model=${isPremium ? PREMIUM_MODEL : `deepseek→${SUGGEST_MODEL}`}`);
+      console.log(`✦ [AI] Calling suggestions — brain: ${brainContext.length}c, style: ${adminStyleBlock.length}c, voice: ${voiceProfile.id}, budget: ${brainBudget}c, dsModel: ${DEEPSEEK_SUGGEST_MODEL || process.env.DEEPSEEK_MODEL || 'provider default'}, maxTokens: ${SUGGEST_MAX_TOKENS}, sysPrompt: ${systemPrompt.length}c, userPrompt: ${userPrompt.length}c, examples: ${responseExamples.length}, image: ${!!imageAnalysis}, productAnswer: ${brainHasProductAnswer}`);
       console.time('✦ [AI] llmSuggest');
-      const { data: anthropicData, provider } = await callAIForSuggestions(buildBody(userPrompt), ANTHROPIC_API_KEY);
+      const { data: anthropicData, provider } = await callAIForSuggestions(buildBody(userPrompt), ANTHROPIC_API_KEY, callOpts);
       console.timeEnd('✦ [AI] llmSuggest');
 
       const rawContent = anthropicData.content?.[0]?.text || '';
@@ -1770,6 +1889,14 @@ module.exports = function createAiRoutes({ getCachedStore }) {
       const usage = anthropicData?.usage || {};
       if (usage.output_tokens != null || usage.completion_tokens != null) {
         console.log(`✦ [AI] usage — in:${usage.input_tokens ?? usage.prompt_tokens ?? '?'} out:${usage.output_tokens ?? usage.completion_tokens ?? '?'} reasoning:${usage.reasoning_tokens ?? '?'} cap:${SUGGEST_MAX_TOKENS} stop:${anthropicData?.stop_reason || 'unknown'}`);
+        // Cache reads are the whole point of the split above. If this stays at 0
+        // across repeated turns, something upstream is varying the prefix and the
+        // cache is costing 1.25x on every write instead of saving on reads.
+        if (canCache) {
+          const wrote = usage.cache_creation_input_tokens ?? 0;
+          const read  = usage.cache_read_input_tokens ?? 0;
+          console.log(`✦ [AI] cache — read:${read} wrote:${wrote}${read === 0 && wrote === 0 ? ' (NOT CACHING — check the prefix is byte-stable)' : ''}`);
+        }
       }
       warnIfTruncated(anthropicData, SUGGEST_MAX_TOKENS, 'Suggestions');
 
@@ -1859,7 +1986,7 @@ module.exports = function createAiRoutes({ getCachedStore }) {
         if (stalled) {
           try {
             console.time('✦ [AI] llmStallRetry');
-            const retry = await callAIForSuggestions(buildBody(userPrompt + STALL_RETRY_INSTRUCTION), ANTHROPIC_API_KEY);
+            const retry = await callAIForSuggestions(buildBody(userPrompt + STALL_RETRY_INSTRUCTION), ANTHROPIC_API_KEY, callOpts);
             console.timeEnd('✦ [AI] llmStallRetry');
             warnIfTruncated(retry.data, SUGGEST_MAX_TOKENS, 'Stall retry');
             const retryParsed = parseAIResponse(retry.data.content?.[0]?.text || '', 'suggestions');
@@ -1938,7 +2065,7 @@ module.exports = function createAiRoutes({ getCachedStore }) {
       // Runs after every safety guard so a scrub can never alter text a guard
       // already cleared. scrubVoice only strips formatting and filler; anything
       // it cannot safely fix comes back as a flag for the agent to eyeball.
-      suggestions = suggestions.map(s => scrubVoice(humanizeText(s), voiceProfile));
+      suggestions = suggestions.map(s => scrubVoice(normalizeTypography(s), voiceProfile));
 
       const voiceFlags = [];
       suggestions.forEach((s, i) => {
@@ -1946,6 +2073,18 @@ module.exports = function createAiRoutes({ getCachedStore }) {
         if (flags.length) {
           voiceFlags.push({ index: i, flags });
           console.warn(`🗣️  [Voice] suggestion[${i}]: ${flags.map(f => f.detail ? `${f.label} (${f.detail})` : f.label).join(', ')}`);
+        }
+      });
+
+      // AI tells are reported, never rewritten — see detectAITells(). This runs
+      // independently of the voice profile, because the built-in 'direct-support'
+      // profile has no lint config and would otherwise surface nothing at all.
+      const aiTells = [];
+      suggestions.forEach((s, i) => {
+        const tells = detectAITells(s);
+        if (tells.length) {
+          aiTells.push({ index: i, tells });
+          console.warn(`🤖 [AITell] suggestion[${i}]: ${tells.map(t => `"${t.match}"`).join(', ')}`);
         }
       });
 
@@ -1964,6 +2103,7 @@ module.exports = function createAiRoutes({ getCachedStore }) {
         ...(usedFallback && { fallbackReason: fallbackReason || FALLBACK_REASON.ALL_FILTERED }),
         ...(usedFallback && fallbackDetail && { fallbackDetail }),
         ...(voiceFlags.length && { voiceFlags }),
+        ...(aiTells.length && { aiTells }),
         ...(blocked && { blocked }),
         ...(isSafetyDosing && { coverage: { product: coverage.product, complete: coverage.complete } }),
       });

@@ -1552,7 +1552,7 @@
 // }
 
 // function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis, adminNote, opts = {}) {
-//   return generateSmartFallbackSuggestionsRaw(customerMsg, chatHistory, analysis, adminNote, opts).map(humanizeText);
+//   return generateSmartFallbackSuggestionsRaw(customerMsg, chatHistory, analysis, adminNote, opts).map(normalizeTypography);
 // }
 
 // module.exports = {
@@ -1671,99 +1671,91 @@ function agentLastStalled(chatHistory = '') {
   return !!last && STALL_RE.test(last);
 }
 
-const BANNED_PHRASE_REPLACEMENTS = [
-  // — patience / inconvenience —
-  [/\bthank you for your patience\b[.!]?/gi, ''],
-  [/\bthanks for your patience\b[.!]?/gi, ''],
-  [/\bi apolog(?:ize|ise) for any inconvenience\b[.!]?/gi, 'sorry about that'],
-  [/\bwe apolog(?:ize|ise) for any inconvenience\b[.!]?/gi, 'sorry about that'],
-
-  // — "great question" family —
-  [/\bthat['’]s a (?:really )?great question\b[.!]?/gi, ''],
-  [/\bthat is a (?:really )?great question\b[.!]?/gi, ''],
-  [/\bgreat question\b[.!]?/gi, ''],
-  [/\bgood question\b[.!]?/gi, ''],
-
-  // — "happy to help" softening (keep, don't hard-ban) —
-  [/\bi['’]d be happy to help\b/gi, 'happy to help'],
-  [/\bi would be happy to help\b/gi, 'happy to help'],
-  [/\bmore than happy to\b/gi, 'happy to'],
-  [/\bi['’]d be happy to\b/gi, 'I can'],
-  [/\bi would be happy to\b/gi, 'I can'],
-
-  // — ownership theatre —
-  // Widened after "I'm personally on this now" survived both the ban list and the
-  // scrubber. Match the construction, not an enumerated verb list.
-  [/\b(?:i['’]m|i am|im) personally (?:handling|taking care of|looking into|on|overseeing|seeing to|dealing with|sorting|chasing)\s*(?:this|it)?\b[,.!]?\s*(?:now|right now|myself)?/gi, ''],
-  [/\b(?:i['’]m|i am|im) personally\b/gi, "I'm"],
-  [/\b(?:i['’]m|i am) (?:personally )?taking (?:full )?ownership(?: of this)?\b[.!]?/gi, ''],
-  [/\bi['’]ll personally\b/gi, "I'll"],
-  [/\bi will personally\b/gi, "I'll"],
-  [/\bon your behalf\b/gi, ''],
-  [/\brest assured(?:,| that)?\b[,.]?/gi, ''],
-
-  // — reach-out / hesitate / closers —
-  [/\bfeel free to reach out\b/gi, 'just let me know'],
-  [/\bdon['’]t hesitate to reach out\b/gi, 'just let me know'],
-  [/\bdon['’]t hesitate to\b/gi, 'just'],
-  [/\bplease don['’]t hesitate\b[.!]?/gi, ''],
-  [/\breach out\b/gi, 'get in touch'],
-  [/\b(?:please )?let me know if (?:there['’]s|there is) anything else\b[.!]?/gi, ''],
-  [/\bif (?:there['’]s|there is) anything else (?:i can help(?: with)?|you need)\b[.!]?/gi, ''],
-  [/\bis there anything else i can help(?: you)?(?: with)?\b[.!?]?/gi, ''],
-  [/\bi['’]m here to help\b[.!]?/gi, ''],
-  [/\bi am here to help\b[.!]?/gi, ''],
-
-  // — signposting —
-  [/\bhere['’]s what i can do\b[:.!]?/gi, ''],
-  [/\bjust to clarify\b[,]?/gi, ''],
-  [/\bto answer your question\b[,]?/gi, ''],
-  [/\bplease be advised\b[,.]?/gi, ''],
-  [/\bas per our policy\b/gi, ''],
-  [/\bas per our\b/gi, 'per our'],
-
-  // — misc corporate —
-  [/\bat your earliest convenience\b/gi, 'when you can'],
-  [/\bwe appreciate your\b/gi, 'thanks for your'],
-  [/\bi appreciate you bringing this to my attention\b[.!]?/gi, 'thanks for flagging this'],
-  [/\bi hope this (?:message |email )?finds you well\b[.!]?/gi, ''],
-  [/\bi['’]d like to inquire\b/gi, ''],
-  [/\bi understand your frustration\b[.!]?/gi, 'I hear you'],
-  [/\bi (?:completely |totally )?understand your frustration\b[.!]?/gi, 'I hear you'],
-  [/\bi understand your concern\b[.!]?/gi, 'I hear you'],
-  [/\bkindly\b\s*/gi, ''],
+// ── AI TELLS ────────────────────────────────────────────────────────────────
+// The phrases below are what make a support reply read as machine-written. The
+// system prompt already forbids every one of them by name, so this list is a
+// DETECTOR — it reports, it does not rewrite.
+//
+// It used to rewrite. ~60 regexes deleted the offending phrase in place, then
+// re-capitalised and re-punctuated whatever was left. Two problems came out of
+// that, and between them they were most of why the output read flat:
+//
+//   1. Deletion leaves a stub. "Thank you for your patience." removed from the
+//      middle of a reply welds the sentences on either side of it together, and
+//      the clean-up pass then capitalises the seam into a new sentence that the
+//      model never wrote.
+//   2. It subtracts warmth without adding any. Stripping the padding out of a
+//      padded reply does not produce a human one; it produces a shorter machine
+//      one, which is the exact quality being complained about.
+//
+// A model told not to write these mostly doesn't. When it does, the agent is
+// reading the draft before it sends anyway — so surfacing a flag beats silently
+// mangling the text underneath them.
+const AI_TELL_PATTERNS = [
+  { re: /\bthanks? you? for your patience\b/i,                     label: 'thanks for your patience' },
+  { re: /\b(?:i|we) apolog(?:ize|ise) for any inconvenience\b/i,   label: 'apologise for any inconvenience' },
+  { re: /\b(?:that(?:'|’)?s|that is) a (?:really )?great question\b/i, label: 'great question' },
+  { re: /\b(?:great|good) question\b/i,                            label: 'great question' },
+  { re: /\b(?:i(?:'|’)?d|i would) be (?:more than )?happy to\b/i,  label: 'happy to help' },
+  { re: /\b(?:i(?:'|’)?m|i am|im) personally\b/i,                  label: 'ownership theatre' },
+  { re: /\b(?:i(?:'|’)?ll|i will) personally\b/i,                  label: 'ownership theatre' },
+  { re: /\btaking (?:full )?ownership\b/i,                         label: 'ownership theatre' },
+  { re: /\bon your behalf\b/i,                                     label: 'on your behalf' },
+  { re: /\brest assured\b/i,                                       label: 'rest assured' },
+  { re: /\b(?:feel free to|don(?:'|’)?t hesitate to) reach out\b/i, label: 'feel free to reach out' },
+  { re: /\bdon(?:'|’)?t hesitate\b/i,                              label: "don't hesitate" },
+  { re: /\breach out\b/i,                                          label: 'reach out' },
+  { re: /\blet me know if (?:there(?:'|’)?s|there is) anything else\b/i, label: 'anything else closer' },
+  { re: /\bis there anything else i can help\b/i,                  label: 'anything else closer' },
+  { re: /\bi(?:'|’)?m here to help\b/i,                            label: "I'm here to help" },
+  { re: /\bhere(?:'|’)?s what i can do\b/i,                        label: 'signposting' },
+  { re: /\bjust to clarify\b/i,                                    label: 'signposting' },
+  { re: /\bto answer your question\b/i,                            label: 'signposting' },
+  { re: /\bplease be advised\b/i,                                  label: 'please be advised' },
+  { re: /\bas per our\b/i,                                         label: 'as per our policy' },
+  { re: /\bat your earliest convenience\b/i,                       label: 'at your earliest convenience' },
+  { re: /\bwe appreciate your\b/i,                                 label: 'we appreciate your' },
+  { re: /\bi appreciate you bringing this to my attention\b/i,     label: 'corporate acknowledgement' },
+  { re: /\bi hope this (?:message |email )?finds you well\b/i,     label: 'hope this finds you well' },
+  { re: /\bi(?:'|’)?d like to inquire\b/i,                         label: 'I would like to inquire' },
+  { re: /\bi (?:completely |totally )?understand your (?:frustration|concern)\b/i, label: 'understand your frustration' },
+  { re: /\bkindly\b/i,                                             label: 'kindly' },
 ];
 
-function scrubBannedPhrases(text) {
-  if (!text || typeof text !== 'string') return text;
-  let out = text;
-  for (const [pattern, replacement] of BANNED_PHRASE_REPLACEMENTS) out = out.replace(pattern, replacement);
-  out = out
-    .replace(/[^\S\n]{2,}/g, ' ')
-    .replace(/\s+([.,!?;:])/g, '$1')
-    .replace(/([.!?])\s*,/g, '$1')
-    .replace(/,\s*([.!?])/g, '$1')
-    .replace(/,\s*,/g, ',')
-    .replace(/([.!?])[ \t]*\1+/g, '$1')
-    .replace(/^[\s.,!?;:]+/, '')
-    .replace(/\s+$/g, '')
-    .replace(/(^|[.!?]\s+)([a-z])/g, (m, pre, ch) => pre + ch.toUpperCase())
-    .trim();
-  return out;
+/**
+ * Report the AI tells present in a draft. Never mutates.
+ *
+ * @returns {Array<{label: string, match: string}>} deduplicated by label, so a
+ *   reply that says "reach out" twice reports one flag rather than two.
+ */
+function detectAITells(text) {
+  if (!text || typeof text !== 'string') return [];
+  const seen = new Map();
+  for (const { re, label } of AI_TELL_PATTERNS) {
+    const hit = text.match(re);
+    if (hit && !seen.has(label)) seen.set(label, hit[0].trim());
+  }
+  return [...seen].map(([label, match]) => ({ label, match }));
 }
 
-function humanizeText(text) {
+/**
+ * Typographic normalisation only — the one transform that is genuinely lossless.
+ *
+ * Em and en dashes used as sentence separators are a strong machine tell and a
+ * comma always carries the same meaning, so converting them cannot change a
+ * claim, a number, a date or a promise. Everything that COULD change one of
+ * those now goes through detectAITells() instead.
+ */
+function normalizeTypography(text) {
   if (!text || typeof text !== 'string') return text;
-  const dashFixed = text
+  return text
     .replace(/\s*--\s*/g, ', ')   // double-hyphen used as a dash
     .replace(/\s*—\s*/g, ', ')    // em dash
     .replace(/\s*–\s*/g, ', ')    // en dash used as separator
     .replace(/,\s*,/g, ',')       // collapse accidental double commas
     .replace(/\s+,/g, ',')        // fix stray space before comma
+    .replace(/[^\S\n]{2,}/g, ' ') // runs of spaces, never newlines
     .trim();
-  const scrubbed = scrubBannedPhrases(dashFixed);
-
-  return scrubbed && scrubbed.length >= 4 ? scrubbed : dashFixed;
 }
 
 /**
@@ -2255,6 +2247,7 @@ function buildBrainQuery(clientMessage = '', chatHistory = '', conversationState
 // ============ ANTHROPIC CLIENT (with retry) ============
 
 function callAnthropicAPIWithRetry(requestBody, apiKey, retries = 1, timeoutMs = 15000) {
+  timeoutMs = timeoutMs || 15000;
   const attempt = (attemptsLeft) => new Promise((resolve, reject) => {
     const options = { hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Length': Buffer.byteLength(requestBody) } };
     const req = require('https').request(options, apiRes => {
@@ -2278,20 +2271,37 @@ function callAnthropicAPIWithRetry(requestBody, apiKey, retries = 1, timeoutMs =
   return attempt(retries);
 }
 
-async function callAIForSuggestions(requestBody, apiKey) {
-  try {
-    const { tryDeepSeekFallback } = require('./deepseek-fallback');
-    const primary = await tryDeepSeekFallback(requestBody);
-    if (primary) {
-      console.log('✦ [AI] Suggestions served via DeepSeek (primary)');
-      return { data: primary, provider: 'deepseek' };
+/**
+ * @param {string} requestBody  Anthropic-shaped request body, already serialised.
+ * @param {string} apiKey
+ * @param {object} [opts]
+ * @param {boolean} [opts.skipDeepSeek]  Go straight to Anthropic. Set for turns
+ *   routed to the premium tier, where the whole point is the stronger model —
+ *   letting DeepSeek answer first would silently undo the routing decision.
+ * @param {number} [opts.timeoutMs]  Anthropic socket timeout. The 15s default
+ *   is sized for Haiku; a thinking-enabled Opus turn needs considerably more,
+ *   and a timeout here degrades to canned templates rather than to a slower
+ *   reply, so it is worth being generous.
+ */
+async function callAIForSuggestions(requestBody, apiKey, opts = {}) {
+  const { skipDeepSeek = false, timeoutMs } = opts;
+
+  if (!skipDeepSeek) {
+    try {
+      const { tryDeepSeekFallback } = require('./deepseek-fallback');
+      const primary = await tryDeepSeekFallback(requestBody);
+      if (primary) {
+        console.log('✦ [AI] Suggestions served via DeepSeek (primary)');
+        return { data: primary, provider: 'deepseek' };
+      }
+      console.warn('✦ [AI] DeepSeek primary unavailable — falling back to Claude');
+    } catch (err) {
+      console.warn(`✦ [AI] DeepSeek primary error: ${err.message} — falling back to Claude`);
     }
-    console.warn('✦ [AI] DeepSeek primary unavailable — falling back to Claude');
-  } catch (err) {
-    console.warn(`✦ [AI] DeepSeek primary error: ${err.message} — falling back to Claude`);
   }
-  console.log('✦ [AI] Suggestions served via Claude (fallback)');
-  const data = await callAnthropicAPIWithRetry(requestBody, apiKey);
+
+  console.log(`✦ [AI] Suggestions served via Claude (${skipDeepSeek ? 'premium tier' : 'fallback'})`);
+  const data = await callAnthropicAPIWithRetry(requestBody, apiKey, 1, timeoutMs);
   return { data, provider: 'claude' };
 }
 
@@ -2614,14 +2624,10 @@ function detectServiceFailure(sentiment, analysisBlock, isTrustQuestion) {
  *   model splits the difference. Pass null (or a profile whose fields are null) to
  *   keep the built-in behaviour byte-for-byte.
  */
-function buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness, brainContext = '', brainSettings = {}, adminStyleBlock = '', imageAnalysis = '', sentiment = 'neutral', responseExamples = [], isTrustQuestion = false, isSafetyDosing = false, brainHasProductAnswer = false, voiceProfile = null) {
-  const hasBrain = brainContext && brainContext.trim().length > 0;
-  const trustBlock = isTrustQuestion ? TRUST_QUESTION_BLOCK : '';
-  const safetyBlock = isSafetyDosing ? SAFETY_DOSING_BLOCK : '';
-  const isServiceFailure = detectServiceFailure(sentiment, analysisBlock, isTrustQuestion);
-  const serviceFailureBlock = isServiceFailure ? SERVICE_FAILURE_BLOCK : '';
-
-  const humanVoiceBlock = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Hoisted to module scope so stableSystemPrefix() below can hand the exact same
+// bytes to the prompt cache. The block is a static template with no
+// interpolation, so its position does not change what it renders.
+const humanVoiceBlock = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #1 RULE — ONE MESSAGE, ONE THING, THEN STOP.
 You're a real person who already knows the answer, texting a customer fast.
 Not a call center. Not a script. Not a corporate email.
@@ -2679,6 +2685,33 @@ NEVER (these are the tells that scream AI):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 `;
+
+/**
+ * The leading, request-invariant slice of the system prompt.
+ *
+ * buildSystemPrompt() emits `${voiceText}${examplesText}` first and everything
+ * turn-specific after it, so this prefix is byte-identical across every request
+ * for a given voice profile — which is exactly the condition prompt caching
+ * needs. Splitting the finished prompt here is metadata only: the model still
+ * receives the identical string it received before.
+ *
+ * Keep this in lockstep with the head of buildSystemPrompt's return. The route
+ * verifies the prompt actually starts with this and silently skips caching if
+ * it does not, so drift costs money rather than correctness.
+ */
+function stableSystemPrefix(voiceProfile) {
+  const voiceText    = voiceProfile?.voiceBlock    ?? humanVoiceBlock;
+  const examplesText = voiceProfile?.examplesBlock ?? ROBOT_VS_HUMAN_BLOCK;
+  return `${voiceText}${examplesText}`;
+}
+
+function buildSystemPrompt(storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness, brainContext = '', brainSettings = {}, adminStyleBlock = '', imageAnalysis = '', sentiment = 'neutral', responseExamples = [], isTrustQuestion = false, isSafetyDosing = false, brainHasProductAnswer = false, voiceProfile = null) {
+  const hasBrain = brainContext && brainContext.trim().length > 0;
+  const trustBlock = isTrustQuestion ? TRUST_QUESTION_BLOCK : '';
+  const safetyBlock = isSafetyDosing ? SAFETY_DOSING_BLOCK : '';
+  const isServiceFailure = detectServiceFailure(sentiment, analysisBlock, isTrustQuestion);
+  const serviceFailureBlock = isServiceFailure ? SERVICE_FAILURE_BLOCK : '';
+
 
   const cleanExamples = (responseExamples || [])
     .map(r => (typeof r === 'string' ? r : r?.text))
@@ -2919,6 +2952,162 @@ right person now"), don't recite ownership theatre.`;
 }
 
 // ============ CONVERSATION STATE ============
+
+/**
+ * Decide which tier a turn belongs to.
+ *
+ * Every signal here is already computed upstream for other reasons, so routing
+ * costs nothing extra — no classifier call, no added latency.
+ */
+function pickModelTier({ sentiment, isTrustQuestion, isSafetyDosing, isRefundOrComplaint, conversationState }) {
+  const reasons = [];
+  if (isSafetyDosing)                          reasons.push('dosing/safety');
+  if (isTrustQuestion)                         reasons.push('trust challenge');
+  if (isRefundOrComplaint)                     reasons.push('refund/complaint');
+  if (sentiment === 'negative' ||
+      sentiment === 'very_negative')           reasons.push(`sentiment ${sentiment}`);
+  if (conversationState?.isEscalating)         reasons.push('escalating');
+  if (conversationState?.isLongConversation)   reasons.push('long conversation');
+  return { tier: reasons.length ? 'premium' : 'routine', reasons };
+}
+
+// ============ EMOTION ============
+
+/**
+ * Read the customer's emotional state from the conversation.
+ *
+ * This used to be computed in the browser by counting how many of fifteen
+ * adjectives ("angry", "furious", "ridiculous"...) appeared in the last few
+ * messages. That misses the way real customers actually express anger, which is
+ * usually through FACTS AND REPETITION rather than adjectives:
+ *
+ *   "I've been waiting three weeks and nobody has replied.
+ *    This is the third time I've asked."
+ *
+ * scores zero on an adjective count, so every downstream escalation path —
+ * SERVICE_FAILURE_BLOCK, the very_negative prompt label, detectServiceFailure —
+ * stayed disarmed for exactly the customer who most needed them.
+ *
+ * So: weigh behaviour alongside vocabulary. Repetition, unanswered messages,
+ * elapsed-time claims and escalation threats all carry more signal than whether
+ * someone reached for the word "frustrated".
+ *
+ * Returns the same five labels the rest of the pipeline already expects, plus
+ * the signals behind the verdict. The signals matter as much as the label: fed
+ * into the prompt they let the model respond to "asked 3 times, 19 days, no
+ * reply since Tuesday" instead of to a bare adjective, which is the difference
+ * between a tailored reply and a canned apology.
+ *
+ * @returns {{ level: string, score: number, signals: string[] }}
+ */
+
+const _CAPS_WORD_RE = /\b[A-Z]{4,}\b/g;
+const _CAPS_ALLOWLIST = new Set(['ASAP', 'HELP', 'FEDEX', 'USPS', 'DHL', 'UPS', 'COD', 'PLEASE']);
+
+// Vocabulary. Kept, but no longer the whole story.
+const _ANGRY_WORDS = /\b(angry|furious|livid|upset|frustrat\w*|annoyed|disgusted|disgusting|pathetic|useless|terrible|horrible|awful|worst|unacceptable|ridiculous|appalling|outrageous|disappointed|fed up|sick of)\b/i;
+const _PROFANITY = /\b(wtf|bullshit|bs|damn|hell|crap|screwed|scam|fraud|thieves|stealing|robbed)\b/i;
+const _POSITIVE_WORDS = /\b(thank you|thanks|thankyou|appreciate|grateful|great|awesome|perfect|excellent|amazing|wonderful|brilliant|love it|lifesaver|helpful|sorted|solved|resolved)\b/i;
+
+// Behaviour. This is where the real signal is.
+const _REPETITION = /\b(again|still|already (asked|told|sent|emailed)|second time|third time|fourth time|\d+(?:st|nd|rd|th) time|multiple times|several times|keep asking|asked (?:you )?(?:twice|three times|repeatedly)|as i (?:said|mentioned|told you))\b/i;
+const _NO_RESPONSE = /\b(no (?:one|body) (?:has )?(?:replied|responded|answered|got back)|nobody(?:'s| has)? (?:replied|responded|answered)|never (?:heard|got|received) (?:back|a reply|any response)|haven'?t heard (?:back|from)|no (?:reply|response|answer|update)|ignoring me|being ignored)\b/i;
+// Customers write "three weeks" at least as often as "3 weeks", and the spelled
+// form was invisible to the old digit-only pattern — which is exactly the
+// register the calmest, angriest complaints are written in.
+const _ELAPSED = /\b(\d+|a|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*(day|days|week|weeks|month|months)\b/i;
+const _WORD_NUMBERS = { a: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6,
+                        seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
+
+// Split by severity. Asking for a manager and threatening a chargeback are both
+// escalation, but only one of them means the account is about to be lost.
+const _ESCALATION_SEVERE = /\b(chargeback|dispute the charge|lawyer|attorney|legal action|sue|lawsuit|bbb|better business bureau|attorney general|trading standards|consumer protection)\b/i;
+const _ESCALATION_SOFT = /\b(manager|supervisor|escalate|escalation|leave a review|1 star|one star|report you|trustpilot)\b/i;
+const _DEMAND = /\b(i want (?:a )?refund|refund me|give me my money|cancel (?:my|the) order|i'?m done|last chance|final warning|unless you)\b/i;
+
+function detectEmotion(chatHistory = '', clientMessage = '', conversationState = null) {
+  const msg = String(clientMessage || '');
+  const history = String(chatHistory || '');
+  const signals = [];
+  let score = 0;
+
+  // ── Vocabulary ────────────────────────────────────────────────────────────
+  if (_ANGRY_WORDS.test(msg)) { score += 2; signals.push('uses angry language'); }
+  if (_PROFANITY.test(msg))   { score += 2; signals.push('profanity or accusation of bad faith'); }
+
+  // ── Repetition: they have had to ask more than once ───────────────────────
+  if (_REPETITION.test(msg)) { score += 3; signals.push('says they have asked before'); }
+
+  // ── Silence: we did not answer ────────────────────────────────────────────
+  if (_NO_RESPONSE.test(msg)) { score += 3; signals.push('says nobody has responded'); }
+
+  // ── Elapsed time: a long wait is a grievance whatever tone it is stated in ─
+  const elapsed = msg.match(_ELAPSED);
+  if (elapsed) {
+    const raw = elapsed[1].toLowerCase();
+    const n = _WORD_NUMBERS[raw] ?? parseInt(raw, 10);
+    const unit = elapsed[2].toLowerCase();
+    const days = unit.startsWith('week') ? n * 7 : unit.startsWith('month') ? n * 30 : n;
+    if (days >= 21)     { score += 3; signals.push(`cites a ${elapsed[0]} wait`); }
+    else if (days >= 7) { score += 2; signals.push(`cites a ${elapsed[0]} wait`); }
+    else if (days >= 3) { score += 1; signals.push(`cites a ${elapsed[0]} wait`); }
+  }
+
+  // ── Escalation and demands ────────────────────────────────────────────────
+  if (_ESCALATION_SEVERE.test(msg)) { score += 5; signals.push('threatens chargeback or legal action'); }
+  else if (_ESCALATION_SOFT.test(msg)) { score += 3; signals.push('asks to escalate'); }
+  if (_DEMAND.test(msg))     { score += 2; signals.push('demands a refund or cancellation'); }
+
+  // ── Shouting ──────────────────────────────────────────────────────────────
+  const caps = (msg.match(_CAPS_WORD_RE) || []).filter(w => !_CAPS_ALLOWLIST.has(w));
+  if (caps.length >= 2) { score += 2; signals.push('writing in capitals'); }
+  else if (caps.length === 1) { score += 1; signals.push('a word in capitals'); }
+
+  // ── Punctuation ───────────────────────────────────────────────────────────
+  if (/[!?]{2,}/.test(msg)) { score += 1; signals.push('emphatic punctuation'); }
+
+  // ── Structural: consecutive unanswered customer messages ──────────────────
+  // Someone sending three messages in a row with no reply between them is
+  // escalating whether or not they have said so.
+  const lines = history.split('\n').map(l => l.trim()).filter(Boolean);
+  let trailingCustomer = 0;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (/^(customer|client):/i.test(lines[i])) trailingCustomer++;
+    else if (/^(agent|support):/i.test(lines[i])) break;
+  }
+  if (trailingCustomer >= 3)      { score += 3; signals.push(`${trailingCustomer} unanswered messages in a row`); }
+  else if (trailingCustomer === 2) { score += 2; signals.push('two unanswered messages in a row'); }
+
+  // ── Length of the thread ──────────────────────────────────────────────────
+  // A long thread is not itself anger, but it raises the cost of getting the
+  // next reply wrong, so it nudges rather than jumps.
+  if (conversationState?.isLongConversation) { score += 1; signals.push('long-running conversation'); }
+  if (conversationState?.isEscalating)       { score += 3; signals.push('escalation keywords in the latest message'); }
+
+  // ── Positive counterweight ────────────────────────────────────────────────
+  let positive = 0;
+  if (_POSITIVE_WORDS.test(msg)) positive += 1;
+  if (/\b(thank you so much|thanks so much|really appreciate|you'?re (?:a )?(?:the best|amazing|great)|perfect,? thank)\b/i.test(msg)) positive += 1;
+
+  // Gratitude only reads as gratitude when there is no grievance beside it.
+  // "Thanks, but this is the third time I've asked" is not a happy customer.
+  if (positive > 0 && score === 0) {
+    return {
+      level: positive >= 2 ? 'very_positive' : 'positive',
+      score: -positive,
+      signals: [positive >= 2 ? 'strong thanks' : 'thanks'],
+    };
+  }
+
+  // A single weak signal ("long-running conversation") is not a grievance, so
+  // the negative band starts at 3 — roughly one strong behavioural signal, or
+  // two weak ones together.
+  const level = score >= 7 ? 'very_negative'
+              : score >= 3 ? 'negative'
+              : 'neutral';
+
+  return { level, score, signals };
+}
 
 function analyzeConversationState(chatHistory, clientMessage, analysis) {
   const fullText = `${chatHistory || ''} ${clientMessage || ''}`.toLowerCase();
@@ -3189,12 +3378,12 @@ function generateSmartFallbackSuggestionsRaw(customerMsg, chatHistory, analysis,
 }
 
 function generateSmartFallbackSuggestions(customerMsg, chatHistory, analysis, adminNote, opts = {}) {
-  return generateSmartFallbackSuggestionsRaw(customerMsg, chatHistory, analysis, adminNote, opts).map(humanizeText);
+  return generateSmartFallbackSuggestionsRaw(customerMsg, chatHistory, analysis, adminNote, opts).map(normalizeTypography);
 }
 
 module.exports = {
-  humanizeText,
-  scrubBannedPhrases,
+  normalizeTypography,
+  detectAITells,
   callAnthropicAPIWithRetry,
   callAIForSuggestions,
   extractAdminStyle,
@@ -3219,6 +3408,9 @@ module.exports = {
   buildPolicyBlock,
   parseAIResponse,
   analyzeConversationState,
+  detectEmotion,
+  pickModelTier,
+  stableSystemPrefix,
   validateSuggestions,
   validateSafetyDosing,
   generateSmartFallbackSuggestionsRaw,
