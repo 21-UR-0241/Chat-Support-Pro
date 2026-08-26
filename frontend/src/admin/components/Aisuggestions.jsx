@@ -814,7 +814,7 @@
 
 
 //             {!loading && !imageAnalyzing && suggestions.length > 0 && (
-//               <button className="ai-detailed-trigger" onClick={handleOpenDetailed} type="button">
+//               <button className="ai-detailed-trigger" onClick={() => handleOpenDetailed()} type="button">
 //                 <span className="ai-detailed-trigger-label">Show Longer Replies</span>
 //                 <span className="ai-detailed-trigger-badge">3 styles</span>
 //               </button>
@@ -847,7 +847,7 @@
 //             ) : detailedModal.error ? (
 //               <div className="ai-modal-error-body">
 //                 <p>{detailedModal.error}</p>
-//                 <button onClick={handleOpenDetailed} type="button" className="ai-retry-btn">Try Again</button>
+//                 <button onClick={() => handleOpenDetailed({ force: true })} type="button" className="ai-retry-btn">Try Again</button>
 //               </div>
 //             ) : (
 //               <>
@@ -887,7 +887,7 @@
 //                   )}
 //                 </div>
 //                 <div className="ai-modal-footer">
-//                   <button className="ai-modal-regenerate" onClick={handleOpenDetailed} type="button">↻ Regenerate All</button>
+//                   <button className="ai-modal-regenerate" onClick={() => handleOpenDetailed({ force: true })} type="button">↻ Regenerate All</button>
 //                   {detailedModal.answers[activeTab] && (
 //                     <button
 //                       className="ai-modal-use"
@@ -917,6 +917,64 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import api from '../services/api';
 import OrderPanel from './OrderPanel';
+
+// ── Suggestion cache ─────────────────────────────────────────────────────────
+// Generated suggestions survive leaving a conversation and coming back.
+//
+// MODULE SCOPE, not a ref inside the component. The panel unmounts whenever the
+// agent toggles it or closes the chat, which took a component-held cache with
+// it — the suggestions were gone by the time they returned.
+//
+// Backed by sessionStorage so it also survives a reload of the tab. Keyed by
+// conversation AND by the customer message the suggestions answer, so a reply
+// written for a question the customer has since followed up on is never
+// restored: that entry simply stops matching and the panel regenerates.
+//
+// sessionStorage rather than localStorage on purpose — this is working state for
+// one sitting, not something to still be around tomorrow.
+const CACHE_KEY = 'ai-suggestion-cache';
+const CACHE_MAX = 40;
+
+function readCache() {
+  try {
+    const raw = sessionStorage.getItem(CACHE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    // Private mode, blocked site data, or a corrupt entry. An empty cache just
+    // means regenerating, so there is nothing here worth surfacing.
+    return {};
+  }
+}
+
+function writeCache(next) {
+  try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(next)); } catch { /* see above */ }
+}
+
+const cacheKeyFor = (convId, msgId) => `${convId}:${msgId}`;
+
+function cacheEntry(convId, msgId, patch) {
+  if (convId == null || msgId == null) return;
+  const cache = readCache();
+  const key = cacheKeyFor(convId, msgId);
+  const merged = { ...(cache[key] || {}), ...patch, savedAt: Date.now() };
+  delete cache[key];
+  cache[key] = merged;
+
+  // Oldest-first eviction. Entries are small, but an agent working a long shift
+  // would otherwise grow this without bound.
+  const keys = Object.keys(cache);
+  if (keys.length > CACHE_MAX) {
+    keys
+      .sort((a, b) => (cache[a].savedAt || 0) - (cache[b].savedAt || 0))
+      .slice(0, keys.length - CACHE_MAX)
+      .forEach(k => delete cache[k]);
+  }
+  writeCache(cache);
+}
+
+const readEntry = (convId, msgId) =>
+  (convId == null || msgId == null) ? null : (readCache()[cacheKeyFor(convId, msgId)] || null);
+
 import '../styles/Aisuggestions.css';
 
 // Unpacks the API's `voiceFlags` into an index-keyed lookup.
@@ -1047,35 +1105,6 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
     }
     return 300;
   };
-
-  // ── Suggestion cache ───────────────────────────────────────────────────────
-  // Switching conversation and coming back used to wipe the panel and cost a
-  // fresh generation: the effect below clears suggestions whenever the last
-  // message id differs from lastProcessedMsgId, and that ref was shared across
-  // every conversation, so any switch away and back always looked like a change.
-  //
-  // Keyed by conversation AND by the customer message the suggestions were
-  // written for. A cached set is restored only while that message is still the
-  // latest one — if the customer has said something since, the old suggestions
-  // are genuinely stale and regenerating is correct.
-  //
-  // Deliberately in memory rather than storage: a full page reload should start
-  // clean rather than restore drafts written against a conversation that may
-  // have moved on while the tab was closed.
-  const SUGGESTION_CACHE_MAX = 50;
-  const suggestionCache = useRef(new Map());
-
-  const cacheSuggestions = (convId, msgId, entry) => {
-    if (convId == null || msgId == null) return;
-    const cache = suggestionCache.current;
-    const key = `${convId}:${msgId}`;
-    cache.delete(key);            // re-insert so Map iteration order is LRU
-    cache.set(key, entry);
-    while (cache.size > SUGGESTION_CACHE_MAX) cache.delete(cache.keys().next().value);
-  };
-
-  const readCachedSuggestions = (convId, msgId) =>
-    (convId == null || msgId == null) ? null : suggestionCache.current.get(`${convId}:${msgId}`) || null;
 
   const [panelWidth, setPanelWidth] = useState(readStoredWidth);
   const [isResizing, setIsResizing] = useState(false);
@@ -1454,7 +1483,7 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
 
       // Keep them so returning to this conversation shows the same suggestions
       // instead of a blank panel and another generation.
-      cacheSuggestions(reqConv, lastProcessedMsgId.current, {
+      cacheEntry(reqConv, lastProcessedMsgId.current, {
         suggestions: data.suggestions || [],
         needsReview: data.needsReview || [],
         isFallback: fellBack,
@@ -1581,24 +1610,29 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
     if (msgConvId != null && String(msgConvId) !== String(conversation?.id)) return;
 
     const msgId = String(lastCustomerMsg.id);
-    if (msgId === lastProcessedMsgId.current) return;
 
-    // Coming back to a conversation whose suggestions we already have, with the
-    // customer not having said anything since: restore them rather than clearing
-    // the panel and charging for a regeneration of the same answer.
-    const cached = readCachedSuggestions(conversation?.id, msgId);
-    if (cached) {
+    // Restore BEFORE the unchanged-message check below.
+    //
+    // That check exists to avoid redoing work when nothing moved, but closing a
+    // chat wipes the panel's state while leaving lastProcessedMsgId pointing at
+    // the same message. Reopening therefore hit the early return and left the
+    // panel empty with the suggestions still sitting in the cache. Restoring
+    // first makes the check mean "nothing to redo", not "nothing to show".
+    const cached = readEntry(conversation?.id, msgId);
+    if (cached?.suggestions?.length) {
       lastProcessedMsgId.current = msgId;
       setSuggestions(cached.suggestions);
-      setNeedsReview(cached.needsReview);
-      setIsFallback(cached.isFallback);
-      setFallbackInfo(cached.fallbackInfo);
-      setServerVoiceFlags(cached.serverVoiceFlags);
+      setNeedsReview(cached.needsReview || []);
+      setIsFallback(!!cached.isFallback);
+      setFallbackInfo(cached.fallbackInfo || { code: null, message: null });
+      setServerVoiceFlags(cached.serverVoiceFlags || {});
       setContextLevel(assessContextQuality());
       setReadyToGenerate(false);
       setError(null);
       return;
     }
+
+    if (msgId === lastProcessedMsgId.current) return;
 
     const quality = assessContextQuality();
     setContextLevel(quality);
@@ -1660,8 +1694,19 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
     });
   };
 
-  const handleOpenDetailed = async () => {
+  // `force` bypasses the cache. Reopening the modal should show what was already
+  // written; pressing Regenerate explicitly asks for a fresh pass, and silently
+  // handing back the cached copy would make that button look broken.
+  const handleOpenDetailed = async ({ force = false } = {}) => {
     if (!suggestions.length) return;
+
+    const priorDetailed = force ? null : readEntry(conversation?.id, lastProcessedMsgId.current)?.detailed;
+    if (priorDetailed?.answers?.length) {
+      setDetailedModal(priorDetailed);
+      setActiveTab(0);
+      return;
+    }
+
     const reqConv = conversation?.id;
     setDetailedModal({ loading: true, error: null, answers: [], fallback: false, fallbackInfo: { code: null, message: null }, voiceFlags: {} });
     setActiveTab(0);
@@ -1671,14 +1716,20 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
       const data = await postToAI(buildPayload(clientMessage, { detailedAnswerMode: true, baseSuggestions: suggestions }));
       if (reqConv !== activeConvRef.current) return;   // switched mid-request — bail
       const fellBack = isFallbackResponse(data);
-      setDetailedModal({
+      const detailed = {
         loading: false,
         error: null,
         answers: data.detailedAnswers || [],
         fallback: fellBack,
         fallbackInfo: fellBack ? describeFallback(data) : { code: null, message: null },
         voiceFlags: mergeFlagMaps(flagsByIndex(data.voiceFlags), tellsByIndex(data.aiTells)),
-      });
+      };
+      setDetailedModal(detailed);
+
+      // Long replies are the expensive path — a deliberate click that runs the
+      // premium model at high effort. Reopening the modal for the same message
+      // should show what was already written, not spend it again.
+      cacheEntry(reqConv, lastProcessedMsgId.current, { detailed });
     } catch (err) {
       if (reqConv !== activeConvRef.current) return;
       setDetailedModal({ loading: false, error: `Failed to generate: ${err.message}`, answers: [], fallback: false, fallbackInfo: { code: null, message: null }, voiceFlags: {} });
@@ -2058,7 +2109,7 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
 
 
             {!loading && !imageAnalyzing && suggestions.length > 0 && (
-              <button className="ai-detailed-trigger" onClick={handleOpenDetailed} type="button">
+              <button className="ai-detailed-trigger" onClick={() => handleOpenDetailed()} type="button">
                 <span className="ai-detailed-trigger-label">Show Longer Replies</span>
                 <span className="ai-detailed-trigger-badge">3 styles</span>
               </button>
@@ -2095,13 +2146,13 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
             ) : detailedModal.error ? (
               <div className="ai-modal-error-body">
                 <p>{detailedModal.error}</p>
-                <button onClick={handleOpenDetailed} type="button" className="ai-retry-btn">Try Again</button>
+                <button onClick={() => handleOpenDetailed({ force: true })} type="button" className="ai-retry-btn">Try Again</button>
               </div>
             ) : (
               <>
                 {detailedModal.fallback && renderFallbackNotice({
                   info: detailedModal.fallbackInfo,
-                  onRetry: handleOpenDetailed,
+                  onRetry: () => handleOpenDetailed({ force: true }),
                   retrying: detailedModal.loading,
                   modal: true,
                 })}
@@ -2160,7 +2211,7 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
                   )}
                 </div>
                 <div className="ai-modal-footer">
-                  <button className="ai-modal-regenerate" onClick={handleOpenDetailed} type="button">↻ Regenerate All</button>
+                  <button className="ai-modal-regenerate" onClick={() => handleOpenDetailed({ force: true })} type="button">↻ Regenerate All</button>
                   {detailedModal.answers[activeTab] && (
                     <button
                       className="ai-modal-use"
