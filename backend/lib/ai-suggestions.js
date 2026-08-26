@@ -2246,8 +2246,61 @@ function buildBrainQuery(clientMessage = '', chatHistory = '', conversationState
 
 // ============ ANTHROPIC CLIENT (with retry) ============
 
+// Non-Anthropic hints that ride along in the request body for the DeepSeek shim
+// to read. They must never reach api.anthropic.com: it rejects unknown top-level
+// fields outright with "Extra inputs are not permitted", which fails the whole
+// request rather than being ignored.
+//
+// This became reachable when the premium tier started skipping DeepSeek and
+// posting the same body straight to Anthropic. Stripping here rather than at each
+// call site means no future caller can reintroduce it.
+const NON_ANTHROPIC_BODY_KEYS = /^(?:deepseek|_reasoningEffort$)/i;
+
+/**
+ * Drop shim-only hints from a serialised request body bound for Anthropic.
+ * Returns the body unchanged if it cannot be parsed — a malformed body is the
+ * caller's problem to surface, not something to swallow here.
+ */
+function stripNonAnthropicFields(requestBodyStr) {
+  let parsed;
+  try { parsed = JSON.parse(requestBodyStr); }
+  catch { return requestBodyStr; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return requestBodyStr;
+
+  const dropped = Object.keys(parsed).filter(k => NON_ANTHROPIC_BODY_KEYS.test(k));
+  if (!dropped.length) return requestBodyStr;
+
+  for (const k of dropped) delete parsed[k];
+  console.log(`✦ [AI] stripped shim-only field(s) before Anthropic: ${dropped.join(', ')}`);
+  return JSON.stringify(parsed);
+}
+
+/**
+ * Pull the assistant's visible text out of an Anthropic response.
+ *
+ * `content` is a list of blocks, and with thinking enabled the FIRST block is a
+ * thinking block whose `.text` is undefined. Reading content[0].text therefore
+ * yields '' on every thinking-enabled model, which surfaces as
+ * "returned 0 chars, stop_reason=end_turn" and a silent fall back to canned
+ * templates — the model answered fine, the reply was just never read.
+ *
+ * Concatenates every text block rather than taking the first, since a response
+ * may legitimately be split across several.
+ */
+function extractText(data) {
+  const content = data?.content;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .filter(b => b && b.type === 'text' && typeof b.text === 'string')
+    .map(b => b.text)
+    .join('');
+}
+
+
 function callAnthropicAPIWithRetry(requestBody, apiKey, retries = 1, timeoutMs = 15000) {
   timeoutMs = timeoutMs || 15000;
+  requestBody = stripNonAnthropicFields(requestBody);
   const attempt = (attemptsLeft) => new Promise((resolve, reject) => {
     const options = { hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Length': Buffer.byteLength(requestBody) } };
     const req = require('https').request(options, apiRes => {
@@ -3411,6 +3464,8 @@ module.exports = {
   detectEmotion,
   pickModelTier,
   stableSystemPrefix,
+  extractText,
+  stripNonAnthropicFields,
   validateSuggestions,
   validateSafetyDosing,
   generateSmartFallbackSuggestionsRaw,

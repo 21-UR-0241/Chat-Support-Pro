@@ -1075,6 +1075,7 @@ const {
   analyzeConversationState,
   pickModelTier,
   stableSystemPrefix,
+  extractText,
   detectEmotion,
   validateSuggestions,
   validateSafetyDosing,
@@ -1404,11 +1405,23 @@ module.exports = function createAiRoutes({ getCachedStore }) {
 
   const router = express.Router();
 
-  const detailedFromFallback = (fallback) => ([
-    { label: 'Empathetic',     text: fallback[0] || 'Unable to generate.' },
-    { label: 'Thorough',       text: fallback[1] || 'Unable to generate.' },
-    { label: 'Above & Beyond', text: fallback[2] || 'Unable to generate.' },
-  ]);
+  // Canned templates, not model output. They were labelled Empathetic / Thorough
+  // / Above & Beyond, which was already a stretch and became actively misleading
+  // once the tabs started rendering these labels: three variants of the same
+  // canned English are not three strategies, and presenting them as such invites
+  // an agent to send one thinking it was chosen for the situation. Say what they
+  // are instead, and carry the reason in `why` so it shows above the draft.
+  const detailedFromFallback = (fallback) => {
+    const texts = (Array.isArray(fallback) ? fallback : []).filter(Boolean).slice(0, 3);
+    if (!texts.length) {
+      return [{ label: 'Unavailable', why: 'The model did not answer and no template matched.', text: 'Unable to generate.' }];
+    }
+    return texts.map((text, i) => ({
+      label: `Template ${i + 1}`,
+      why: 'Canned fallback, not written for this conversation. Review before sending.',
+      text,
+    }));
+  };
 
   // Fallback templates come from lib/ai-suggestions and are written in generic
   // support English. Scrub them on the way out so a canned reply is never the
@@ -1495,7 +1508,7 @@ module.exports = function createAiRoutes({ getCachedStore }) {
         { type: 'text', text: `You are a customer support assistant analyzing a screenshot uploaded by a support agent${storeContext}. Extract and report EVERYTHING visible in this image so the agent can write a precise, accurate reply to the customer.\n\nRead the ENTIRE screenshot carefully and extract:\n\n1. SCREEN TYPE — What kind of screen is this? (order confirmation, tracking page, error message, product page, payment screen, account page, chat/email, invoice, etc.)\n\n2. ALL VISIBLE TEXT — Extract every piece of text you can read: headings, labels, values, statuses, messages, error text, button labels, dates, times, prices, quantities, addresses, names, email addresses, phone numbers, reference numbers, order IDs, tracking numbers, product names, SKUs, descriptions — everything.\n\n3. KEY DATA POINTS — Specifically call out:\n   - Order/reference numbers (exact format, e.g. #1001, ORD-12345)\n   - Order status (pending, fulfilled, shipped, cancelled, refunded, etc.)\n   - Payment status and amounts (exact dollar figures)\n   - Tracking numbers and carrier names\n   - Shipping/delivery dates or estimated dates\n   - Product names, quantities, sizes, variants\n   - Customer name and email if visible\n   - Any error messages or warning text (copy exactly)\n   - Any action items, buttons, or options shown\n\n4. WHAT ISSUE THIS RELATES TO — Based on what you see, what is the customer's likely concern or question?\n\nWrite your response as a clear, structured report. Include every specific value — exact numbers, exact text, exact statuses. Do not summarize or paraphrase data — reproduce it exactly as shown. Plain text only, no markdown.` }
       ]}]});
       const data = await callAnthropicAPIWithRetry(requestBody, ANTHROPIC_API_KEY, 1, 40000);
-      const analysis = data.content?.[0]?.text || '';
+      const analysis = extractText(data) || '';
       console.log(`🖼️  [ImageAnalysis] Done — ${analysis.length} chars`);
       return res.json({ analysis });
     } catch (err) { console.error('🖼️  [ImageAnalysis] Error:', err.message); return res.status(500).json({ error: 'Image analysis failed', message: err.message }); }
@@ -1725,7 +1738,7 @@ module.exports = function createAiRoutes({ getCachedStore }) {
         const { data: anthropicData, provider } = await callAIForSuggestions(requestBody, ANTHROPIC_API_KEY, { skipDeepSeek: true, timeoutMs: PREMIUM_TIMEOUT_MS });
         console.timeEnd('✦ [AI] llmDetailed');
 
-        const rawContent = anthropicData.content?.[0]?.text || '';
+        const rawContent = extractText(anthropicData) || '';
         console.log(`✦ [AI] Detailed raw (first 300): ${rawContent.substring(0, 300)}`);
         warnIfTruncated(anthropicData, DETAILED_MAX_TOKENS, 'Detailed');
 
@@ -1880,7 +1893,7 @@ module.exports = function createAiRoutes({ getCachedStore }) {
       const { data: anthropicData, provider } = await callAIForSuggestions(buildBody(userPrompt), ANTHROPIC_API_KEY, callOpts);
       console.timeEnd('✦ [AI] llmSuggest');
 
-      const rawContent = anthropicData.content?.[0]?.text || '';
+      const rawContent = extractText(anthropicData) || '';
       console.log(`✦ [AI] Served by: ${provider} — Raw (first 300): ${rawContent.substring(0, 300)}`);
 
       // Token accounting is the difference between "the provider is down" and "the
@@ -1989,7 +2002,7 @@ module.exports = function createAiRoutes({ getCachedStore }) {
             const retry = await callAIForSuggestions(buildBody(userPrompt + STALL_RETRY_INSTRUCTION), ANTHROPIC_API_KEY, callOpts);
             console.timeEnd('✦ [AI] llmStallRetry');
             warnIfTruncated(retry.data, SUGGEST_MAX_TOKENS, 'Stall retry');
-            const retryParsed = parseAIResponse(retry.data.content?.[0]?.text || '', 'suggestions');
+            const retryParsed = parseAIResponse(extractText(retry.data) || '', 'suggestions');
             const retrySuggestions = Array.isArray(retryParsed?.suggestions) ? retryParsed.suggestions.slice(0, 3) : null;
             if (retrySuggestions?.length) {
               let cleaned = validateSuggestions(retrySuggestions, conversationState, chatHistory);

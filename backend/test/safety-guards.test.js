@@ -191,6 +191,79 @@ group('stableSystemPrefix', () => {
   });
 });
 
+// ── Anthropic request/response shape ────────────────────────────────────────
+// Both of these are regressions that reached production. The premium tier
+// stopped going through the DeepSeek shim, which exposed two assumptions that
+// had been safe only because the shim sat in the middle.
+
+group('stripNonAnthropicFields', () => {
+  test('removes shim-only hints that Anthropic rejects outright', () => {
+    const body = JSON.stringify({
+      model: 'claude-opus-5', max_tokens: 100, system: 's', messages: [],
+      deepseekTimeoutMs: 90000, deepseekModel: 'x', deepseekReasoningEffort: 'low',
+    });
+    const out = JSON.parse(ai.stripNonAnthropicFields(body));
+    assert.ok(!Object.keys(out).some(k => /^deepseek/i.test(k)),
+      'a deepseek* field reaching Anthropic 400s the whole request');
+  });
+
+  test('keeps every legitimate Anthropic field', () => {
+    const body = JSON.stringify({
+      model: 'claude-opus-5', max_tokens: 100, system: 's', messages: [{ role: 'user', content: 'x' }],
+      output_config: { effort: 'medium' }, deepseekTimeoutMs: 1,
+    });
+    const out = JSON.parse(ai.stripNonAnthropicFields(body));
+    assert.deepStrictEqual(
+      Object.keys(out).sort(),
+      ['max_tokens', 'messages', 'model', 'output_config', 'system'],
+    );
+  });
+
+  test('leaves a clean body byte-identical', () => {
+    const body = JSON.stringify({ model: 'claude-opus-5', max_tokens: 1, messages: [] });
+    assert.strictEqual(ai.stripNonAnthropicFields(body), body);
+  });
+
+  test('passes an unparseable body through rather than swallowing it', () => {
+    assert.strictEqual(ai.stripNonAnthropicFields('not json'), 'not json');
+  });
+});
+
+group('extractText', () => {
+  test('finds the reply when a thinking block comes first', () => {
+    const data = { content: [
+      { type: 'thinking', thinking: 'deliberating' },
+      { type: 'text', text: '{"suggestions":["a"]}' },
+    ] };
+    assert.strictEqual(ai.extractText(data), '{"suggestions":["a"]}',
+      'reading content[0].text here yields "" and silently serves templates');
+  });
+
+  test('still works when text is the only block', () => {
+    assert.strictEqual(ai.extractText({ content: [{ type: 'text', text: 'hello' }] }), 'hello');
+  });
+
+  test('joins a reply split across several text blocks', () => {
+    const data = { content: [{ type: 'text', text: '{"a":' }, { type: 'text', text: '1}' }] };
+    assert.strictEqual(ai.extractText(data), '{"a":1}');
+  });
+
+  test('returns empty string when there is no text block at all', () => {
+    assert.strictEqual(ai.extractText({ content: [{ type: 'thinking', thinking: 'x' }] }), '');
+  });
+
+  test('tolerates missing, null and malformed responses', () => {
+    assert.strictEqual(ai.extractText(null), '');
+    assert.strictEqual(ai.extractText({}), '');
+    assert.strictEqual(ai.extractText({ content: null }), '');
+    assert.strictEqual(ai.extractText({ content: [null, { type: 'text', text: 'ok' }] }), 'ok');
+  });
+
+  test('accepts a plain string content', () => {
+    assert.strictEqual(ai.extractText({ content: 'raw' }), 'raw');
+  });
+});
+
 // ── Model tier routing ──────────────────────────────────────────────────────
 // Routing must be conservative in one direction only: sending a routine turn to
 // the expensive model wastes money, but sending an angry customer to the cheap
