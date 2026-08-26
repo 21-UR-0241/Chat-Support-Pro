@@ -1043,6 +1043,7 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
     { color: '#f59e0b' },
     { color: '#3b82f6' },
     { color: '#8b5cf6' },
+    { color: '#10b981' },
   ];
 
   // Single source of truth for "was this response a canned template?"
@@ -1595,6 +1596,13 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
     [suggestions, serverVoiceFlags],
   );
 
+  // The model chooses how many angles to return, so an index left over from a
+  // previous, longer expansion can point past the end of this one.
+  useEffect(() => {
+    const count = detailedModal?.answers?.length ?? 0;
+    if (count > 0 && activeTab >= count) setActiveTab(0);
+  }, [detailedModal, activeTab]);
+
   const detailedFlags = useMemo(
     () => (detailedModal?.answers || []).map((_, i) => detailedModal.voiceFlags?.[i] || []),
     [detailedModal],
@@ -1942,17 +1950,23 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
                   retrying: detailedModal.loading,
                   modal: true,
                 })}
+                {/* One tab per angle the model actually chose, labelled with what
+                    that angle DOES. These used to be three fixed tabs reading
+                    "Reply 1/2/3" while the model's own labels were generated and
+                    then thrown away — so the agent had to open each one to find
+                    out how they differed, and the model was paying tokens to fill
+                    a fixed three-rung ladder nobody saw. */}
                 <div className="ai-modal-tabs">
-                  {[0, 1, 2].map(i => (
+                  {detailedModal.answers.map((a, i) => (
                     <button
                       key={i}
                       className={`ai-modal-tab ${activeTab === i ? 'active' : ''} ${detailedFlags[i]?.length ? 'ai-modal-tab--offvoice' : ''}`}
                       style={{ '--tab-color': TAB_COLORS[i]?.color }}
                       onClick={() => setActiveTab(i)}
-                      title={suggestions[i] || `Reply ${i + 1}`}
+                      title={a.why || a.label || `Reply ${i + 1}`}
                       type="button"
                     >
-                      <span className="ai-modal-tab-label">Reply {i + 1}</span>
+                      <span className="ai-modal-tab-label">{a.label || `Reply ${i + 1}`}</span>
                     </button>
                   ))}
                 </div>
@@ -1965,6 +1979,11 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
                   )}
                   {detailedModal.answers[activeTab] ? (
                     <>
+                      {detailedModal.answers[activeTab].why && (
+                        <div className="ai-modal-answer-why">
+                          {detailedModal.answers[activeTab].why}
+                        </div>
+                      )}
                       <div className="ai-modal-answer-block" style={{ '--answer-color': TAB_COLORS[activeTab]?.color }}>
                         {detailedModal.answers[activeTab].text}
                       </div>
