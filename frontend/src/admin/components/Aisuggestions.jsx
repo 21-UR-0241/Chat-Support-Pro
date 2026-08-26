@@ -1047,6 +1047,35 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
     return 300;
   };
 
+  // ── Suggestion cache ───────────────────────────────────────────────────────
+  // Switching conversation and coming back used to wipe the panel and cost a
+  // fresh generation: the effect below clears suggestions whenever the last
+  // message id differs from lastProcessedMsgId, and that ref was shared across
+  // every conversation, so any switch away and back always looked like a change.
+  //
+  // Keyed by conversation AND by the customer message the suggestions were
+  // written for. A cached set is restored only while that message is still the
+  // latest one — if the customer has said something since, the old suggestions
+  // are genuinely stale and regenerating is correct.
+  //
+  // Deliberately in memory rather than storage: a full page reload should start
+  // clean rather than restore drafts written against a conversation that may
+  // have moved on while the tab was closed.
+  const SUGGESTION_CACHE_MAX = 50;
+  const suggestionCache = useRef(new Map());
+
+  const cacheSuggestions = (convId, msgId, entry) => {
+    if (convId == null || msgId == null) return;
+    const cache = suggestionCache.current;
+    const key = `${convId}:${msgId}`;
+    cache.delete(key);            // re-insert so Map iteration order is LRU
+    cache.set(key, entry);
+    while (cache.size > SUGGESTION_CACHE_MAX) cache.delete(cache.keys().next().value);
+  };
+
+  const readCachedSuggestions = (convId, msgId) =>
+    (convId == null || msgId == null) ? null : suggestionCache.current.get(`${convId}:${msgId}`) || null;
+
   const [panelWidth, setPanelWidth] = useState(readStoredWidth);
   const [isResizing, setIsResizing] = useState(false);
   const panelRef = useRef(null);
@@ -1415,11 +1444,22 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
       const data = await postToAI(payload);
       if (reqConv !== activeConvRef.current) return;   // switched mid-request — bail
       const fellBack = isFallbackResponse(data);
+      const flags = mergeFlagMaps(flagsByIndex(data.voiceFlags), tellsByIndex(data.aiTells));
       setSuggestions(data.suggestions || []);
       setNeedsReview(data.needsReview || []);
       setIsFallback(fellBack);
       setFallbackInfo(fellBack ? describeFallback(data) : { code: null, message: null });
-      setServerVoiceFlags(mergeFlagMaps(flagsByIndex(data.voiceFlags), tellsByIndex(data.aiTells)));
+      setServerVoiceFlags(flags);
+
+      // Keep them so returning to this conversation shows the same suggestions
+      // instead of a blank panel and another generation.
+      cacheSuggestions(reqConv, lastProcessedMsgId.current, {
+        suggestions: data.suggestions || [],
+        needsReview: data.needsReview || [],
+        isFallback: fellBack,
+        fallbackInfo: fellBack ? describeFallback(data) : { code: null, message: null },
+        serverVoiceFlags: flags,
+      });
     } catch (err) {
       if (reqConv !== activeConvRef.current) return;
       setError(`Could not generate suggestions: ${err.message}`);
@@ -1541,6 +1581,23 @@ function AISuggestions({ conversation, messages, onSelectSuggestion }) {
 
     const msgId = String(lastCustomerMsg.id);
     if (msgId === lastProcessedMsgId.current) return;
+
+    // Coming back to a conversation whose suggestions we already have, with the
+    // customer not having said anything since: restore them rather than clearing
+    // the panel and charging for a regeneration of the same answer.
+    const cached = readCachedSuggestions(conversation?.id, msgId);
+    if (cached) {
+      lastProcessedMsgId.current = msgId;
+      setSuggestions(cached.suggestions);
+      setNeedsReview(cached.needsReview);
+      setIsFallback(cached.isFallback);
+      setFallbackInfo(cached.fallbackInfo);
+      setServerVoiceFlags(cached.serverVoiceFlags);
+      setContextLevel(assessContextQuality());
+      setReadyToGenerate(false);
+      setError(null);
+      return;
+    }
 
     const quality = assessContextQuality();
     setContextLevel(quality);
