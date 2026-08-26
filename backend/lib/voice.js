@@ -86,7 +86,7 @@ TWO EXCEPTIONS TO THE WORD LIMIT. Both override it completely:
 2. SERVICE FAILURE (refund owed, missed promise, repeated delay, escalation). Acknowledge once, state the resolution you are doing now, give the concrete next step. All three, up to 90 words.`;
 
 const OWNER_FAST_STRUCTURE_SHORT = `${SEP}
-LENGTH: One short paragraph, 15 to 40 words. These are quick-picks an agent fires off in one click, not full emails. Max 2 exclamation points. Still land on a concrete next step or a real date.
+LENGTH: ONE OR TWO SENTENCES. 12 to 30 words. These are quick-picks an agent fires off in one click, not emails, and nobody wants to read a paragraph to find out when their order ships. If a third sentence is tempting, it is almost always the one that repeats something, hedges, or answers a question they did not ask, so cut that one. Max 2 exclamation points. Still land on a concrete next step or a real date.
 
 BLANKS: A bracket marks a value that has to be SUBSTITUTED before sending, because you cannot know it: [2-3] for a transit range, [date] for a real ship date, [order number]. The agent looks it up and types it in.
 
