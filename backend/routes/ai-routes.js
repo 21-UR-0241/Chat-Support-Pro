@@ -454,17 +454,8 @@
 //                         : isRefundOrComplaint ? BRAIN_BUDGET.refund
 //                         : BRAIN_BUDGET.general;
 
-//       let analysisBlock = buildEnhancedAnalysisBlock(analysis, conversationState, recentContext);
+//       const analysisBlock = buildEnhancedAnalysisBlock(analysis, conversationState, recentContext);
 
-      // The signals, not just the label. "very_negative" tells the model to be
-      // sorry; "asked three times, three week wait, no reply" tells it what to be
-      // sorry ABOUT, which is the difference between a tailored reply and a
-      // generic apology. This is also what stops three consecutive turns in an
-      // escalating thread from producing three interchangeable drafts.
-      if (emotion.signals.length) {
-        analysisBlock += `\nWhy they feel that way: ${emotion.signals.join('; ')}.`;
-        analysisBlock += `\nRespond to these specifics. Do not apologise in the abstract.`;
-      }
 //       const customerContext = buildCustomerContext(customerName, customerEmail, conversationState);
 //       const policyBlock = buildPolicyBlock();
 
@@ -1567,7 +1558,17 @@ module.exports = function createAiRoutes({ getCachedStore }) {
                         : isRefundOrComplaint ? BRAIN_BUDGET.refund
                         : BRAIN_BUDGET.general;
 
-      const analysisBlock = buildEnhancedAnalysisBlock(analysis, conversationState, recentContext);
+      let analysisBlock = buildEnhancedAnalysisBlock(analysis, conversationState, recentContext);
+
+      // The signals, not just the label. "very_negative" tells the model to be
+      // sorry; "asked three times, three week wait, no reply" tells it what to be
+      // sorry ABOUT, which is the difference between a tailored reply and a
+      // generic apology. It is also what stops consecutive turns in an escalating
+      // thread producing interchangeable drafts.
+      if (emotion.signals.length) {
+        analysisBlock += `\nWhy they feel that way: ${emotion.signals.join('; ')}.`;
+        analysisBlock += `\nRespond to these specifics. Do not apologise in the abstract.`;
+      }
       const customerContext = buildCustomerContext(customerName, customerEmail, conversationState);
       const policyBlock = buildPolicyBlock();
 
