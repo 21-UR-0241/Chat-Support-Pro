@@ -2682,6 +2682,7 @@ const session = require('express-session');
 
 const db = require('./database');
 const shopify = require('./shopify-api');
+const { summariseOrders } = require('./lib/order-summary');
 const { rawBodyMiddleware, handleWebhook } = require('./webhooks');
 const { getAuthUrl, handleCallback } = require('./shopify-auth');
 const { initWebSocketServer, sendToConversation, broadcastToAgents, getWebSocketStats, closeAll } = require('./websocket-server');
@@ -2783,7 +2784,13 @@ function stripStoreSecrets(store) {
 }
 
 function safeStore(store) {
-  return snakeToCamel(stripStoreSecrets(store));
+  if (!store) return store;
+  // Derive the connection flag BEFORE the token is stripped. The admin panel
+  // needs to know whether a store completed the Shopify install in order to
+  // offer the connect flow, and it must never receive the token itself to
+  // find that out.
+  const shopifyConnected = !!store.access_token;
+  return { ...snakeToCamel(stripStoreSecrets(store)), shopifyConnected };
 }
 
 /** Run async fn over items with bounded concurrency. */
@@ -3903,6 +3910,48 @@ app.get('/api/customer-context/:storeId/:email', authenticateToken, async (req, 
     res.json(context);
   } catch (error) { console.error('Customer context error:', error.message); res.status(500).json({ error: 'Failed to fetch customer context' }); }
 });
+
+// Agent-facing order lookup. Returns the SUMMARISED shape (status in plain
+// words, tracking flattened to carrier/number/url) rather than raw Shopify JSON,
+// so the panel renders it directly and the normalising lives in one tested
+// place instead of in the component.
+//
+// Not fed to the AI. Suggestions are written from the brain data and the
+// transcript; order facts are shown to the agent, who decides what to say. That
+// keeps every existing guard against invented tracking numbers and dates intact.
+app.get('/api/orders/:storeId/:email', authenticateToken, async (req, res) => {
+  try {
+    const store = await getCachedStore(req.params.storeId);
+    if (!store) return res.status(404).json({ error: 'Store not found' });
+
+    const scope = await getRequestStoreScope(req);
+    if (!scope.canViewAll && !(store.store_group && scope.groups.includes(store.store_group))) {
+      return res.status(403).json({ error: 'You do not have access to this store' });
+    }
+
+    // A store that never completed the Shopify install has no token to call
+    // with. Say so plainly rather than surfacing a 401 from Shopify, so the
+    // panel can point at the connect flow instead of showing a broken state.
+    if (!store.access_token) {
+      return res.json({ connected: false, orders: [], reason: 'This store is not connected to Shopify yet.' });
+    }
+
+    const context = await shopify.getCustomerContext(store, req.params.email);
+    if (!context?.found) return res.json({ connected: true, orders: [], customerFound: false });
+
+    res.json({
+      connected: true,
+      customerFound: true,
+      ordersCount: context.ordersCount ?? 0,
+      totalSpent: context.totalSpent ?? null,
+      orders: summariseOrders(context.recentOrders),
+    });
+  } catch (error) {
+    console.error('Order lookup error:', error.message);
+    res.status(500).json({ error: 'Failed to look up orders' });
+  }
+});
+
 
 // ============ CUSTOMER & ORDER LOOKUP ============
 

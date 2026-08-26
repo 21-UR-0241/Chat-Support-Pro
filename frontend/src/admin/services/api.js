@@ -743,6 +743,15 @@ async searchConversations({ q, storeGroup, storeId } = {}) {
     );
   }
 
+  // ============ Orders (Shopify) ============
+
+  // Returns { connected, customerFound, orders: [...] }. `connected: false` means
+  // the store never completed the Shopify install — a normal state to render,
+  // not an error to throw on.
+  async getOrders(storeId, email) {
+    return this.fetch(`/api/orders/${encodeURIComponent(storeId)}/${encodeURIComponent(email)}`);
+  }
+
   // ============ Messages ============
 
   async getMessages(conversationId) {
