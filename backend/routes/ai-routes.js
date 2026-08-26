@@ -454,7 +454,17 @@
 //                         : isRefundOrComplaint ? BRAIN_BUDGET.refund
 //                         : BRAIN_BUDGET.general;
 
-//       const analysisBlock = buildEnhancedAnalysisBlock(analysis, conversationState, recentContext);
+//       let analysisBlock = buildEnhancedAnalysisBlock(analysis, conversationState, recentContext);
+
+      // The signals, not just the label. "very_negative" tells the model to be
+      // sorry; "asked three times, three week wait, no reply" tells it what to be
+      // sorry ABOUT, which is the difference between a tailored reply and a
+      // generic apology. This is also what stops three consecutive turns in an
+      // escalating thread from producing three interchangeable drafts.
+      if (emotion.signals.length) {
+        analysisBlock += `\nWhy they feel that way: ${emotion.signals.join('; ')}.`;
+        analysisBlock += `\nRespond to these specifics. Do not apologise in the abstract.`;
+      }
 //       const customerContext = buildCustomerContext(customerName, customerEmail, conversationState);
 //       const policyBlock = buildPolicyBlock();
 
@@ -1072,6 +1082,7 @@ const {
   buildCustomerContext,
   buildPolicyBlock,
   analyzeConversationState,
+  detectEmotion,
   validateSuggestions,
   validateSafetyDosing,
   generateSmartFallbackSuggestions,
@@ -1488,6 +1499,24 @@ module.exports = function createAiRoutes({ getCachedStore }) {
       }
 
       const conversationState = analyzeConversationState(chatHistory, clientMessage, analysis);
+
+      // Emotion is read HERE, from the transcript, not taken from the client.
+      // The panel used to compute it by counting fifteen adjectives in the
+      // browser and post it up with the request, which meant a customer writing
+      // "three weeks, third time asking, no reply" arrived labelled 'neutral'
+      // and every escalation path downstream stayed switched off. The client
+      // value is still accepted as a floor so a caller that knows something the
+      // transcript does not cannot be overruled downward.
+      const emotion = detectEmotion(chatHistory, clientMessage, conversationState);
+      const clientSentiment = conversationState?.sentiment || analysis?.sentiment || 'neutral';
+      const EMOTION_RANK = { very_negative: 0, negative: 1, neutral: 2, positive: 3, very_positive: 4 };
+      const sentiment = (EMOTION_RANK[clientSentiment] ?? 2) < (EMOTION_RANK[emotion.level] ?? 2)
+        ? clientSentiment
+        : emotion.level;
+      if (emotion.signals.length) {
+        console.log(`✦ [AI] emotion: ${emotion.level} (score ${emotion.score}) — ${emotion.signals.join('; ')}${sentiment !== emotion.level ? ` [client said ${clientSentiment}, using that]` : ''}`);
+      }
+
       const isTrustQuestion = detectTrustQuestion(clientMessage);
       const isSafetyDosing = detectSafetyDosingQuestion(clientMessage, chatHistory);
       const isRefundOrComplaint = REFUND_COMPLAINT_RE.test(clientMessage);
@@ -1740,7 +1769,7 @@ module.exports = function createAiRoutes({ getCachedStore }) {
       const systemPrompt = buildSystemPrompt(
         storeName, customerContext, analysisBlock, policyBlock, contextQuality, messageRichness,
         brainContext, brainSettings, adminStyleBlock, imageAnalysis,
-        conversationState?.sentiment || analysis?.sentiment || 'neutral',
+        sentiment,
         responseExamples, isTrustQuestion, isSafetyDosing, brainHasProductAnswer,
         voiceProfile
       ) + (isRefundOrComplaint ? COMPENSATION_BLOCK : '') + JSON_HARDENING_SUFFIX;

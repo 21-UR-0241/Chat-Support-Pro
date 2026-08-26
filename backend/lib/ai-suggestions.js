@@ -2912,6 +2912,144 @@ right person now"), don't recite ownership theatre.`;
 
 // ============ CONVERSATION STATE ============
 
+// ============ EMOTION ============
+
+/**
+ * Read the customer's emotional state from the conversation.
+ *
+ * This used to be computed in the browser by counting how many of fifteen
+ * adjectives ("angry", "furious", "ridiculous"...) appeared in the last few
+ * messages. That misses the way real customers actually express anger, which is
+ * usually through FACTS AND REPETITION rather than adjectives:
+ *
+ *   "I've been waiting three weeks and nobody has replied.
+ *    This is the third time I've asked."
+ *
+ * scores zero on an adjective count, so every downstream escalation path —
+ * SERVICE_FAILURE_BLOCK, the very_negative prompt label, detectServiceFailure —
+ * stayed disarmed for exactly the customer who most needed them.
+ *
+ * So: weigh behaviour alongside vocabulary. Repetition, unanswered messages,
+ * elapsed-time claims and escalation threats all carry more signal than whether
+ * someone reached for the word "frustrated".
+ *
+ * Returns the same five labels the rest of the pipeline already expects, plus
+ * the signals behind the verdict. The signals matter as much as the label: fed
+ * into the prompt they let the model respond to "asked 3 times, 19 days, no
+ * reply since Tuesday" instead of to a bare adjective, which is the difference
+ * between a tailored reply and a canned apology.
+ *
+ * @returns {{ level: string, score: number, signals: string[] }}
+ */
+
+const _CAPS_WORD_RE = /\b[A-Z]{4,}\b/g;
+const _CAPS_ALLOWLIST = new Set(['ASAP', 'HELP', 'FEDEX', 'USPS', 'DHL', 'UPS', 'COD', 'PLEASE']);
+
+// Vocabulary. Kept, but no longer the whole story.
+const _ANGRY_WORDS = /\b(angry|furious|livid|upset|frustrat\w*|annoyed|disgusted|disgusting|pathetic|useless|terrible|horrible|awful|worst|unacceptable|ridiculous|appalling|outrageous|disappointed|fed up|sick of)\b/i;
+const _PROFANITY = /\b(wtf|bullshit|bs|damn|hell|crap|screwed|scam|fraud|thieves|stealing|robbed)\b/i;
+const _POSITIVE_WORDS = /\b(thank you|thanks|thankyou|appreciate|grateful|great|awesome|perfect|excellent|amazing|wonderful|brilliant|love it|lifesaver|helpful|sorted|solved|resolved)\b/i;
+
+// Behaviour. This is where the real signal is.
+const _REPETITION = /\b(again|still|already (asked|told|sent|emailed)|second time|third time|fourth time|\d+(?:st|nd|rd|th) time|multiple times|several times|keep asking|asked (?:you )?(?:twice|three times|repeatedly)|as i (?:said|mentioned|told you))\b/i;
+const _NO_RESPONSE = /\b(no (?:one|body) (?:has )?(?:replied|responded|answered|got back)|nobody(?:'s| has)? (?:replied|responded|answered)|never (?:heard|got|received) (?:back|a reply|any response)|haven'?t heard (?:back|from)|no (?:reply|response|answer|update)|ignoring me|being ignored)\b/i;
+// Customers write "three weeks" at least as often as "3 weeks", and the spelled
+// form was invisible to the old digit-only pattern — which is exactly the
+// register the calmest, angriest complaints are written in.
+const _ELAPSED = /\b(\d+|a|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*(day|days|week|weeks|month|months)\b/i;
+const _WORD_NUMBERS = { a: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6,
+                        seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
+
+// Split by severity. Asking for a manager and threatening a chargeback are both
+// escalation, but only one of them means the account is about to be lost.
+const _ESCALATION_SEVERE = /\b(chargeback|dispute the charge|lawyer|attorney|legal action|sue|lawsuit|bbb|better business bureau|attorney general|trading standards|consumer protection)\b/i;
+const _ESCALATION_SOFT = /\b(manager|supervisor|escalate|escalation|leave a review|1 star|one star|report you|trustpilot)\b/i;
+const _DEMAND = /\b(i want (?:a )?refund|refund me|give me my money|cancel (?:my|the) order|i'?m done|last chance|final warning|unless you)\b/i;
+
+function detectEmotion(chatHistory = '', clientMessage = '', conversationState = null) {
+  const msg = String(clientMessage || '');
+  const history = String(chatHistory || '');
+  const signals = [];
+  let score = 0;
+
+  // ── Vocabulary ────────────────────────────────────────────────────────────
+  if (_ANGRY_WORDS.test(msg)) { score += 2; signals.push('uses angry language'); }
+  if (_PROFANITY.test(msg))   { score += 2; signals.push('profanity or accusation of bad faith'); }
+
+  // ── Repetition: they have had to ask more than once ───────────────────────
+  if (_REPETITION.test(msg)) { score += 3; signals.push('says they have asked before'); }
+
+  // ── Silence: we did not answer ────────────────────────────────────────────
+  if (_NO_RESPONSE.test(msg)) { score += 3; signals.push('says nobody has responded'); }
+
+  // ── Elapsed time: a long wait is a grievance whatever tone it is stated in ─
+  const elapsed = msg.match(_ELAPSED);
+  if (elapsed) {
+    const raw = elapsed[1].toLowerCase();
+    const n = _WORD_NUMBERS[raw] ?? parseInt(raw, 10);
+    const unit = elapsed[2].toLowerCase();
+    const days = unit.startsWith('week') ? n * 7 : unit.startsWith('month') ? n * 30 : n;
+    if (days >= 21)     { score += 3; signals.push(`cites a ${elapsed[0]} wait`); }
+    else if (days >= 7) { score += 2; signals.push(`cites a ${elapsed[0]} wait`); }
+    else if (days >= 3) { score += 1; signals.push(`cites a ${elapsed[0]} wait`); }
+  }
+
+  // ── Escalation and demands ────────────────────────────────────────────────
+  if (_ESCALATION_SEVERE.test(msg)) { score += 5; signals.push('threatens chargeback or legal action'); }
+  else if (_ESCALATION_SOFT.test(msg)) { score += 3; signals.push('asks to escalate'); }
+  if (_DEMAND.test(msg))     { score += 2; signals.push('demands a refund or cancellation'); }
+
+  // ── Shouting ──────────────────────────────────────────────────────────────
+  const caps = (msg.match(_CAPS_WORD_RE) || []).filter(w => !_CAPS_ALLOWLIST.has(w));
+  if (caps.length >= 2) { score += 2; signals.push('writing in capitals'); }
+  else if (caps.length === 1) { score += 1; signals.push('a word in capitals'); }
+
+  // ── Punctuation ───────────────────────────────────────────────────────────
+  if (/[!?]{2,}/.test(msg)) { score += 1; signals.push('emphatic punctuation'); }
+
+  // ── Structural: consecutive unanswered customer messages ──────────────────
+  // Someone sending three messages in a row with no reply between them is
+  // escalating whether or not they have said so.
+  const lines = history.split('\n').map(l => l.trim()).filter(Boolean);
+  let trailingCustomer = 0;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (/^(customer|client):/i.test(lines[i])) trailingCustomer++;
+    else if (/^(agent|support):/i.test(lines[i])) break;
+  }
+  if (trailingCustomer >= 3)      { score += 3; signals.push(`${trailingCustomer} unanswered messages in a row`); }
+  else if (trailingCustomer === 2) { score += 2; signals.push('two unanswered messages in a row'); }
+
+  // ── Length of the thread ──────────────────────────────────────────────────
+  // A long thread is not itself anger, but it raises the cost of getting the
+  // next reply wrong, so it nudges rather than jumps.
+  if (conversationState?.isLongConversation) { score += 1; signals.push('long-running conversation'); }
+  if (conversationState?.isEscalating)       { score += 3; signals.push('escalation keywords in the latest message'); }
+
+  // ── Positive counterweight ────────────────────────────────────────────────
+  let positive = 0;
+  if (_POSITIVE_WORDS.test(msg)) positive += 1;
+  if (/\b(thank you so much|thanks so much|really appreciate|you'?re (?:a )?(?:the best|amazing|great)|perfect,? thank)\b/i.test(msg)) positive += 1;
+
+  // Gratitude only reads as gratitude when there is no grievance beside it.
+  // "Thanks, but this is the third time I've asked" is not a happy customer.
+  if (positive > 0 && score === 0) {
+    return {
+      level: positive >= 2 ? 'very_positive' : 'positive',
+      score: -positive,
+      signals: [positive >= 2 ? 'strong thanks' : 'thanks'],
+    };
+  }
+
+  // A single weak signal ("long-running conversation") is not a grievance, so
+  // the negative band starts at 3 — roughly one strong behavioural signal, or
+  // two weak ones together.
+  const level = score >= 7 ? 'very_negative'
+              : score >= 3 ? 'negative'
+              : 'neutral';
+
+  return { level, score, signals };
+}
+
 function analyzeConversationState(chatHistory, clientMessage, analysis) {
   const fullText = `${chatHistory || ''} ${clientMessage || ''}`.toLowerCase();
   const messages = (chatHistory || '').split('\n').filter(m => m.trim());
@@ -3211,6 +3349,7 @@ module.exports = {
   buildPolicyBlock,
   parseAIResponse,
   analyzeConversationState,
+  detectEmotion,
   validateSuggestions,
   validateSafetyDosing,
   generateSmartFallbackSuggestionsRaw,

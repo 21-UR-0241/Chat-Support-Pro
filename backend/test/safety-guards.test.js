@@ -142,6 +142,66 @@ group('detectStall', () => {
   });
 });
 
+// ── Emotion ─────────────────────────────────────────────────────────────────
+// The regression that motivated moving this off the browser: real anger is
+// usually expressed in facts and repetition, not adjectives.
+
+group('detectEmotion', () => {
+  test('reads anger expressed as facts, with no angry words at all', () => {
+    const msg = "I've been waiting three weeks and nobody has replied. This is the third time I've asked.";
+    const { level, signals } = ai.detectEmotion('', msg, null);
+    assert.strictEqual(level, 'very_negative',
+      'the calmly-worded complaint is the one that most needs escalation');
+    assert.ok(signals.length >= 2, 'the reasons should be reported, not just the label');
+  });
+
+  test('still reads anger expressed as adjectives', () => {
+    const { level } = ai.detectEmotion('', 'This is ridiculous and completely unacceptable!!', null);
+    assert.ok(level === 'negative' || level === 'very_negative');
+  });
+
+  test('understands spelled-out durations', () => {
+    const digits = ai.detectEmotion('', 'Its been 3 weeks now.', null);
+    const words  = ai.detectEmotion('', 'Its been three weeks now.', null);
+    assert.strictEqual(words.score, digits.score, '"three weeks" must weigh the same as "3 weeks"');
+  });
+
+  test('weighs a legal threat above a request for a manager', () => {
+    const legal   = ai.detectEmotion('', 'I am contacting my lawyer about this.', null);
+    const manager = ai.detectEmotion('', 'Can I speak to a manager?', null);
+    assert.ok(legal.score > manager.score, 'a chargeback threat is not the same as asking to escalate');
+  });
+
+  test('counts consecutive unanswered customer messages', () => {
+    const history = 'Customer: hello\nCustomer: are you there\nCustomer: still waiting';
+    const { signals } = ai.detectEmotion(history, 'any update?', null);
+    assert.ok(signals.some(x => /unanswered/i.test(x)), 'a stack of unanswered messages is itself a signal');
+  });
+
+  test('leaves a routine question neutral', () => {
+    assert.strictEqual(ai.detectEmotion('', 'Hi, when does my order ship?', null).level, 'neutral');
+  });
+
+  test('does not let one weak signal flip the label', () => {
+    const { level } = ai.detectEmotion('', 'Its been 4 days, any news?', null);
+    assert.strictEqual(level, 'neutral', 'a short wait politely asked about is not a grievance');
+  });
+
+  test('reads plain gratitude as positive', () => {
+    assert.strictEqual(ai.detectEmotion('', 'Thank you so much, that is perfect!', null).level, 'very_positive');
+  });
+
+  test('does not read gratitude beside a grievance as positive', () => {
+    const { level } = ai.detectEmotion('', "Thanks, but this is the second time I've asked.", null);
+    assert.strictEqual(level, 'negative', 'politeness is not satisfaction');
+  });
+
+  test('tolerates empty input', () => {
+    assert.strictEqual(ai.detectEmotion('', '', null).level, 'neutral');
+    assert.strictEqual(ai.detectEmotion(null, null, null).level, 'neutral');
+  });
+});
+
 // ── AI tells: detect, never rewrite ─────────────────────────────────────────
 // The contract that replaced the old scrubber. detectAITells reports; the text
 // it was given must come back byte-identical from normalizeTypography.
