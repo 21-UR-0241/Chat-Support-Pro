@@ -142,6 +142,79 @@ group('detectStall', () => {
   });
 });
 
+// ── Warmth gating ───────────────────────────────────────────────────────────
+// Levity is a liability on a dosing question, a trust challenge, or with a
+// customer who is already unhappy: a joke there reads as not taking them
+// seriously. These lock the gate shut on every such turn.
+
+group('warmth vs no-levity', () => {
+  const voice = require('../lib/voice');
+  const profile = voice.resolveVoiceProfile({});
+  const build = (o = {}) => ai.buildSystemPrompt(
+    'S', '', o.analysis ?? '', '', 'minimal', 'brief', '', {}, '', '',
+    o.sentiment ?? 'neutral', [], o.trust ?? false, o.dosing ?? false, false, profile,
+  );
+  const isWarm = (t) => t.includes('WARMTH — this one is safe');
+  const isCold = (t) => t.includes('NO LEVITY ON THIS ONE');
+
+  test('allows warmth on a routine neutral turn', () => {
+    assert.ok(isWarm(build()));
+  });
+
+  test('allows warmth with a happy customer', () => {
+    assert.ok(isWarm(build({ sentiment: 'positive' })));
+  });
+
+  test('forbids levity on a dosing question', () => {
+    const t = build({ dosing: true });
+    assert.ok(isCold(t) && !isWarm(t), 'a joke on a dosing turn is a safety problem, not a tone one');
+  });
+
+  test('forbids levity on a trust challenge', () => {
+    assert.ok(isCold(build({ trust: true })));
+  });
+
+  test('forbids levity with an unhappy customer', () => {
+    assert.ok(isCold(build({ sentiment: 'negative' })));
+  });
+
+  test('forbids levity with an angry customer', () => {
+    assert.ok(isCold(build({ sentiment: 'very_negative' })));
+  });
+
+  test('always emits exactly one of the two, never neither', () => {
+    for (const o of [{}, { dosing: true }, { trust: true }, { sentiment: 'very_negative' }, { sentiment: 'very_positive' }]) {
+      const t = build(o);
+      assert.strictEqual(isWarm(t) !== isCold(t), true, `ambiguous warmth state for ${JSON.stringify(o)}`);
+    }
+  });
+});
+
+group('reply length rules', () => {
+  const voice = require('../lib/voice');
+  const profile = voice.resolveVoiceProfile({});
+
+  test('the quick-pick rule asks for one or two sentences', () => {
+    assert.match(profile.structureShort, /ONE OR TWO SENTENCES/);
+  });
+
+  test('dosing math is still exempt from the word limit', () => {
+    assert.match(profile.structureShort, /RECONSTITUTION \/ DOSING MATH/i,
+      'trimming a dose to hit a word count is worse than a long reply');
+  });
+
+  test('service failure is still exempt from the word limit', () => {
+    assert.match(profile.structureShort, /SERVICE FAILURE/i);
+  });
+
+  test('a complete dosing reply is not flagged on length', () => {
+    const dosing = 'Reconstitute the 10mg vial with 2.5mL of BAC water for 4mg/mL, which is 25 units on an insulin syringe.';
+    const flags = voice.lintVoice(dosing, profile, { detailed: true });
+    assert.ok(!flags.some(f => f.code === 'length'),
+      'flagging a complete dose on length trains agents to cut numbers out of it');
+  });
+});
+
 // ── Prompt cache prefix ─────────────────────────────────────────────────────
 // The cache split is only safe while the prompt genuinely starts with this
 // prefix. If buildSystemPrompt's return is ever reordered, these fail here
