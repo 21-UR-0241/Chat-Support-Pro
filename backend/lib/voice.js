@@ -323,7 +323,15 @@ const CAPS_ALLOW = new Set([
  * you ship a wrong promise. Whatever it can't safely fix comes back from
  * lintVoice() instead.
  */
-function scrubVoice(text, profile) {
+/**
+ * @param {object} [opts]
+ * @param {boolean} [opts.isContinuation]  True when the agent has already
+ *   replied in this thread. The opener repair below is skipped in that case: a
+ *   greeting belongs on the first reply of a conversation, not the ninth, and
+ *   prepending one to every suggestion is what made the panel read as though it
+ *   had not been following along.
+ */
+function scrubVoice(text, profile, { isContinuation = false } = {}) {
   if (!profile?.scrub) return text;
   if (!text || typeof text !== 'string') return text;
   let t = text;
@@ -332,7 +340,7 @@ function scrubVoice(text, profile) {
   // Three cases: right greeting already there, a DIFFERENT greeting to convert
   // (keeping the customer's name, since "Hello Linda!" also satisfies the
   // use-their-name-once rule), or none at all.
-  if (profile.openerFix && profile.lint?.requireOpener && !profile.lint.requireOpener.test(t.trim())) {
+  if (!isContinuation && profile.openerFix && profile.lint?.requireOpener && !profile.lint.requireOpener.test(t.trim())) {
     // Greeting match is case-insensitive; the NAME check that follows is not.
     // With /i on the whole pattern, [A-Z][a-z]+ also matched lowercase words, so
     // "Hey there" read "there" as a name and "Hey so its packed" would have become
@@ -381,7 +389,7 @@ function scrubVoice(text, profile) {
  *
  * @returns {Array<{code:string,label:string,detail?:string}>}
  */
-function lintVoice(text, profile, { detailed = false } = {}) {
+function lintVoice(text, profile, { detailed = false, isContinuation = false } = {}) {
   const cfg = profile?.lint;
   if (!cfg) return [];
   if (!text || typeof text !== 'string') return [];
@@ -482,7 +490,7 @@ function lintVoice(text, profile, { detailed = false } = {}) {
   // Opener is checked in short mode only when the profile says it is mandatory
   // for every reply. Word count and paragraph count stay long-mode only: a
   // one-line quick-pick would fail both by design.
-  if (cfg.requireOpener && (detailed || cfg.requireOpenerShort) && !cfg.requireOpener.test(t)) {
+  if (!isContinuation && cfg.requireOpener && (detailed || cfg.requireOpenerShort) && !cfg.requireOpener.test(t)) {
     issues.push({ code: 'opener', label: 'wrong opener' });
   }
 

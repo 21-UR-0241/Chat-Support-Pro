@@ -1078,6 +1078,7 @@ const {
   extractText,
   detectEmotion,
   extractAgentCommitments,
+  CONTINUATION_BLOCK,
   validateSuggestions,
   validateSafetyDosing,
   generateSmartFallbackSuggestions,
@@ -1550,6 +1551,12 @@ module.exports = function createAiRoutes({ getCachedStore }) {
       // and every escalation path downstream stayed switched off. The client
       // value is still accepted as a floor so a caller that knows something the
       // transcript does not cannot be overruled downward.
+      // Has the agent already spoken in this thread? A greeting belongs on the
+      // first reply and nowhere else, and lastAgentMessage is '' until there is
+      // one, so this needs no extra parsing of the transcript.
+      const isContinuation = !!(conversationState?.lastAgentMessage || '').trim();
+      if (isContinuation) console.log('✦ [AI] mid-conversation — greeting suppressed');
+
       const emotion = detectEmotion(chatHistory, clientMessage, conversationState);
       const clientSentiment = conversationState?.sentiment || analysis?.sentiment || 'neutral';
       const EMOTION_RANK = { very_negative: 0, negative: 1, neutral: 2, positive: 3, very_positive: 4 };
@@ -1731,7 +1738,7 @@ module.exports = function createAiRoutes({ getCachedStore }) {
         const structureSection = voiceProfile.structureLong || '';
         const fallbackLength   = structureSection ? '' : '\n\nWrite three distinct, detailed replies in flowing paragraphs. No bullet points.';
 
-        const systemPrompt = `${trustSystemSection}${safetySystemSection}${compSystemSection}${brainSystemSection}${imageSystemSection}${adminStyleBlock ? `${adminStyleBlock}\n\n` : ''}${voiceSection}${examplesSection}${structureSection}\nYou are ghostwriting replies for a human support agent. All three styles must sound like the SAME person.\n\nNO fake time promises: state a shipping, handling, or delivery timeframe ONLY if it appears in the brain data above, quoted exactly, otherwise put a [bracketed placeholder] there. Never invent tracking status, stock, or pickup options.\n\nNever attribute a statement, symptom, or concern to the customer that they did not actually make. Never name a product, price, or free item that is not in the brain data.${fallbackLength}\n\n${policyBlock ? `Policies:\n${policyBlock}\n` : ''}${customerContext ? `Customer context:\n${customerContext}\n` : ''}${analysisBlock ? `Conversation analysis:\n${analysisBlock}\n` : ''}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nPICK THE ANGLES YOURSELF\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nGive the agent 2 to 4 genuinely different ways to handle THIS message. Not\nrewordings of one reply, different decisions about what to do.\n\nChoose the angles from the situation in front of you. A customer who has waited\nthree weeks needs different options than someone asking which vial to buy: maybe\n\"refund now\" versus \"reship today\", maybe \"answer the question\" versus \"answer it\nand flag the thing they have not thought of yet\". If only two angles are honestly\navailable, give two. Padding to a fixed count is what makes suggestions feel\ncanned.\n\nLabel each one with what it actually DOES, in 1 to 3 plain words the agent can\nscan: \"Refund now\", \"Reship today\", \"Answer + upsell\", \"Hold for stock\". Never\nreuse a generic ladder like Empathetic / Thorough / Above and Beyond, and never\nlabel one by how long it is.\n\nAdd \"why\" for each: one short line on when the agent should pick that one.\n\nEvery angle still obeys every rule above. Different strategies, one voice, and\nnothing invented that the brain data does not authorise.\n\nYour response MUST END with the JSON object and nothing after it. Return ONLY valid JSON:\n{\n  "detailedAnswers": [\n    { "label": "...", "why": "...", "text": "..." }\n  ]\n}`;
+        const systemPrompt = `${trustSystemSection}${safetySystemSection}${compSystemSection}${brainSystemSection}${imageSystemSection}${adminStyleBlock ? `${adminStyleBlock}\n\n` : ''}${voiceSection}${examplesSection}${structureSection}\nYou are ghostwriting replies for a human support agent. All three styles must sound like the SAME person.\n\nNO fake time promises: state a shipping, handling, or delivery timeframe ONLY if it appears in the brain data above, quoted exactly, otherwise put a [bracketed placeholder] there. Never invent tracking status, stock, or pickup options.\n\nNever attribute a statement, symptom, or concern to the customer that they did not actually make. Never name a product, price, or free item that is not in the brain data.${fallbackLength}\n\n${policyBlock ? `Policies:\n${policyBlock}\n` : ''}${customerContext ? `Customer context:\n${customerContext}\n` : ''}${analysisBlock ? `Conversation analysis:\n${analysisBlock}\n` : ''}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nPICK THE ANGLES YOURSELF\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nGive the agent 2 to 4 genuinely different ways to handle THIS message. Not\nrewordings of one reply, different decisions about what to do.\n\nChoose the angles from the situation in front of you. A customer who has waited\nthree weeks needs different options than someone asking which vial to buy: maybe\n\"refund now\" versus \"reship today\", maybe \"answer the question\" versus \"answer it\nand flag the thing they have not thought of yet\". If only two angles are honestly\navailable, give two. Padding to a fixed count is what makes suggestions feel\ncanned.\n\nLabel each one with what it actually DOES, in 1 to 3 plain words the agent can\nscan: \"Refund now\", \"Reship today\", \"Answer + upsell\", \"Hold for stock\". Never\nreuse a generic ladder like Empathetic / Thorough / Above and Beyond, and never\nlabel one by how long it is.\n\nAdd \"why\" for each: one short line on when the agent should pick that one.\n\nEvery angle still obeys every rule above. Different strategies, one voice, and\nnothing invented that the brain data does not authorise.\n\nYour response MUST END with the JSON object and nothing after it. Return ONLY valid JSON:\n{\n  "detailedAnswers": [\n    { "label": "...", "why": "...", "text": "..." }\n  ]\n}` + (isContinuation ? CONTINUATION_BLOCK : '');
 
         const userPrompt = `${brainUserBlock}Conversation history:\n${chatHistory || '(none)'}\n\nCustomer's message:\n${clientMessage}${adminNote ? `\nAdmin note: ${adminNote}` : ''}\n\nWrite 3 detailed replies. Your response must END with the JSON, nothing after it.`;
         // Detailed mode keeps the reasoning model: the agent chose to expand, so a
@@ -1805,8 +1812,8 @@ module.exports = function createAiRoutes({ getCachedStore }) {
         const detailedAiTells = [];
         detailedAnswers.forEach((a, i) => {
           if (!a?.text) return;
-          a.text = scrubVoice(normalizeTypography(a.text), voiceProfile);
-          const flags = lintVoice(a.text, voiceProfile, { detailed: true });
+          a.text = scrubVoice(normalizeTypography(a.text), voiceProfile, { isContinuation });
+          const flags = lintVoice(a.text, voiceProfile, { detailed: true, isContinuation });
           if (flags.length) {
             detailedVoiceFlags.push({ index: i, label: a.label, flags });
             console.warn(`🗣️  [Voice] detailed[${i}] ${a.label}: ${flags.map(f => f.label).join(', ')}`);
@@ -1841,7 +1848,7 @@ module.exports = function createAiRoutes({ getCachedStore }) {
         sentiment,
         responseExamples, isTrustQuestion, isSafetyDosing, brainHasProductAnswer,
         voiceProfile
-      ) + (isRefundOrComplaint ? COMPENSATION_BLOCK : '') + JSON_HARDENING_SUFFIX;
+      ) + (isRefundOrComplaint ? COMPENSATION_BLOCK : '') + (isContinuation ? CONTINUATION_BLOCK : '') + JSON_HARDENING_SUFFIX;
 
       const userPrompt = buildUserPrompt(
         chatHistory, clientMessage, messageEdited, adminNote, conversationState, recentContext,
@@ -2093,11 +2100,11 @@ module.exports = function createAiRoutes({ getCachedStore }) {
       // Runs after every safety guard so a scrub can never alter text a guard
       // already cleared. scrubVoice only strips formatting and filler; anything
       // it cannot safely fix comes back as a flag for the agent to eyeball.
-      suggestions = suggestions.map(s => scrubVoice(normalizeTypography(s), voiceProfile));
+      suggestions = suggestions.map(s => scrubVoice(normalizeTypography(s), voiceProfile, { isContinuation }));
 
       const voiceFlags = [];
       suggestions.forEach((s, i) => {
-        const flags = lintVoice(s, voiceProfile);
+        const flags = lintVoice(s, voiceProfile, { isContinuation });
         if (flags.length) {
           voiceFlags.push({ index: i, flags });
           console.warn(`🗣️  [Voice] suggestion[${i}]: ${flags.map(f => f.detail ? `${f.label} (${f.detail})` : f.label).join(', ')}`);

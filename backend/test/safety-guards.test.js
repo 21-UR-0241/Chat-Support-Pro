@@ -142,6 +142,49 @@ group('detectStall', () => {
   });
 });
 
+// ── Greeting placement ──────────────────────────────────────────────────────
+// The owner-fast voice comes from a doc about answering a NEW message, so it
+// mandates "Hello!" on every reply and scrubVoice prepended one when missing.
+// Correct on the first reply of a thread; on the ninth it is the clearest
+// possible signal that nobody read the conversation.
+
+group('greeting placement', () => {
+  const voice = require('../lib/voice');
+  const profile = voice.resolveVoiceProfile({});
+  const draft = 'Nothing was charged, so theres nothing to cancel.';
+
+  test('adds the greeting on the first reply of a thread', () => {
+    assert.match(voice.scrubVoice(draft, profile, { isContinuation: false }), /^Hello/);
+  });
+
+  test('does NOT add a greeting mid-conversation', () => {
+    const out = voice.scrubVoice(draft, profile, { isContinuation: true });
+    assert.strictEqual(out, draft, 'a reply mid-thread must be left exactly as written');
+  });
+
+  test('defaults to first-reply behaviour when not told', () => {
+    assert.match(voice.scrubVoice(draft, profile), /^Hello/,
+      'omitting the flag must not silently suppress the greeting on turn one');
+  });
+
+  test('flags a missing greeting only on the first reply', () => {
+    const first = voice.lintVoice(draft, profile, { isContinuation: false }).map(f => f.code);
+    const mid   = voice.lintVoice(draft, profile, { isContinuation: true }).map(f => f.code);
+    assert.ok(first.includes('opener'), 'turn one should still want a greeting');
+    assert.ok(!mid.includes('opener'), 'flagging a missing greeting mid-thread is noise');
+  });
+
+  test('does not strip a greeting the model deliberately wrote first-turn', () => {
+    const greeted = 'Hello! Nothing was charged.';
+    assert.strictEqual(voice.scrubVoice(greeted, profile, { isContinuation: false }), greeted);
+  });
+
+  test('the prompt block tells the model not to greet', () => {
+    assert.match(ai.CONTINUATION_BLOCK, /DO NOT GREET/i);
+    assert.match(ai.CONTINUATION_BLOCK, /not the first reply/i);
+  });
+});
+
 // ── Warmth gating ───────────────────────────────────────────────────────────
 // Levity is a liability on a dosing question, a trust challenge, or with a
 // customer who is already unhappy: a joke there reads as not taking them

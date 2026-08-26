@@ -2635,6 +2635,32 @@ NEVER:
 // there reads as not taking them seriously, which is the single fastest way to
 // turn an irritated customer into an escalating one. The caller only includes
 // this block when none of those apply.
+// ── MID-CONVERSATION ────────────────────────────────────────────────────────
+// The owner-fast voice is written from a doc about ANSWERING A NEW MESSAGE, so
+// it mandates "Hello!" on every reply and every worked example opens with one.
+// That is right for the first reply of a thread and wrong for every reply after
+// it: greeting someone you have been talking to for twenty minutes is the
+// clearest possible signal that nobody read the conversation.
+//
+// Appended after the voice block (and therefore after the cached prefix), so it
+// overrides the opener rule only on the turns where that rule does not apply.
+const CONTINUATION_BLOCK = `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+THIS IS NOT THE FIRST REPLY — DO NOT GREET
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+You are already mid-conversation with this person. The rule above about opening
+with "Hello!" applies to the FIRST reply in a thread only, and this is not it.
+
+Do NOT open with "Hello", "Hi", "Hey", "Hello <name>", or any other greeting.
+Do NOT re-introduce yourself, and do NOT use their name again — that was already
+done earlier in the thread.
+
+Start with the answer. The first words out should be the substance: "Nothing was
+charged, so there is nothing to cancel" or "That vial takes 2mL". Continue the
+conversation the way a person does when they are already in it.
+`;
+
+
 const RAPPORT_BLOCK = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 WARMTH — this one is safe to be a person on
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -3561,6 +3587,7 @@ module.exports = {
   analyzeConversationState,
   detectEmotion,
   extractAgentCommitments,
+  CONTINUATION_BLOCK,
   pickModelTier,
   stableSystemPrefix,
   extractText,
