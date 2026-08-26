@@ -1077,6 +1077,7 @@ const {
   stableSystemPrefix,
   extractText,
   detectEmotion,
+  extractAgentCommitments,
   validateSuggestions,
   validateSafetyDosing,
   generateSmartFallbackSuggestions,
@@ -1581,6 +1582,20 @@ module.exports = function createAiRoutes({ getCachedStore }) {
       if (emotion.signals.length) {
         analysisBlock += `\nWhy they feel that way: ${emotion.signals.join('; ')}.`;
         analysisBlock += `\nRespond to these specifics. Do not apologise in the abstract.`;
+      }
+
+      // What the agent has already promised this customer, in their own words.
+      // Sending the transcript is not the same instruction as "do not contradict
+      // it": a shipping question the agent answered with "2-3 business days" was
+      // coming back as a suggestion quoting the brain's "4-7 business days" —
+      // each defensible alone, a flat contradiction to the customer reading the
+      // thread. Name them, and require a decision instead of a silent swap.
+      const agentCommitments = extractAgentCommitments(chatHistory);
+      if (agentCommitments.length) {
+        const listed = agentCommitments.map(c => `"${c.value}"`).join(', ');
+        analysisBlock += `\nThe agent has ALREADY told this customer: ${listed}.`;
+        analysisBlock += `\nDo not quietly state a different number. Either use the same one, or correct it openly ("I gave you 2-3 days earlier, the accurate window is X") so the customer is not left with two answers.`;
+        console.log(`✦ [AI] agent commitments in thread: ${listed}`);
       }
       const customerContext = buildCustomerContext(customerName, customerEmail, conversationState);
       const policyBlock = buildPolicyBlock();

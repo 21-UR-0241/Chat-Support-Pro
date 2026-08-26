@@ -191,6 +191,59 @@ group('stableSystemPrefix', () => {
   });
 });
 
+// ── Agent commitments ───────────────────────────────────────────────────────
+// From a real thread: the agent answered "2-3 business days", and the model
+// then suggested "4-7 business days" from the brain. Both defensible alone; a
+// flat contradiction to the customer reading the thread.
+
+group('extractAgentCommitments', () => {
+  const THREAD = [
+    'Customer: Hi there, I am looking for the store',
+    'Agent: Hi Josh, we are fully online so no actual store',
+    'Customer: Do you know how long shipping should take?',
+    'Agent: Usually after payment processing, 2-3 business days',
+  ].join('\n');
+
+  test('finds a timeframe the agent already gave', () => {
+    const found = ai.extractAgentCommitments(THREAD);
+    assert.ok(found.some(c => /2-3 business days/i.test(c.value)),
+      'the number the customer is holding us to must be surfaced');
+  });
+
+  test('ignores timeframes the CUSTOMER mentioned', () => {
+    const thread = 'Customer: your site said 2-3 business days\nAgent: let me look into it';
+    assert.deepStrictEqual(ai.extractAgentCommitments(thread), [],
+      'only what WE promised counts as a commitment');
+  });
+
+  test('captures money and discounts', () => {
+    const thread = 'Agent: I can do 20% off, and refund the $45 shipping';
+    const values = ai.extractAgentCommitments(thread).map(c => c.value.toLowerCase());
+    assert.ok(values.some(v => v.includes('20%')));
+    assert.ok(values.some(v => v.includes('45')));
+  });
+
+  test('keeps the later value when the agent revised it', () => {
+    const thread = 'Agent: about 2-3 business days\nCustomer: ok\nAgent: actually 4-7 business days';
+    const found = ai.extractAgentCommitments(thread);
+    assert.ok(found.some(c => /4-7/.test(c.value)), 'the revision must be present');
+  });
+
+  test('carries the sentence it came from, for the prompt to quote', () => {
+    const [first] = ai.extractAgentCommitments(THREAD);
+    assert.ok(first.said && first.said.length > 0);
+  });
+
+  test('returns nothing for a thread with no commitments', () => {
+    assert.deepStrictEqual(ai.extractAgentCommitments('Agent: hello\nCustomer: hi'), []);
+  });
+
+  test('tolerates empty and null input', () => {
+    assert.deepStrictEqual(ai.extractAgentCommitments(''), []);
+    assert.deepStrictEqual(ai.extractAgentCommitments(null), []);
+  });
+});
+
 // ── Anthropic request/response shape ────────────────────────────────────────
 // Both of these are regressions that reached production. The premium tier
 // stopped going through the DeepSeek shim, which exposed two assumptions that
