@@ -17,7 +17,7 @@
     "build": "npm run frontend:build",
     "deploy": "npm run build && shopify app deploy",
     "clean": "taskkill /F /IM node.exe 2>nul || echo No processes to clean",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node backend/test/safety-guards.test.js",
     "lint": "eslint backend frontend",
     "format": "prettier --write \"**/*.{js,jsx,json,md}\"",
     "db:migrate": "node scripts/migrate.js",
