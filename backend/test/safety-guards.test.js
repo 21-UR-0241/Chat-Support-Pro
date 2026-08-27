@@ -142,6 +142,51 @@ group('detectStall', () => {
   });
 });
 
+// ── Tone register ───────────────────────────────────────────────────────────
+// Casual is the default. Written as worked swaps rather than more banned words:
+// the prompt already carries a long NEVER list, and piling on prohibitions makes
+// replies careful and flat, which is the opposite of casual.
+
+group('tone', () => {
+  const voice = require('../lib/voice');
+  const profile = voice.resolveVoiceProfile({});
+  const build = (settings) => ai.buildSystemPrompt(
+    'S', '', '', '', 'minimal', 'brief', '', settings, '', '',
+    'neutral', [], false, false, false, profile,
+  );
+
+  test('defaults to casual', () => {
+    assert.match(build({}), /Talk the way you would to someone you get on with/);
+  });
+
+  test('gives worked swaps, not just an adjective', () => {
+    const t = build({});
+    assert.match(t, /not "it has been dispatched"/);
+    assert.match(t, /not "prior to placing your order"/);
+  });
+
+  test('casual does not license vagueness', () => {
+    assert.match(build({}), /still give the specific date/i,
+      'casual is about the words; the date, number and next step still have to be there');
+  });
+
+  test('casual does not license text-speak or all-lowercase', () => {
+    assert.match(build({}), /never use text-speak/i);
+  });
+
+  test('formal is still selectable', () => {
+    assert.match(build({ tone: 'formal' }), /No contractions/);
+  });
+
+  test('friendly-professional is still selectable', () => {
+    assert.match(build({ tone: 'friendly-professional' }), /a little blunt/);
+  });
+
+  test('an unknown tone value falls back to casual rather than breaking', () => {
+    assert.match(build({ tone: 'nonsense' }), /Talk the way you would/);
+  });
+});
+
 // ── Dosing is declined, not answered ────────────────────────────────────────
 // Policy reversal: telling a customer what dose to take is medical advice, and
 // this is a store. The guards that block unauthorised numbers stay as defence in

@@ -2899,7 +2899,9 @@ ${cleanExamples.map(t => `  • "${t.trim()}"`).join('\n')}
     contextGuidance = contextQuality === 'minimal' ? `ℹ️ FIRST MESSAGE: Answer the one thing you can from brain rules directly. Only ask a follow-up for something the brain doesn't cover.` : `✓ Use history + brain rules to answer the one thing they asked, specifically.`;
   }
   const len = brainSettings.length || 'medium';
-  const tone = brainSettings.tone || 'friendly-professional';
+  // Casual is the default register. A store can still set 'formal' or
+  // 'friendly-professional' in the training settings if it wants them.
+  const tone = brainSettings.tone || 'casual';
   const empathy = brainSettings.empathy || 'high';
   const isComplexComplaint = messageRichness === 'very_detailed' && (sentiment === 'very_negative' || sentiment === 'negative');
   const lengthRule = isServiceFailure
@@ -2925,7 +2927,32 @@ ${cleanExamples.map(t => `  • "${t.trim()}"`).join('\n')}
     ? lengthRule
     : (voiceProfile?.structureShort ?? lengthRule);
 
-  const toneRule = tone === 'formal' ? `Formal, professional, but still a real person, not a form letter. No contractions.` : tone === 'casual' ? `Casual, conversational. Contractions and fragments encouraged.` : `Friendly, direct, a little blunt, genuinely on their side. Warm but not eager or performing.`;
+  // Written as positive register guidance with worked pairs rather than another
+  // list of banned words. The prompt already carries a long NEVER list; adding
+  // more prohibitions makes replies careful and flat, which is the opposite of
+  // casual. Showing the swap is what actually moves the register.
+  const CASUAL_TONE = [
+    'Casual. Talk the way you would to someone you get on with, not the way a company writes.',
+    'Contractions always: were, its, well, thats, dont, youre, Ill.',
+    'Everyday words over formal ones. Say it like this:',
+    '  "we sent it" not "it has been dispatched"',
+    '  "Ill sort it" not "I will rectify this"',
+    '  "before you order" not "prior to placing your order"',
+    '  "about your order" not "regarding your order"',
+    '  "so you dont get charged twice" not "in order to avoid duplicate charges"',
+    '  "yeah, that one is back in stock" not "I can confirm that item is available"',
+    'Short sentences. A fragment is fine when it reads naturally.',
+    'Yeah, yep and sure are fine where they land naturally. Do not force slang, and',
+    'never use text-speak (u, ur, plz) or write in lowercase to seem relaxed.',
+    'Casual is about the words, not about being vague: still give the specific date,',
+    'number or next step. Casual and precise at the same time is the target.',
+  ].join('\n');
+
+  const toneRule = tone === 'formal'
+    ? `Formal, professional, but still a real person, not a form letter. No contractions.`
+    : tone === 'friendly-professional'
+      ? `Friendly, direct, a little blunt, genuinely on their side. Warm but not eager or performing.`
+      : CASUAL_TONE;
   const empathyRule = empathy === 'high' ? `When something actually went wrong, lead with a short genuine acknowledgment fused into the fix. One acknowledgment, never stacked. On a routine question, skip empathy entirely and just answer.` : empathy === 'low' ? `Skip empathy preambles. Get straight to the answer.` : `Brief acknowledgment only when warranted, then the answer.`;
 
   const qualityBlock = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nREPLY QUALITY (admin-set, non-negotiable):\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nLENGTH:  ${lengthText}\nTONE:    ${toneRule}\nEMPATHY: ${empathyRule}`;
