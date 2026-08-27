@@ -142,6 +142,70 @@ group('detectStall', () => {
   });
 });
 
+// ── Dosing is declined, not answered ────────────────────────────────────────
+// Policy reversal: telling a customer what dose to take is medical advice, and
+// this is a store. The guards that block unauthorised numbers stay as defence in
+// depth; these assert the model is told not to reach for a number at all.
+
+group('dosing decline', () => {
+  const voice = require('../lib/voice');
+  const profile = voice.resolveVoiceProfile({});
+  const build = (dosing) => ai.buildSystemPrompt(
+    'S', '', '', '', 'minimal', 'brief', '', {}, '', '',
+    'neutral', [], false, dosing, false, profile,
+  );
+
+  test('a dosing question gets the decline block', () => {
+    const t = build(true);
+    assert.match(t, /DECLINE/);
+    assert.match(t, /not medical professionals/i);
+  });
+
+  test('the decline points at a healthcare provider', () => {
+    assert.match(build(true), /healthcare provider/i);
+  });
+
+  test('the decline still offers help with everything else', () => {
+    const t = build(true);
+    assert.match(t, /order|shipping|tracking|returns/i,
+      'a bare refusal leaves the customer stonewalled, which is not what was asked for');
+  });
+
+  test('forbids stating a dose even when the brain has one', () => {
+    assert.match(build(true), /Never state a dose/i);
+  });
+
+  test('forbids caving to pressure', () => {
+    assert.match(build(true), /Pressure is not authorisation/i);
+  });
+
+  test('reconstitution may be relayed but never calculated', () => {
+    const t = build(true);
+    assert.match(t, /RECONSTITUTION/);
+    assert.match(t, /NEVER calculate it/i);
+    assert.match(t, /quoted as written/i);
+  });
+
+  test('relaying reconstitution does not license stating a dose', () => {
+    assert.match(build(true), /does NOT license stating a dose/i);
+  });
+
+  test('a non-dosing turn gets no decline block', () => {
+    const t = build(false);
+    assert.ok(!/DOSING \/ ADMINISTRATION — DECLINE/.test(t),
+      'an order question must not be answered with a medical disclaimer');
+  });
+
+  test('the existing dose guards are untouched', () => {
+    // Defence in depth: the prompt says do not, the guard enforces it.
+    const out = ai.validateSafetyDosing(
+      [{ text: 'Take 2.5mg weekly and you will be fine.' }],
+      'what dose should I take?',
+    );
+    assert.ok(out, 'validateSafetyDosing must still run on dosing turns');
+  });
+});
+
 // ── Greeting placement ──────────────────────────────────────────────────────
 // The owner-fast voice comes from a doc about answering a NEW message, so it
 // mandates "Hello!" on every reply and scrubVoice prepended one when missing.
