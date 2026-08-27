@@ -2977,8 +2977,21 @@ function buildUserPrompt(chatHistory, clientMessage, messageEdited, adminNote, c
   const isOrderQuestion = /order|tracking|shipped|delivery|refund|return|cancel|charge|payment|where is|status|when will/i.test(msgLower);
   const isTrustQuestion = detectTrustQuestion(clientMessage);
   const isSafetyDosing = detectSafetyDosingQuestion(clientMessage, chatHistory);
-  const questionType = isTrustQuestion ? 'TRUST/LEGITIMACY — customer fears being scammed (likely because payment is e-transfer/crypto, no chargeback). See the TRUST block above. Acknowledge the worry once, name why it is fair, then point ONLY to verification the BRAIN provides (whatever proof it lists), quoted exactly. NO bare "we are safe/legit" assertions. NO invented timelines. NO fabricated proof, numbers, or guarantees.' : isKnowledgeQuestion && !isOrderQuestion ? 'PRODUCT/KNOWLEDGE — answer directly from brain data below. Do NOT stall.' : isOrderQuestion ? 'ORDER/ACCOUNT — may need lookup. Ask for order number only if not already provided.' : 'GENERAL — use brain data if applicable.';
-  const brainBlock = brainContext?.trim() ? `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nANSWER FROM BRAIN — USE THIS DATA TO WRITE YOUR REPLIES\nThe store's knowledge base. Your replies come from here first.\nIf the answer exists below, use it immediately, in your own plain voice.\nDo NOT say "let me check" when the data is right here. Don't quote it like a spec sheet.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${brainContext}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` : '';
+  const questionType = isSafetyDosing ? 'DOSING / ADMINISTRATION — DECLINE. See the DOSING block above. Do NOT state a dose, amount, unit count, frequency or titration step, and do NOT answer from the brain data below even though it contains numbers. Say we are not medical professionals, point to their healthcare provider, and offer help with everything else. Reconstitution water volume may be relayed ONLY if the brain states it verbatim for this exact product.' : isTrustQuestion ? 'TRUST/LEGITIMACY — customer fears being scammed (likely because payment is e-transfer/crypto, no chargeback). See the TRUST block above. Acknowledge the worry once, name why it is fair, then point ONLY to verification the BRAIN provides (whatever proof it lists), quoted exactly. NO bare "we are safe/legit" assertions. NO invented timelines. NO fabricated proof, numbers, or guarantees.' : isKnowledgeQuestion && !isOrderQuestion ? 'PRODUCT/KNOWLEDGE — answer directly from brain data below. Do NOT stall.' : isOrderQuestion ? 'ORDER/ACCOUNT — may need lookup. Ask for order number only if not already provided.' : 'GENERAL — use brain data if applicable.';
+  // On a dosing turn the brain block still ships - it may hold the reconstitution
+  // volume, which IS relayable - but the header must not tell the model to answer
+  // from it. Retrieval is deliberately augmented toward dosing terms for these
+  // turns, so the block arrives full of numbers; pairing that with "use this data
+  // to write your replies" is what produced doses the guard then had to block.
+  const brainHeader = isSafetyDosing
+    ? 'BRAIN DATA - REFERENCE ONLY ON THIS TURN, DO NOT ANSWER FROM IT\n'
+      + 'This is a dosing/administration question, which we decline. The numbers\n'
+      + 'below are here so you can recognise them, NOT so you can relay them.\n'
+      + 'Do NOT state any dose, amount, unit count, frequency or titration step\n'
+      + 'from this block. The ONE exception is a reconstitution water volume for\n'
+      + 'this exact product, quoted verbatim.'
+    : 'ANSWER FROM BRAIN — USE THIS DATA TO WRITE YOUR REPLIES\\nThe store\'s knowledge base. Your replies come from here first.\\nIf the answer exists below, use it immediately, in your own plain voice.\\nDo NOT say "let me check" when the data is right here. Don\'t quote it like a spec sheet.';
+  const brainBlock = brainContext?.trim() ? `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${brainHeader}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${brainContext}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` : '';
   const imageBlock = imageAnalysis?.trim() ? `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nSCREENSHOT DATA — complete analysis of the agent's uploaded image\nCONFIRMED FACTS from the screenshot. Use them directly. Reference exact values.\nDo NOT ask for any information already visible here.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${imageAnalysis.trim()}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` : '';
   const signals = [`QUESTION TYPE: ${questionType}`];
 
@@ -3422,6 +3435,23 @@ function generateSmartFallbackSuggestionsRaw(customerMsg, chatHistory, analysis,
   const customerAlreadyExplained = messageRichness === 'very_detailed' || messageRichness === 'detailed';
   const isWrongItem = /ordered.{0,40}received|sent.{0,30}instead|received.{0,30}instead|wrong (item|product|vial|size|dose|peptide)/i.test(customerMsg + chatHistory) || topics.includes('wrong_item');
   const customerAskingForEmail = /email.{0,30}(address|send|reach|contact)/i.test(lower) || /where.{0,20}(send|email)/i.test(lower);
+
+
+  // A dosing question that reached the fallback must still DECLINE.
+  //
+  // This is the path the customer actually saw when the model emitted a dose and
+  // the contamination guard blocked it: the generic template said "let me get you
+  // the answer, one sec", which promises exactly the thing we will not provide and
+  // leaves them waiting for it. A decline is the correct answer here whether the
+  // model succeeded or failed.
+  const isDosingQuestion = detectSafetyDosingQuestion(customerMsg || '', chatHistory || '');
+  if (isDosingQuestion) {
+    return [
+      "We're not medical professionals so I can't advise on dosing or how to use it, that's one for your healthcare provider. Anything about your order, shipping or the products themselves though, I'm right here.",
+      "I can't give dosing guidance, we're not medically qualified and I don't want to get that wrong for you. Your provider is the right person to ask. Happy to help with anything else.",
+      "That one's for a healthcare professional, not us. I can help with your order, shipping, or questions about the products themselves.",
+    ];
+  }
 
   const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
   let lead = '';

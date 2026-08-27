@@ -142,6 +142,61 @@ group('detectStall', () => {
   });
 });
 
+// ── The decline has to actually reach the customer ──────────────────────────
+// Shipping the decline in the system prompt was not enough. The user prompt
+// still classified dosing as PRODUCT/KNOWLEDGE ("answer directly from brain
+// data, do NOT stall"), the brain header still said "use this data to write your
+// replies", and retrieval is deliberately augmented toward dosing terms — so the
+// model was told three times to answer and once to decline. It answered, the
+// contamination guard blocked it, and the customer got "let me get you the
+// answer, one sec": a promise of the exact thing we will not provide.
+
+group('dosing decline reaches the customer', () => {
+  const brain = 'Retatrutide 10mg: add 2mL BAC water. Start 1.0mg weekly, titrate to 5.0mg.';
+  const dosingPrompt = () => ai.buildUserPrompt('', 'what dose should I start on?', false, '', {}, null, brain, '', true);
+  const orderPrompt  = () => ai.buildUserPrompt('', 'where is my order?', false, '', {}, null, brain, '', true);
+
+  test('a dosing turn is classified as DECLINE, not PRODUCT/KNOWLEDGE', () => {
+    const p = dosingPrompt();
+    assert.match(p, /DOSING \/ ADMINISTRATION — DECLINE/);
+    assert.ok(!/PRODUCT\/KNOWLEDGE — answer directly from brain/.test(p),
+      'the knowledge branch tells the model to answer, which is the contradiction');
+  });
+
+  test('the brain block is reference-only on a dosing turn', () => {
+    const p = dosingPrompt();
+    assert.match(p, /REFERENCE ONLY ON THIS TURN/);
+    assert.ok(!/USE THIS DATA TO WRITE YOUR REPLIES/.test(p));
+  });
+
+  test('reconstitution stays relayable even under the reference-only header', () => {
+    assert.match(dosingPrompt(), /reconstitution water volume[\s\S]*verbatim/i);
+  });
+
+  test('a normal turn still answers from the brain', () => {
+    assert.match(orderPrompt(), /USE THIS DATA TO WRITE YOUR REPLIES/,
+      'only dosing turns lose the brain-first framing');
+  });
+
+  test('the FALLBACK declines too, rather than promising an answer', () => {
+    const f = ai.generateSmartFallbackSuggestions('what dose should I start on?', '', {}, '');
+    assert.match(f.join(' '), /medical|healthcare/i);
+    assert.ok(!/let me get you the answer|one sec|let me check/i.test(f.join(' ')),
+      'this is what the customer actually saw: a promise of the thing we will not give');
+  });
+
+  test('the dosing fallback still offers help with everything else', () => {
+    const f = ai.generateSmartFallbackSuggestions('how much should I inject?', '', {}, '');
+    assert.match(f.join(' '), /order|shipping|product/i);
+  });
+
+  test('a non-dosing fallback is unaffected', () => {
+    const f = ai.generateSmartFallbackSuggestions('where is my order?', '', {}, '');
+    assert.ok(!/medical professionals/i.test(f.join(' ')),
+      'an order question must not be answered with a medical disclaimer');
+  });
+});
+
 // ── Tone register ───────────────────────────────────────────────────────────
 // Casual is the default. Written as worked swaps rather than more banned words:
 // the prompt already carries a long NEVER list, and piling on prohibitions makes
