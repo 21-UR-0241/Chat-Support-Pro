@@ -2715,6 +2715,7 @@ function every(ms, fn, label) {
 const ALLOWED_ORIGINS = [
   'https://chat-support-pro.onrender.com',
   'https://chat-support-pro.vercel.app',
+  'https://chat-support-pro-1.onrender.com',
   'http://localhost:5173',
   'http://localhost:3000',
   'http://localhost:8080',
